@@ -29,17 +29,25 @@ export function calculateMACD(prices: number[], fastPeriod = 12, slowPeriod = 26
   const emaSlow = calculateEMA(prices, slowPeriod);
   
   const dif = emaFast.map((fast, i) => fast - emaSlow[i]);
-  const dea = calculateEMA(dif.filter(x => !isNaN(x)), signalPeriod);
   
-  // 为了保持数组长度一致，在DEA前面填充NaN
+  // Calculate DEA from the start of valid DIF values (after slowPeriod-1)
+  const validDifStartIndex = slowPeriod - 1;
+  const validDif = dif.slice(validDifStartIndex);
+  const dea = calculateEMA(validDif, signalPeriod);
+  
+  // Create full-length DEA array with proper NaN padding
   const fullDea: number[] = [];
-  const nanCount = slowPeriod - 1;
-  for (let i = 0; i < nanCount; i++) {
+  const deaNanCount = validDifStartIndex + signalPeriod - 1;
+  for (let i = 0; i < deaNanCount; i++) {
     fullDea.push(NaN);
   }
   fullDea.push(...dea);
   
-  const macd = dif.map((d, i) => (d - fullDea[i]) * 2);
+  // Ensure arrays are same length before calculating MACD
+  const macd = dif.map((d, i) => {
+    const deaValue = i < fullDea.length ? fullDea[i] : NaN;
+    return isNaN(d) || isNaN(deaValue) ? NaN : (d - deaValue) * 2;
+  });
   
   return {
     dif,

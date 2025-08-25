@@ -5,9 +5,9 @@ import * as dotenv from 'dotenv';
 // 2. 在Smithery部署时，从配置文件中加载
 dotenv.config();
 
-// For logging purposes only in development
-if (process.env.NODE_ENV !== 'production') {
-  console.log('Environment variables loaded, TUSHARE_TOKEN available:', process.env.TUSHARE_TOKEN ? 'Yes' : 'No');
+// Environment validation - no logging of token status for security
+if (!process.env.TUSHARE_TOKEN && process.env.NODE_ENV !== 'production') {
+  console.warn('Warning: TUSHARE_TOKEN not configured. Some features may not work.');
 }
 
 export const TUSHARE_CONFIG = {
