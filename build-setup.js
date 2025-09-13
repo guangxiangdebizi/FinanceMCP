@@ -3,9 +3,14 @@
  * 清理构建目录，执行构建并进行必要的后处理
  */
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // 确保build目录存在
 const buildDir = path.join(__dirname, 'build');
