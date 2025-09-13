@@ -167,3 +167,4 @@ function formatNumber(num) {
         return num.toLocaleString();
     }
 }
+//# sourceMappingURL=top10HoldersFormatters.js.map

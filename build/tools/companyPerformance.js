@@ -520,3 +520,4 @@ function formatFinancialData(results, tsCode) {
     }
     return output;
 }
+//# sourceMappingURL=companyPerformance.js.map

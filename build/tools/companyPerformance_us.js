@@ -162,3 +162,4 @@ async function fetchUsFinancialData(apiInterface, ts_code, period, start_date, e
     }
     return { data: items };
 }
+//# sourceMappingURL=companyPerformance_us.js.map

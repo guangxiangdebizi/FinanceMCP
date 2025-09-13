@@ -129,3 +129,4 @@ export function formatManagement(data) {
     result += `🏢 **数据来源:** Tushare上市公司管理层接口\n`;
     return result;
 }
+//# sourceMappingURL=managementFormatters.js.map

@@ -173,3 +173,4 @@ export const hotNews = {
         }
     }
 };
+//# sourceMappingURL=hotNews.js.map

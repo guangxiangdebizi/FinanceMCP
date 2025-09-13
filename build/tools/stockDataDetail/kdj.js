@@ -41,3 +41,4 @@ export function calculateKDJ(highs, lows, closes, period = 9, k = 3, d = 3) {
     }
     return { k: kValues, d: dValues, j: jValues };
 }
+//# sourceMappingURL=kdj.js.map

@@ -528,3 +528,4 @@ function formatPercent(num) {
         return 'N/A';
     return value.toFixed(2);
 }
+//# sourceMappingURL=fundData.js.map

@@ -32,3 +32,4 @@ export function calculateRSI(prices, period = 14) {
     }
     return rsi;
 }
+//# sourceMappingURL=rsi.js.map

@@ -163,3 +163,4 @@ function formatDate(dateStr) {
     const day = dateStr.substring(6, 8);
     return `${year}-${month}-${day}`;
 }
+//# sourceMappingURL=companyBasicFormatters.js.map

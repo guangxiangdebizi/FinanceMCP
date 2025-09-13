@@ -75,3 +75,4 @@ function formatNumber(num) {
         return num.toLocaleString();
     }
 }
+//# sourceMappingURL=shareFloatFormatters.js.map

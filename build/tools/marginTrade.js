@@ -388,3 +388,4 @@ function formatNumber(num) {
         return numValue.toLocaleString();
     }
 }
+//# sourceMappingURL=marginTrade.js.map

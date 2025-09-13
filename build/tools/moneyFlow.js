@@ -244,3 +244,4 @@ function formatPercent(num) {
     const sign = number > 0 ? '+' : '';
     return `${sign}${number.toFixed(2)}%`;
 }
+//# sourceMappingURL=moneyFlow.js.map

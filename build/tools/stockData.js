@@ -996,3 +996,4 @@ export const stockData = {
         }
     }
 };
+//# sourceMappingURL=stockData.js.map

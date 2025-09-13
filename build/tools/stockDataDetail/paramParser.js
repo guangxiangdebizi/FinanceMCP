@@ -32,3 +32,4 @@ export function parseIndicatorParams(indicator) {
 export function formatIndicatorParams(name, params) {
     return params.length > 0 ? `(${params.join(',')})` : '(默认)';
 }
+//# sourceMappingURL=paramParser.js.map

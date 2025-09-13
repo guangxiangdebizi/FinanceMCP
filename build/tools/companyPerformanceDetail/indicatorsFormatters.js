@@ -236,3 +236,4 @@ export function formatIndicators(data) {
     output += `**💡 说明：** 已智能过滤全为空的字段，只显示有实际数据的财务指标项目\n\n`;
     return output;
 }
+//# sourceMappingURL=indicatorsFormatters.js.map

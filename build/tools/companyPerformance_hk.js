@@ -164,3 +164,4 @@ async function fetchHkFinancialData(apiInterface, ts_code, period, start_date, e
     }
     return { data: items };
 }
+//# sourceMappingURL=companyPerformance_hk.js.map

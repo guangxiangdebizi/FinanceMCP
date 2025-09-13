@@ -244,3 +244,4 @@ function getFieldDisplayName(field) {
     };
     return fieldNames[field] || field;
 }
+//# sourceMappingURL=incomeFormatters.js.map

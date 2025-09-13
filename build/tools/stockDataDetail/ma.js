@@ -35,3 +35,4 @@ export function calculateEMA(prices, period) {
     }
     return ema;
 }
+//# sourceMappingURL=ma.js.map

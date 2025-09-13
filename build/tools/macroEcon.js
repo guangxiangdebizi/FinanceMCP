@@ -481,3 +481,4 @@ function dateToMonth(dateStr) {
         return "";
     return dateStr.substring(0, 6);
 }
+//# sourceMappingURL=macroEcon.js.map

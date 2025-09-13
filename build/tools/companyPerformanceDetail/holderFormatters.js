@@ -84,3 +84,4 @@ export function formatHolderTrade(data) {
     }
     return output;
 }
+//# sourceMappingURL=holderFormatters.js.map

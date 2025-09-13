@@ -34,3 +34,4 @@ export function formatTime(timeStr) {
     }
     return new Date().toISOString();
 }
+//# sourceMappingURL=utils.js.map

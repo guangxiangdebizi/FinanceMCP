@@ -212,3 +212,4 @@ function formatNumber(num) {
         return num.toLocaleString();
     }
 }
+//# sourceMappingURL=pledgeFormatters.js.map
