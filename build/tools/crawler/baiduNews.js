@@ -133,3 +133,4 @@ function containsKeywords(content, searchQuery) {
     // OR逻辑：只要包含任意一个关键词即可
     return keywords.some(keyword => lowerContent.includes(keyword.toLowerCase()));
 }
+//# sourceMappingURL=baiduNews.js.map

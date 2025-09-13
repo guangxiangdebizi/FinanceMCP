@@ -83,3 +83,4 @@ export function filterDataToUserRange(data, startDate, endDate) {
         return tradeDate >= startDate && tradeDate <= endDate;
     });
 }
+//# sourceMappingURL=dataCalculator.js.map

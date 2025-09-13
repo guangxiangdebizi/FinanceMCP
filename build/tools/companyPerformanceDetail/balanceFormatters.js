@@ -208,3 +208,4 @@ export function formatAllBalance(data) {
     output += `**💡 说明：** 单位：万元，已智能过滤全为空的字段，只显示有实际数据的项目\n\n`;
     return output;
 }
+//# sourceMappingURL=balanceFormatters.js.map

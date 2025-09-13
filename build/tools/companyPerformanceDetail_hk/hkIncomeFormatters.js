@@ -242,3 +242,4 @@ function calculateTrend(values) {
         return '📉 下降';
     return '➡️ 平稳';
 }
+//# sourceMappingURL=hkIncomeFormatters.js.map

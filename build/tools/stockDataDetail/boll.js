@@ -45,3 +45,4 @@ export function calculateBOLL(prices, period = 20, stdDev = 2) {
         lower
     };
 }
+//# sourceMappingURL=boll.js.map

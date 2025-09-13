@@ -41,3 +41,4 @@ export function calculateMACD(prices, fastPeriod = 12, slowPeriod = 26, signalPe
         macd
     };
 }
+//# sourceMappingURL=macd.js.map

@@ -6,3 +6,4 @@ export { calculateBOLL } from './boll.js';
 export { calculateSMA, calculateEMA } from './ma.js';
 export { parseIndicatorParams, formatIndicatorParams } from './paramParser.js';
 export { calculateRequiredDays, calculateExtendedStartDate, filterDataToUserRange } from './dataCalculator.js';
+//# sourceMappingURL=index.js.map

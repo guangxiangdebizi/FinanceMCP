@@ -33,3 +33,4 @@ export function formatDividend(data) {
     }
     return output;
 }
+//# sourceMappingURL=dividendFormatters.js.map

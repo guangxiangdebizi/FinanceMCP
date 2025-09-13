@@ -86,3 +86,4 @@ async function searchFinanceNews(query) {
         return [];
     }
 }
+//# sourceMappingURL=financeNews.js.map

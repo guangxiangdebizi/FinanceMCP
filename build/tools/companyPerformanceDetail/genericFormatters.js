@@ -14,3 +14,4 @@ export function formatGenericData(data, fields) {
     }
     return output;
 }
+//# sourceMappingURL=genericFormatters.js.map

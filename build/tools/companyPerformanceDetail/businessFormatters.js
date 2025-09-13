@@ -112,3 +112,4 @@ export function formatMainBusiness(data) {
     }
     return output;
 }
+//# sourceMappingURL=businessFormatters.js.map

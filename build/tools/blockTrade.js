@@ -232,3 +232,4 @@ function formatNumber(num) {
     const number = parseFloat(num);
     return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
+//# sourceMappingURL=blockTrade.js.map
