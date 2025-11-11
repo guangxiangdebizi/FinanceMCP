@@ -28,7 +28,7 @@
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/5a81b053-4d19-4285-b5a2-991d14425595" />
 
-访问我们的在线体验网站：**[http://106.14.205.176:3090/](http://106.14.205.176:3090/)**
+访问我们的在线体验网站：**[https://finvestai.top/](https://finvestai.top/)**
 
 - ✨ **零配置体验** - 无需任何设置，打开网页即用
 - 🤖 **集成大模型** - 直接与AI助手对话，获取金融分析
@@ -49,7 +49,7 @@
       "disabled": false,
       "timeout": 600,
       "type": "streamableHttp",
-      "url": "http://47.79.147.241:3100/mcp",
+      "url": "https://finvestai.top/mcp",
       "headers": {
         "X-Tushare-Token": "您的tushare令牌"
       }
