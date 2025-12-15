@@ -374,6 +374,37 @@ npm run start:sse
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 #### ⭐ 推荐配置：stdio 模式（本地使用，零配置，默认）
+
+##### 🎯 方式一：全局安装后直接使用（最稳定，强烈推荐！）
+
+```bash
+# 第一步：全局安装
+npm install -g finance-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "finance-mcp": {
+      "type": "stdio",
+      "command": "finance-mcp",
+      "args": [],
+      "env": {
+        "TUSHARE_TOKEN": "your_tushare_token_here"
+      }
+    }
+  }
+}
+```
+
+**为什么推荐这种方式？**
+- ✅ **最稳定** - 避免 npx 在不同系统上的兼容性问题
+- ✅ **启动更快** - 无需每次下载和解析包
+- ✅ **Windows友好** - 避免 `npx` vs `npx.cmd` 的问题
+- ✅ **离线可用** - 安装后无需网络连接
+
+##### 📦 方式二：使用 npx（无需安装）
+
 ```json
 {
   "mcpServers": {
@@ -388,11 +419,47 @@ npm run start:sse
 }
 ```
 
-**优势**：
+> ⚠️ **Windows 用户注意**：如果上述配置不工作，请尝试将 `"command": "npx"` 改为 `"command": "npx.cmd"`
+
+**stdio 模式优势**：
 - ✅ 更快的响应速度（1-2ms 延迟）
 - ✅ 更低的资源占用
 - ✅ 无需管理端口
 - ✅ 开箱即用
+
+#### 🔧 常见问题排查
+
+<details>
+<summary><strong>❓ 配置后不工作怎么办？</strong></summary>
+
+1. **确保已安装 Node.js** (版本 >= 18)
+   ```bash
+   node -v  # 检查版本
+   ```
+
+2. **Windows 用户**：使用 `npx.cmd` 替代 `npx`
+   ```json
+   {
+     "command": "npx.cmd",
+     "args": ["-y", "finance-mcp"]
+   }
+   ```
+
+3. **推荐：全局安装后使用**
+   ```bash
+   npm install -g finance-mcp
+   ```
+   然后配置 `"command": "finance-mcp"`
+
+4. **检查 TUSHARE_TOKEN** 是否正确填写
+
+5. **重启 Claude Desktop** 或 MCP 客户端
+
+6. **查看日志**：
+   - Windows: `%APPDATA%\Claude\logs`
+   - macOS: `~/Library/Logs/Claude`
+
+</details>
 
 #### 备选配置：HTTP 模式（云端部署或需要远程访问）
 

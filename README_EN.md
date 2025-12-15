@@ -342,6 +342,37 @@ Configuration file locations:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 #### ⭐ Recommended: stdio Mode (Local, Zero Configuration, Default)
+
+##### 🎯 Option 1: Global Install Then Use (Most Stable, Highly Recommended!)
+
+```bash
+# Step 1: Global installation
+npm install -g finance-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "finance-mcp": {
+      "type": "stdio",
+      "command": "finance-mcp",
+      "args": [],
+      "env": {
+        "TUSHARE_TOKEN": "your_tushare_token_here"
+      }
+    }
+  }
+}
+```
+
+**Why is this recommended?**
+- ✅ **Most Stable** - Avoids npx compatibility issues across different systems
+- ✅ **Faster Startup** - No need to download and parse package each time
+- ✅ **Windows Friendly** - Avoids `npx` vs `npx.cmd` issues
+- ✅ **Works Offline** - No network connection needed after installation
+
+##### 📦 Option 2: Using npx (No Installation Required)
+
 ```json
 {
   "mcpServers": {
@@ -356,7 +387,43 @@ Configuration file locations:
 }
 ```
 
-**Benefits**: Faster response (1-2ms), lower resources, no port management, works out of the box
+> ⚠️ **Windows Users Note**: If the above configuration doesn't work, try changing `"command": "npx"` to `"command": "npx.cmd"`
+
+**stdio Mode Benefits**: Faster response (1-2ms), lower resources, no port management, works out of the box
+
+#### 🔧 Troubleshooting
+
+<details>
+<summary><strong>❓ What to do if configuration doesn't work?</strong></summary>
+
+1. **Ensure Node.js is installed** (version >= 18)
+   ```bash
+   node -v  # Check version
+   ```
+
+2. **Windows Users**: Use `npx.cmd` instead of `npx`
+   ```json
+   {
+     "command": "npx.cmd",
+     "args": ["-y", "finance-mcp"]
+   }
+   ```
+
+3. **Recommended: Global install then use**
+   ```bash
+   npm install -g finance-mcp
+   ```
+   Then configure `"command": "finance-mcp"`
+
+4. **Check if TUSHARE_TOKEN** is correctly filled
+
+5. **Restart Claude Desktop** or your MCP client
+
+6. **Check logs**:
+   - Windows: `%APPDATA%\Claude\logs`
+   - macOS: `~/Library/Logs/Claude`
+
+</details>
 
 #### Alternative: HTTP Mode (Cloud Deployment or Remote Access)
 
