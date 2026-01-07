@@ -1,0 +1,38 @@
+{
+  "enabledPlugins": {
+    "glm-plan-usage@zai-coding-plugins": true,
+    "glm-plan-bug@zai-coding-plugins": true
+  },
+  "alwaysThinkingEnabled": true,
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Edit",
+      "Skill",
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__web-reader__webReader",
+      "mcp__zread__get_repo_structure",
+      "mcp__chrome-devtools__*",
+      "mcp__ide__*",
+      "mcp__4_5v_mcp__*",
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__web-reader__webReader",
+      "mcp__zread__*",
+      "mcp__milk_tea_server__*",
+      "mcp__zai-mcp-server__*",
+      "Bash(cd:*)",
+      "Bash(npm:*)",
+      "Bash(setx:*)",
+      "Bash(echo:*)",
+      "Bash(python:*)",
+      "Bash(timeout:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)",
+      "SlashCommand(/commit)",
+      "Bash(git:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "includeCoAuthoredBy": false
+}

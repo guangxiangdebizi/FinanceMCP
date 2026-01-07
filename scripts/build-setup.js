@@ -8,7 +8,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // 确保build目录存在
-const buildDir = path.join(__dirname, 'build');
+const buildDir = path.join(__dirname, '../build');
 if (!fs.existsSync(buildDir)) {
   fs.mkdirSync(buildDir, { recursive: true });
   console.log('✅ 创建build目录');

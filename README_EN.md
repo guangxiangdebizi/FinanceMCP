@@ -301,8 +301,8 @@ npx -y @smithery/cli install @guangxiangdebizi/FinanceMCP --client claude
 > **💡 Tip**: FinanceMCP supports two deployment modes
 > - **stdio mode** (default, recommended for local use): `npx -y finance-mcp`
 > - **HTTP mode** (for cloud deployment): `npx -y finance-mcp-http`
-> 
-> See [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md) for details
+>
+> See [DEPLOYMENT_MODES.md](./docs/deployment/DEPLOYMENT_MODES.md) for details
 
 #### Method 3: Manual Installation
 ```bash
@@ -485,7 +485,7 @@ npm run start:http
 
 **HTTP Mode Benefits**: Remote access, multiple clients, complete logging, cloud deployment
 
-> 📖 **Documentation**: See [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md) for more deployment options
+> 📖 **Documentation**: See [DEPLOYMENT_MODES.md](./docs/deployment/DEPLOYMENT_MODES.md) for more deployment options
 
 #### Header Token Resolution
 - Prefer `X-Tushare-Token`.

@@ -12,12 +12,13 @@
   ],
   "scripts": {
     "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755'); try{require('fs').chmodSync('build/httpServer.js','755')}catch(e){}\"",
+    "prepublishOnly": "npm run build",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "dev": "node build/httpServer.js",
     "dev:sse": "node build/index.js",
-    "setup": "node build-setup.js",
+    "setup": "node scripts/build-setup.js",
     "start:http": "node build/httpServer.js",
     "start:stdio": "node build/index.js",
     "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100"

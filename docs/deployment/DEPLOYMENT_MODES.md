@@ -373,7 +373,7 @@ lsof -ti:3000 | xargs kill -9
 
 - [日志功能说明](./LOGGING_GUIDE.md) - HTTP 模式的详细日志
 - [Smithery 部署指南](./SMITHERY_DEPLOYMENT.md) - 云端部署教程
-- [README](./README.md) - 完整的项目文档
+- [README](../../README.md) - 完整的项目文档
 
 ## 🆕 版本历史
 

@@ -328,24 +328,26 @@ npx -y @smithery/cli install @guangxiangdebizi/FinanceMCP --client claude
 > - **stdio 模式**（默认，推荐本地使用）：`npx -y finance-mcp`
 > - **HTTP 模式**（云端部署）：`npx -y finance-mcp-http`
 > 
-> 详细说明请参考 [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md)
+> 详细说明请参考 [DEPLOYMENT_MODES.md](./docs/deployment/DEPLOYMENT_MODES.md)
 
-#### 方法3：手动安装
+#### 方法3：从 GitHub 源码安装
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/guangxiangdebizi/FinanceMCP.git
+git clone https://github.com/BG8CFB/FinanceMCP.git
 cd FinanceMCP
 
 # 2. 安装依赖
 npm install
 
-# 3. 配置API密钥
+# 3. 编译 TypeScript 源码
+npm run build
+
+# 4. 配置API密钥
 echo "TUSHARE_TOKEN=your_token_here" > .env
 # 或直接编辑 src/config.ts
-
-# 4. 构建项目
-npm run build
 ```
+
+> ⚠️ **注意**：从 GitHub 源码安装需要编译步骤。如果不想编译，请使用方法1或方法2直接安装 npm 包。
 
 ### 启动服务
 
@@ -495,7 +497,7 @@ npm run start:http
 **HTTP 模式优势**：
 - ✅ 支持远程访问
 - ✅ 支持多客户端同时连接
-- ✅ 完整的 HTTP 日志（参考 [LOGGING_GUIDE.md](./LOGGING_GUIDE.md)）
+- ✅ 完整的 HTTP 日志（参考 [LOGGING_GUIDE.md](./docs/deployment/LOGGING_GUIDE.md)）
 - ✅ 便于部署到 Smithery 等云平台
 
 #### 传递 Token 的方式
@@ -508,7 +510,7 @@ npm run start:http
 
 （加密市场默认使用 Binance 公共行情接口，无需任何加密货币 API Key）
 
-> 📖 **详细文档**：更多部署模式说明请参考 [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md)
+> 📖 **详细文档**：更多部署模式说明请参考 [DEPLOYMENT_MODES.md](./docs/deployment/DEPLOYMENT_MODES.md)
 
 ### 验证安装
 配置完成后，重启Claude桌面版并询问："获取当前时间"。如果返回时间信息，说明安装成功。
