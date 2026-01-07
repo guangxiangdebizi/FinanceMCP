@@ -2,28 +2,54 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const indexData = {
   name: "index_data",
-  description: "获取指定股票指数的数据，例如上证指数、深证成指等",
-  parameters: {
-    type: "object",
+  description: "获取指定股票指数的数据，例如上证指数、深证成指等。示例：index_data(code='000001.SH', start_date='20240101', end_date='20240131')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       code: {
-        type: "string",
-        description: "指数代码，如'000001.SH'表示上证指数，'399001.SZ'表示深证成指"
+        type: "string" as const,
+        description: "指数代码，如'000001.SH'表示上证指数，'399001.SZ'表示深证成指",
+        pattern: "^[0-9]{6}\\.(SH|SZ)$",
+        minLength: 9,
+        maxLength: 9
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20230131'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["code", "start_date", "end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { code: string; start_date?: string; end_date?: string }) {
     try {
-      console.log(`使用Tushare API获取指数${args.code}的数据`);
       
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
@@ -54,7 +80,6 @@ export const indexData = {
       const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
       
       try {
-        console.log(`请求Tushare API: ${params.api_name}，参数:`, params.params);
         
         // 发送请求
         const response = await fetch(TUSHARE_API_URL, {
@@ -135,8 +160,6 @@ export const indexData = {
         clearTimeout(timeoutId);
       }
     } catch (error) {
-      console.error("获取指数数据失败:", error);
-      
       return {
         content: [
           {

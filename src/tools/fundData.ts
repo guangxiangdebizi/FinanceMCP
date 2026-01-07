@@ -2,35 +2,63 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const fundData = {
   name: "fund_data",
-  description: "获取公募基金全面数据，包括基金列表、基金经理、基金净值、基金分红、基金持仓等数据。",
-  parameters: {
-    type: "object",
+  description: "获取公募基金全面数据，包括基金列表、基金经理、基金净值、基金分红、基金持仓等数据。示例：fund_data(ts_code='150018.SZ', data_type='nav', start_date='20240101', end_date='20240131')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       ts_code: {
-        type: "string",
-        description: "基金代码，如'150018.SZ'表示银华深证100分级，'001753.OF'表示场外基金。注意：查询基金列表(basic)时必须提供此参数"
+        type: "string" as const,
+        description: "基金代码，如'150018.SZ'表示银华深证100分级，'001753.OF'表示场外基金。注意：查询基金列表(basic)时必须提供此参数",
+        minLength: 1,
+        maxLength: 20
       },
       data_type: {
-        type: "string",
+        type: "string" as const,
         description: "数据类型，可选值：basic(基金列表)、manager(基金经理)、nav(基金净值)、dividend(基金分红)、portfolio(基金持仓)、all(全部数据)",
         enum: ["basic", "manager", "nav", "dividend", "portfolio", "all"]
       },
-
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'。重要：对于基金持仓(portfolio)数据和基金净值(nav)数据，如果不指定时间参数，将返回所有历史数据，可能数据量很大。建议指定时间范围或使用period参数"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'。重要：对于基金持仓(portfolio)数据和基金净值(nav)数据，如果不指定时间参数，将返回所有历史数据，可能数据量很大。建议指定时间范围或使用period参数",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20231231'。配合start_date使用可限制数据范围"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20231231'。配合start_date使用可限制数据范围",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       period: {
-        type: "string",
-        description: "特定报告期，格式为YYYYMMDD。例如：'20231231'表示2023年年报，'20240630'表示2024年中报，'20220630'表示2022年三季报，'20240331'表示2024年一季报。指定此参数时将忽略start_date和end_date"
+        type: "string" as const,
+        description: "特定报告期，格式为YYYYMMDD。例如：'20231231'表示2023年年报，'20240630'表示2024年中报，'20220630'表示2022年三季报，'20240331'表示2024年一季报。指定此参数时将忽略start_date和end_date",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["data_type","ts_code"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     ts_code?: string; 
     data_type: string; 
@@ -39,7 +67,6 @@ export const fundData = {
     period?: string;
   }) {
     try {
-      console.log('基金数据查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -65,7 +92,6 @@ export const fundData = {
         try {
           // 基金列表(basic)模块必须提供基金代码，否则跳过
           if (dataType === 'basic' && !args.ts_code) {
-            console.warn('基金列表查询需要提供基金代码，跳过basic模块');
             results.push({
               type: dataType,
               error: '基金列表查询需要提供基金代码(ts_code)参数，否则数据量过大'
@@ -91,7 +117,6 @@ export const fundData = {
             });
           }
         } catch (error) {
-          console.warn(`获取${dataType}数据失败:`, error);
           results.push({
             type: dataType,
             error: error instanceof Error ? error.message : '未知错误'
@@ -111,7 +136,6 @@ export const fundData = {
       };
 
     } catch (error) {
-      console.error('基金数据查询错误:', error);
       return {
         content: [{ 
           type: "text", 
@@ -193,7 +217,6 @@ async function fetchFundData(
     }
   }
 
-  console.log(`调用${config.api_name} API，参数:`, JSON.stringify(params, null, 2));
 
   // 设置请求超时
   const controller = new AbortController();
@@ -242,10 +265,8 @@ async function fetchFundData(
         if (!annDate) return true;
         return annDate >= startDate && annDate <= endDate;
       });
-      console.log(`日期范围过滤后剩余${filteredData.length}条${dataType}记录`);
     }
 
-    console.log(`成功获取到${filteredData.length}条${dataType}数据记录`);
     
     // 如果是净值数据且有基金代码，尝试获取基金份额数据并合并
     if (dataType === 'nav' && tsCode && filteredData.length > 0) {
@@ -264,10 +285,9 @@ async function fetchFundData(
             navItem.fd_share = shareMap.get(tradeDate) || null;
           });
           
-          console.log(`成功合并${shareResult.data.length}条基金份额数据`);
         }
       } catch (error) {
-        console.warn('获取基金份额数据失败，将继续返回净值数据:', error);
+        // 获取基金份额数据失败，将继续返回净值数据
       }
     }
     
@@ -308,7 +328,6 @@ async function fetchFundShareData(
     if (endDate) params.params.end_date = endDate;
   }
 
-  console.log(`调用fund_share API，参数:`, JSON.stringify(params, null, 2));
 
   // 设置请求超时
   const controller = new AbortController();

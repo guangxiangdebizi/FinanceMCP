@@ -2,21 +2,44 @@ import { TUSHARE_CONFIG } from '../config.js';
 // 基金经理按姓名查询工具
 export const fundManagerByName = {
   name: "fund_manager_by_name",
-  description: "根据基金经理姓名查询基金经理详细信息，包括管理的基金列表、个人背景、任职经历等",
+  description: "根据基金经理姓名查询基金经理详细信息。示例：fundManagerByName(name='张凯')",
   inputSchema: {
     type: "object" as const,
     properties: {
       name: {
-        type: "string",
-        description: "基金经理姓名，如'张凯'、'刘彦春'等"
+        type: "string" as const,
+        description: "基金经理姓名，如'张凯'、'刘彦春'等",
+        minLength: 1,
+        maxLength: 20
       },
       ann_date: {
-        type: "string",
-        description: "公告日期，格式为YYYYMMDD，如'20230101'。用于限制查询的公告日期"
+        type: "string" as const,
+        description: "公告日期，格式为YYYYMMDD，如'20230101'。用于限制查询的公告日期",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["name"]
-  }
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const
 };
 
 // 类型定义

@@ -26,7 +26,6 @@ export function formatManagement(data: ManagerData[]): string {
     return "未找到管理层数据。";
   }
 
-  console.log(`开始格式化${data.length}条管理层记录`);
 
   let result = `## 📋 上市公司管理层信息\n\n`;
 

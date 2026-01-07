@@ -107,7 +107,6 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
   } catch (err) {
     clearTimeout(timeoutId);
     const msg = `获取Tushare新闻失败: ${err instanceof Error ? err.message : String(err)}`;
-    console.error(msg);
     logs?.push(`[ERROR] ${msg}`);
     return [];
   }
@@ -115,18 +114,36 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
 
 export const hotNews = {
   name: 'hot_news_7x24',
-  description: '7x24热点：从Tushare新闻接口获取最新的财经、政治、科技、体育、娱乐、军事、社会、国际等新闻',
-  parameters: {
-    type: 'object',
+  description: '获取7x24小时热点新闻。示例：hotNews()',
+  inputSchema: {
+    type: 'object' as const,
     properties: {
       limit: {
-        type: 'number',
+        type: 'number' as const,
         description: '返回条数，默认100，上限1500。接口按此数量向Tushare请求后再进行内容相似度去重',
         minimum: 1,
         maximum: 1500
       }
     }
-  },
+  } as const,
+  outputSchema: {
+    type: 'object' as const,
+    properties: {
+      content: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            type: { type: 'string' as const },
+            text: { type: 'string' as const }
+          },
+          required: ['type', 'text']
+        }
+      },
+      isError: { type: 'boolean' as const }
+    },
+    required: ['content']
+  } as const,
   async run(_args?: { limit?: number }) {
     try {
       const logs: string[] = [];

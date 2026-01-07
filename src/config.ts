@@ -86,10 +86,4 @@ export const COINGECKO_CONFIG = {
   TIMEOUT: 30000,
 };
 
-// 开发态输出便于确认来源（不打印实际 Token 值）
-if (process.env.NODE_ENV !== 'production') {
-  const fromTs = getRequestToken() ? 'request-header' : (process.env.TUSHARE_TOKEN ? 'env' : 'none');
-  const fromCg = getCoinGeckoProApiKey() ? 'request-pro-header/env' : (getCoinGeckoApiKey() ? 'request-std-header/env' : 'none');
-  console.log('Tushare token source:', fromTs);
-  console.log('CoinGecko key source:', fromCg);
-}
+// Token 配置已自动完成（无需日志输出，避免污染 MCP 响应）

@@ -10,6 +10,7 @@ build/
 # 日志文件
 *.log
 logs/
+*.log.*  # 日志轮转文件（如 combined-2025-01-07-123456.log）
 
 # 编辑器和IDE
 .vscode/

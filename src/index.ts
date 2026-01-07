@@ -31,16 +31,34 @@ import { hotNews } from "./tools/hotNews.js";
 // 🕐 时间戳工具定义
 const timestampTool = {
   name: "current_timestamp",
-  description: "获取当前东八区（中国时区）的时间戳，包括年月日时分秒信息",
-  parameters: {
-    type: "object",
+  description: "获取当前东八区（中国时区）的时间戳，包括年月日时分秒信息。支持多种格式输出：datetime、date、time、timestamp、readable",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       format: {
-        type: "string",
-        description: "时间格式，可选值：datetime(完整日期时间，默认)、date(仅日期)、time(仅时间)、timestamp(Unix时间戳)、readable(可读格式)"
+        type: "string" as const,
+        description: "时间格式，可选值：datetime(完整日期时间，默认)、date(仅日期)、time(仅时间)、timestamp(Unix时间戳)、readable(可读格式)",
+        enum: ["datetime", "date", "time", "timestamp", "readable"]
       }
     }
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      }
+    },
+    required: ["content"]
+  } as const,
   async run(args?: { format?: string }) {
     try {
       // 获取当前UTC时间
@@ -128,42 +146,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: timestampTool.name,
         description: timestampTool.description,
-        inputSchema: timestampTool.parameters
+        inputSchema: timestampTool.inputSchema
       },
       {
         name: financeNews.name,
         description: financeNews.description,
-        inputSchema: financeNews.parameters
+        inputSchema: financeNews.inputSchema
       },
       {
         name: stockData.name,
         description: stockData.description,
-        inputSchema: stockData.parameters
+        inputSchema: stockData.inputSchema
       },
       {
         name: stockDataMinutes.name,
         description: stockDataMinutes.description,
-        inputSchema: stockDataMinutes.parameters
+        inputSchema: stockDataMinutes.inputSchema
       },
       {
         name: indexData.name,
         description: indexData.description,
-        inputSchema: indexData.parameters
+        inputSchema: indexData.inputSchema
       },
       {
         name: macroEcon.name,
         description: macroEcon.description,
-        inputSchema: macroEcon.parameters
+        inputSchema: macroEcon.inputSchema
       },
       {
         name: companyPerformance.name,
         description: companyPerformance.description,
-        inputSchema: companyPerformance.parameters
+        inputSchema: companyPerformance.inputSchema
       },
       {
         name: fundData.name,
         description: fundData.description,
-        inputSchema: fundData.parameters
+        inputSchema: fundData.inputSchema
       },
       {
         name: fundManagerByName.name,
@@ -173,50 +191,47 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: convertibleBond.name,
         description: convertibleBond.description,
-        inputSchema: convertibleBond.parameters
+        inputSchema: convertibleBond.inputSchema
       },
       {
         name: blockTrade.name,
         description: blockTrade.description,
-        inputSchema: blockTrade.parameters
+        inputSchema: blockTrade.inputSchema
       },
       {
         name: moneyFlow.name,
         description: moneyFlow.description,
-        inputSchema: moneyFlow.parameters
+        inputSchema: moneyFlow.inputSchema
       },
       {
         name: marginTrade.name,
         description: marginTrade.description,
-        inputSchema: marginTrade.parameters
+        inputSchema: marginTrade.inputSchema
       },
       {
         name: companyPerformance_hk.name,
         description: companyPerformance_hk.description,
-        inputSchema: companyPerformance_hk.parameters
+        inputSchema: companyPerformance_hk.inputSchema
       },
       {
         name: companyPerformance_us.name,
         description: companyPerformance_us.description,
-        inputSchema: companyPerformance_us.parameters
-      }
-      ,
+        inputSchema: companyPerformance_us.inputSchema
+      },
       {
         name: csiIndexConstituents.name,
         description: csiIndexConstituents.description,
-        inputSchema: csiIndexConstituents.parameters
-      }
-      ,
+        inputSchema: csiIndexConstituents.inputSchema
+      },
       {
         name: dragonTigerInst.name,
         description: dragonTigerInst.description,
-        inputSchema: dragonTigerInst.parameters
-      }
-      ,
+        inputSchema: dragonTigerInst.inputSchema
+      },
       {
         name: hotNews.name,
         description: hotNews.description,
-        inputSchema: hotNews.parameters
+        inputSchema: hotNews.inputSchema
       }
     ]
   };
@@ -373,6 +388,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Server error:", error);
+  // 服务器启动失败，直接退出（避免污染 MCP 输出）
   process.exit(1);
 });

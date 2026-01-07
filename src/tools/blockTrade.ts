@@ -3,28 +3,53 @@ import { resolveStockCodes } from '../utils/stockCodeResolver.js';
 
 export const blockTrade = {
   name: "block_trade",
-  description: "获取大宗交易数据，包括成交价格、成交量、买卖双方营业部等详细信息",
-  parameters: {
-    type: "object",
+  description: "获取大宗交易数据，包括成交价格、成交量、买卖双方营业部等详细信息。示例：blockTrade(start_date='20240101', end_date='20240131', code='000001.SZ')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       code: {
-        type: "string",
-        description: "股票代码（可选），如'000001.SZ'表示平安银行。不填写则查询全市场大宗交易"
+        type: "string" as const,
+        description: "股票代码（可选），如'000001.SZ'表示平安银行。不填写则查询全市场大宗交易",
+        minLength: 1,
+        maxLength: 20
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20231231'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20231231'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["start_date", "end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { code?: string; start_date: string; end_date: string }) {
     try {
-      console.log('大宗交易查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -51,7 +76,6 @@ export const blockTrade = {
         // 不设置fields参数，返回所有字段
       };
 
-      console.log(`请求大宗交易数据，API: block_trade，参数:`, params.params);
 
       // 设置请求超时
       const controller = new AbortController();
@@ -100,7 +124,6 @@ export const blockTrade = {
           return result;
         });
 
-        console.log(`成功获取到${tradeData.length}条大宗交易记录`);
 
         // 格式化输出
         const formattedOutput = await formatBlockTradeData(tradeData, args.code || '全市场', args.start_date, args.end_date);
@@ -115,7 +138,6 @@ export const blockTrade = {
       }
 
     } catch (error) {
-      console.error('大宗交易查询错误:', error);
       return {
         content: [{ 
           type: "text", 

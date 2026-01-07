@@ -2,28 +2,52 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const macroEcon = {
   name: "macro_econ",
-  description: "获取宏观经济数据，包括Shibor利率、LPR利率、GDP、CPI、PPI、货币供应量、PMI、社融数据、Shibor报价、Libor、Hibor等",
-  parameters: {
-    type: "object",
+  description: "获取宏观经济数据，包括Shibor利率、LPR利率、GDP、CPI、PPI、货币供应量、PMI、社融数据、Shibor报价、Libor、Hibor等。示例：macro_econ(indicator='cpi', start_date='20240101', end_date='20240131')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       indicator: {
-        type: "string",
-        description: "指标类型，可选值：shibor(上海银行间同业拆放利率)、lpr(贷款市场报价利率)、gdp(国内生产总值)、cpi(居民消费价格指数)、ppi(工业生产者出厂价格指数)、cn_m(货币供应量)、cn_pmi(采购经理指数)、cn_sf(社会融资规模)、shibor_quote(Shibor银行报价数据)、libor(伦敦银行间同业拆借利率)、hibor(香港银行间同业拆借利率)"
+        type: "string" as const,
+        description: "指标类型，可选值：shibor(上海银行间同业拆放利率)、lpr(贷款市场报价利率)、gdp(国内生产总值)、cpi(居民消费价格指数)、ppi(工业生产者出厂价格指数)、cn_m(货币供应量)、cn_pmi(采购经理指数)、cn_sf(社会融资规模)、shibor_quote(Shibor银行报价数据)、libor(伦敦银行间同业拆借利率)、hibor(香港银行间同业拆借利率)",
+        enum: ["shibor", "lpr", "gdp", "cpi", "ppi", "cn_m", "cn_pmi", "cn_sf", "shibor_quote", "libor", "hibor"]
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20230131'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["indicator","start_date","end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { indicator: string; start_date?: string; end_date?: string }) {
     try {
-      console.log(`使用Tushare API获取${args.indicator}宏观经济数据`);
       
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
@@ -210,7 +234,6 @@ export const macroEcon = {
       const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
       
       try {
-        console.log(`请求Tushare API: ${params.api_name}，参数:`, params.params);
         
         // 发送请求
         const response = await fetch(TUSHARE_API_URL, {
@@ -422,8 +445,6 @@ ${tableRows.join('\n')}
         clearTimeout(timeoutId);
       }
     } catch (error) {
-      console.error("获取宏观经济数据失败:", error);
-      
       return {
         content: [
           {

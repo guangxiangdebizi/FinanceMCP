@@ -2,30 +2,56 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const convertibleBond = {
   name: "convertible_bond",
-  description: "获取可转债非行情数据，支持两种查询方式：1)使用issue类型按时间范围查询可转债发行数据；2)使用info类型按代码查询可转债详细信息",
-  parameters: {
-    type: "object",
+  description: "获取可转债非行情数据。示例：convertibleBond(data_type='issue', start_date='20240101', end_date='20240131')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       ts_code: {
-        type: "string",
-        description: "可转债代码，如'110001.SH'表示国电转债，'128001.SZ'表示平安转债。配合info类型使用可查询详细信息"
+        type: "string" as const,
+        description: "可转债代码，如'110001.SH'表示国电转债，'128001.SZ'表示平安转债。配合info类型使用可查询详细信息",
+        minLength: 1,
+        maxLength: 20
       },
       data_type: {
-        type: "string",
+        type: "string" as const,
         description: "数据类型，可选值：issue(可转债发行数据)、info(可转债详细信息，通过代码查询)",
         enum: ["issue", "info"]
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'。用于查询发行数据的公告日期范围"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'。用于查询发行数据的公告日期范围",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'。用于查询发行数据的公告日期范围"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20230131'。用于查询发行数据的公告日期范围",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["data_type"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     ts_code?: string; 
     data_type: string; 
@@ -33,7 +59,6 @@ export const convertibleBond = {
     end_date?: string;
   }) {
     try {
-      console.log('可转债数据查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -74,7 +99,6 @@ export const convertibleBond = {
             });
           }
         } catch (error) {
-          console.warn(`获取${dataType}数据失败:`, error);
           results.push({
             type: dataType,
             error: error instanceof Error ? error.message : '未知错误'
@@ -94,7 +118,6 @@ export const convertibleBond = {
       };
 
     } catch (error) {
-      console.error('可转债数据查询错误:', error);
       return {
         content: [{ 
           type: "text", 
@@ -158,7 +181,6 @@ async function fetchConvertibleBondData(
   const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
 
   try {
-    console.log(`请求Tushare API: ${params.api_name}，参数:`, params.params);
     
     // 发送请求
     const response = await fetch(apiUrl!, {
