@@ -2,33 +2,61 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const marginTrade = {
   name: "margin_trade",
-  description: "获取融资融券相关数据，支持多种数据类型：标的股票、交易汇总、交易明细、转融券汇总等",
-  parameters: {
-    type: "object",
+  description: "获取融资融券相关数据。示例：marginTrade(data_type='margin', start_date='20240101', end_date='20240131')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       data_type: {
-        type: "string",
-        description: "数据类型，可选值：margin_secs(融资融券标的股票)、margin(融资融券交易汇总)、margin_detail(融资融券交易明细)、slb_len_mm(做市借券交易汇总)"
+        type: "string" as const,
+        description: "数据类型，可选值：margin_secs(融资融券标的股票)、margin(融资融券交易汇总)、margin_detail(融资融券交易明细)、slb_len_mm(做市借券交易汇总)",
+        enum: ["margin_secs", "margin", "margin_detail", "slb_len_mm"]
       },
       ts_code: {
-        type: "string",
-        description: "股票代码，如'000001.SZ'、'600000.SH'等（部分接口可选）"
+        type: "string" as const,
+        description: "股票代码，如'000001.SZ'、'600000.SH'等（部分接口可选）",
+        minLength: 1,
+        maxLength: 20
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式YYYYMMDD，如'20240101'"
+        type: "string" as const,
+        description: "起始日期，格式YYYYMMDD，如'20240101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式YYYYMMDD，如'20240131'（可选，默认为当前日期）"
+        type: "string" as const,
+        description: "结束日期，格式YYYYMMDD，如'20240131'（可选，默认为当前日期）",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       exchange: {
-        type: "string",
-        description: "交易所代码，可选值：SSE(上海证券交易所)、SZSE(深圳证券交易所)、BSE(北京证券交易所)，仅margin_secs接口使用"
+        type: "string" as const,
+        description: "交易所代码，可选值：SSE(上海证券交易所)、SZSE(深圳证券交易所)、BSE(北京证券交易所)，仅margin_secs接口使用",
+        enum: ["SSE", "SZSE", "BSE"]
       }
     },
     required: ["data_type", "start_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     data_type: string;
     ts_code?: string;
@@ -37,7 +65,6 @@ export const marginTrade = {
     exchange?: string;
   }) {
     try {
-      console.log('融资融券数据查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -93,7 +120,6 @@ export const marginTrade = {
       };
 
     } catch (error) {
-      console.error('融资融券数据查询错误:', error);
       return {
         content: [{ 
           type: "text", 
@@ -187,7 +213,6 @@ async function fetchSlbLenMm(
 
 // 通用API调用函数
 async function callTushareAPI(params: any, apiUrl: string, apiName: string) {
-  console.log(`请求${apiName}数据，参数:`, params.params);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
@@ -227,7 +252,6 @@ async function callTushareAPI(params: any, apiUrl: string, apiName: string) {
       return result;
     });
 
-    console.log(`成功获取到${resultData.length}条${apiName}数据记录`);
     return resultData;
 
   } catch (error) {

@@ -27,15 +27,16 @@ import { hotNews } from "./tools/hotNews.js";
 const timestampTool = {
   name: "current_timestamp",
   description: "获取当前东八区（中国时区）的时间戳，包括年月日时分秒信息",
-  parameters: {
-    type: "object",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       format: {
-        type: "string",
-        description: "时间格式，可选值：datetime(完整日期时间，默认)、date(仅日期)、time(仅时间)、timestamp(Unix时间戳)、readable(可读格式)"
+        type: "string" as const,
+        description: "时间格式，可选值：datetime(完整日期时间，默认)、date(仅日期)、time(仅时间)、timestamp(Unix时间戳)、readable(可读格式)",
+        enum: ["datetime", "date", "time", "timestamp", "readable"]
       }
     }
-  },
+  } as const,
   async run(args?: { format?: string }) {
     const now = new Date();
     const chinaTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
@@ -59,24 +60,24 @@ const timestampTool = {
 };
 
 const toolList = [
-  { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
-  { name: financeNews.name, description: financeNews.description, inputSchema: financeNews.parameters },
-  { name: stockData.name, description: stockData.description, inputSchema: stockData.parameters },
-  { name: stockDataMinutes.name, description: stockDataMinutes.description, inputSchema: stockDataMinutes.parameters },
-  { name: indexData.name, description: indexData.description, inputSchema: indexData.parameters },
-  { name: macroEcon.name, description: macroEcon.description, inputSchema: macroEcon.parameters },
-  { name: companyPerformance.name, description: companyPerformance.description, inputSchema: companyPerformance.parameters },
-  { name: fundData.name, description: fundData.description, inputSchema: fundData.parameters },
-  { name: fundManagerByName.name, description: fundManagerByName.description, inputSchema: (fundManagerByName as any).inputSchema },
-  { name: convertibleBond.name, description: convertibleBond.description, inputSchema: convertibleBond.parameters },
-  { name: blockTrade.name, description: blockTrade.description, inputSchema: blockTrade.parameters },
-  { name: moneyFlow.name, description: moneyFlow.description, inputSchema: moneyFlow.parameters },
-  { name: marginTrade.name, description: marginTrade.description, inputSchema: marginTrade.parameters },
-  { name: companyPerformance_hk.name, description: companyPerformance_hk.description, inputSchema: companyPerformance_hk.parameters },
-  { name: companyPerformance_us.name, description: companyPerformance_us.description, inputSchema: companyPerformance_us.parameters },
-  { name: csiIndexConstituents.name, description: csiIndexConstituents.description, inputSchema: csiIndexConstituents.parameters },
-  { name: dragonTigerInst.name, description: dragonTigerInst.description, inputSchema: dragonTigerInst.parameters },
-  { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.parameters }
+  { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.inputSchema },
+  { name: financeNews.name, description: financeNews.description, inputSchema: financeNews.inputSchema },
+  { name: stockData.name, description: stockData.description, inputSchema: stockData.inputSchema },
+  { name: stockDataMinutes.name, description: stockDataMinutes.description, inputSchema: stockDataMinutes.inputSchema },
+  { name: indexData.name, description: indexData.description, inputSchema: indexData.inputSchema },
+  { name: macroEcon.name, description: macroEcon.description, inputSchema: macroEcon.inputSchema },
+  { name: companyPerformance.name, description: companyPerformance.description, inputSchema: companyPerformance.inputSchema },
+  { name: fundData.name, description: fundData.description, inputSchema: fundData.inputSchema },
+  { name: fundManagerByName.name, description: fundManagerByName.description, inputSchema: fundManagerByName.inputSchema },
+  { name: convertibleBond.name, description: convertibleBond.description, inputSchema: convertibleBond.inputSchema },
+  { name: blockTrade.name, description: blockTrade.description, inputSchema: blockTrade.inputSchema },
+  { name: moneyFlow.name, description: moneyFlow.description, inputSchema: moneyFlow.inputSchema },
+  { name: marginTrade.name, description: marginTrade.description, inputSchema: marginTrade.inputSchema },
+  { name: companyPerformance_hk.name, description: companyPerformance_hk.description, inputSchema: companyPerformance_hk.inputSchema },
+  { name: companyPerformance_us.name, description: companyPerformance_us.description, inputSchema: companyPerformance_us.inputSchema },
+  { name: csiIndexConstituents.name, description: csiIndexConstituents.description, inputSchema: csiIndexConstituents.inputSchema },
+  { name: dragonTigerInst.name, description: dragonTigerInst.description, inputSchema: dragonTigerInst.inputSchema },
+  { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.inputSchema }
 ];
 
 interface Session { id: string; createdAt: Date; lastActivity: Date }
@@ -87,41 +88,33 @@ function extractTokenFromHeaders(req: Request): string | undefined {
   
   // 1. 尝试从标准请求头读取
   const tokenHeader = (h['x-tushare-token'] || h['x-api-key']) as string | undefined;
-  if (tokenHeader && tokenHeader.trim()) {
-    console.log(`[TOKEN] Found in X-Tushare-Token/X-Api-Key header`);
+  if (tokenHeader && tokenHeader.trim()) {
     return tokenHeader.trim();
   }
   
   // 2. 尝试从 Authorization Bearer 读取
   const auth = h['authorization'];
-  if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) {
-    console.log(`[TOKEN] Found in Authorization Bearer header`);
+  if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) {
     return auth.slice(7).trim();
   }
   
   // 3. 🔍 尝试从 Smithery 特殊头读取（可能的头名称）
   const smitheryConfig = h['x-smithery-config'] || h['x-config'] || h['x-session-config'];
-  if (smitheryConfig) {
-    console.log(`[TOKEN] Found Smithery config header:`, smitheryConfig);
+  if (smitheryConfig) {
     try {
       const config = JSON.parse(smitheryConfig as string);
-      if (config.TUSHARE_TOKEN) {
-        console.log(`[TOKEN] Extracted from Smithery config`);
+      if (config.TUSHARE_TOKEN) {
         return config.TUSHARE_TOKEN;
       }
-    } catch (e) {
-      console.log(`[TOKEN] Failed to parse Smithery config:`, e);
+    } catch (e) {
     }
   }
   
   // 4. 🔍 尝试从查询参数读取
   const query = req.query;
-  if (query.tushare_token || query.TUSHARE_TOKEN) {
-    console.log(`[TOKEN] Found in query parameters`);
+  if (query.tushare_token || query.TUSHARE_TOKEN) {
     return (query.tushare_token || query.TUSHARE_TOKEN) as string;
-  }
-  
-  console.log(`[TOKEN] Not found in request, falling back to environment variable`);
+  }
   return undefined;
 }
 
@@ -135,17 +128,13 @@ app.use((req: Request, res: Response, next) => {
   const timestamp = new Date().toISOString();
   const method = req.method;
   const url = req.url;
-  const ip = req.ip || req.socket.remoteAddress;
-  
-  console.log(`[${timestamp}] ${method} ${url} - IP: ${ip}`);
+  const ip = req.ip || req.socket.remoteAddress;
   
   // 🔍 详细记录所有请求头，用于调试 Smithery 配置传递
-  console.log(`[DEBUG] Request Headers:`, JSON.stringify(req.headers, null, 2));
-  
+
   // 记录请求完成时的状态码
   const originalSend = res.send;
-  res.send = function(data): any {
-    console.log(`[${timestamp}] ${method} ${url} - Status: ${res.statusCode}`);
+  res.send = function(data): any {
     return originalSend.call(this, data);
   };
   
@@ -170,8 +159,7 @@ app.get('/health', (_req: Request, res: Response) => {
 
 app.get('/mcp', (req: Request, res: Response) => {
   const accept = req.headers.accept || '';
-  const forceSse = req.query.sse === '1' || req.query.sse === 'true';
-  console.log(`📡 [MCP-SSE] Client connecting - Accept: ${accept}, Force SSE: ${forceSse}`);
+  const forceSse = req.query.sse === '1' || req.query.sse === 'true';
   
   if (forceSse || (typeof accept === 'string' && accept.includes('text/event-stream'))) {
     res.writeHead(200, {
@@ -181,17 +169,14 @@ app.get('/mcp', (req: Request, res: Response) => {
       'X-Accel-Buffering': 'no'
     });
     // 仅发送注释型心跳，避免发送非 JSON-RPC 的 data 事件
-    res.write(': stream established\n\n');
-    console.log(`✅ [MCP-SSE] Stream established`);
+    res.write(': stream established\n\n');
     
     const keep = setInterval(() => res.write(': keepalive\n\n'), 30000);
     req.on('close', () => {
-      clearInterval(keep);
-      console.log(`🔌 [MCP-SSE] Client disconnected`);
+      clearInterval(keep);
     });
     return;
-  }
-  console.log(`❌ [MCP-SSE] Invalid Accept header`);
+  }
   return res.status(400).json({ jsonrpc: '2.0', error: { code: -32600, message: 'Accept must include text/event-stream' }, id: null });
 });
 
@@ -201,44 +186,37 @@ app.post('/mcp', async (req: Request, res: Response) => {
 
   const isNotification = (body.id === undefined || body.id === null) && typeof body.method === 'string' && body.method.startsWith('notifications/');
   if (isNotification) {
-    const sid = req.headers['mcp-session-id'] as string | undefined;
-    console.log(`🔔 [MCP-Notification] ${body.method} - Session: ${sid || 'none'}`);
+    const sid = req.headers['mcp-session-id'] as string | undefined;
     if (sid && sessions.has(sid)) sessions.get(sid)!.lastActivity = new Date();
     return res.status(204).end();
   }
 
-  const method = body.method as string;
-  console.log(`🔧 [MCP-${method}] Request ID: ${body.id}`);
+  const method = body.method as string;
   
   if (method === 'initialize') {
     const newId = randomUUID();
     sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
-    res.setHeader('Mcp-Session-Id', newId);
-    console.log(`✅ [MCP-initialize] New session created: ${newId}`);
+    res.setHeader('Mcp-Session-Id', newId);
     return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '1.0.0' } }, id: body.id });
   }
 
-  if (method === 'tools/list') {
-    console.log(`📋 [MCP-tools/list] Returning ${toolList.length} tools`);
+  if (method === 'tools/list') {
     return res.json({ jsonrpc: '2.0', result: { tools: toolList }, id: body.id });
   }
 
   // 明确表示不支持 resources 和 prompts（返回空列表而不是错误）
-  if (method === 'resources/list') {
-    console.log(`📋 [MCP-resources/list] Not supported, returning empty list`);
+  if (method === 'resources/list') {
     return res.json({ jsonrpc: '2.0', result: { resources: [] }, id: body.id });
   }
 
-  if (method === 'prompts/list') {
-    console.log(`📋 [MCP-prompts/list] Not supported, returning empty list`);
+  if (method === 'prompts/list') {
     return res.json({ jsonrpc: '2.0', result: { prompts: [] }, id: body.id });
   }
 
   if (method === 'tools/call') {
     const { name, arguments: args } = body.params || {};
     const token = extractTokenFromHeaders(req);
-    const startTime = Date.now();
-    console.log(`🚀 [MCP-tools/call] Tool: ${name} | Has Token: ${!!token}`);
+    const startTime = Date.now();
     
     try {
       const result = await runWithRequestContext({ tushareToken: token }, async () => {
@@ -359,18 +337,14 @@ app.post('/mcp', async (req: Request, res: Response) => {
             throw new Error(`Unknown tool: ${name}`);
         }
       });
-      const duration = Date.now() - startTime;
-      console.log(`✅ [MCP-tools/call] Tool: ${name} completed in ${duration}ms`);
+      const duration = Date.now() - startTime;
       return res.json({ jsonrpc: '2.0', result, id: body.id });
     } catch (error: any) {
       const duration = Date.now() - startTime;
-      const message = error?.message || String(error);
-      console.error(`❌ [MCP-tools/call] Tool: ${name} failed after ${duration}ms - Error: ${message}`);
+      const message = error?.message || String(error);
       return res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message }, id: body.id });
     }
-  }
-
-  console.error(`❌ [MCP] Unknown method: ${method}`);
+  }
   return res.status(400).json({ jsonrpc: '2.0', error: { code: -32601, message: `Method not found: ${method}` }, id: body.id });
 });
 
@@ -394,15 +368,5 @@ app.get('/terminate', (_req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(60));
-  console.log('🚀 FinanceMCP Streamable HTTP Server Started');
-  console.log('='.repeat(60));
-  console.log(`📍 Server URL:    http://localhost:${PORT}`);
-  console.log(`📡 MCP Endpoint:  http://localhost:${PORT}/mcp`);
-  console.log(`💚 Health Check:  http://localhost:${PORT}/health`);
-  console.log(`📊 Active Sessions: ${sessions.size}`);
-  console.log(`🔧 Available Tools: ${toolList.length}`);
-  console.log('='.repeat(60));
-  console.log('📝 Server is ready to accept connections');
-  console.log('='.repeat(60) + '\n');
+
 });

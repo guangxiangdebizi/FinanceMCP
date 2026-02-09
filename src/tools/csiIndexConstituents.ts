@@ -310,25 +310,49 @@ async function getIndexWeights(index_code: string, end: string): Promise<Constit
 
 export const csiIndexConstituents = {
   name: 'csi_index_constituents',
-  description: '获取中证指数公司(CSI)指数（含行业/主题）的区间行情、成分权重与估值/财务摘要（PE TTM、PB、股息率、ROE、ROA、净利率、每股经营现金流、资产负债率、营收同比、资产周转率、毛利率、三费比率、现金分红率）。',
-  parameters: {
-    type: 'object',
+  description: '获取中证指数成分股信息。示例：csiIndexConstituents(index_code="000300.SH", start_date="20240101", end_date="20240131")',
+  inputSchema: {
+    type: 'object' as const,
     properties: {
       index_code: {
-        type: 'string',
-        description: "指数代码(仅限CSI，含行业/主题)。请使用 .SH/.SZ 形式且能在 Tushare index_weight 查询到权重的代码，例如中证证券公司 '399975.SZ'；也支持宽基 '000300.SH'、'000905.SH'，以及 'sh000300'、'sz399006' 形式"
+        type: 'string' as const,
+        description: "指数代码(仅限CSI，含行业/主题)。请使用 .SH/.SZ 形式，例如中证证券公司 '399975.SZ'；宽基 '000300.SH'、'000905.SH'，以及 'sh000300'、'sz399006' 形式",
+        minLength: 1,
+        maxLength: 20
       },
       start_date: {
-        type: 'string',
-        description: '开始日期，YYYYMMDD 或 YYYY-MM-DD'
+        type: 'string' as const,
+        description: '开始日期，YYYYMMDD 或 YYYY-MM-DD',
+        minLength: 8,
+        maxLength: 10
       },
       end_date: {
-        type: 'string',
-        description: '结束日期，YYYYMMDD 或 YYYY-MM-DD'
+        type: 'string' as const,
+        description: '结束日期，YYYYMMDD 或 YYYY-MM-DD',
+        minLength: 8,
+        maxLength: 10
       }
     },
     required: ['index_code', 'start_date', 'end_date']
-  },
+  } as const,
+  outputSchema: {
+    type: 'object' as const,
+    properties: {
+      content: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            type: { type: 'string' as const },
+            text: { type: 'string' as const }
+          },
+          required: ['type', 'text']
+        }
+      },
+      isError: { type: 'boolean' as const }
+    },
+    required: ['content']
+  } as const,
   async run(args: { index_code: string; start_date: string; end_date: string; }) {
     try {
       const normIndex = normalizeIndexCode(args.index_code);

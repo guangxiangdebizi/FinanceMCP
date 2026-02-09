@@ -3,21 +3,44 @@ import { resolveStockCodes, extractStockCodes } from '../utils/stockCodeResolver
 
 export const dragonTigerInst = {
   name: 'dragon_tiger_inst',
-  description: '龙虎榜机构成交明细（top_inst）。必填：交易日期；可选：股票TS代码。返回表格包含买入/卖出/净额及上榜理由等。',
-  parameters: {
-    type: 'object',
+  description: '获取龙虎榜机构成交明细。示例：dragonTigerInst(trade_date="20240101", ts_code="000001.SZ")',
+  inputSchema: {
+    type: 'object' as const,
     properties: {
       trade_date: {
-        type: 'string',
-        description: '交易日期，格式YYYYMMDD'
+        type: 'string' as const,
+        description: '交易日期，格式YYYYMMDD',
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       ts_code: {
-        type: 'string',
-        description: '可选，股票TS代码，如 000001.SZ'
+        type: 'string' as const,
+        description: '可选，股票TS代码，如 000001.SZ',
+        minLength: 1,
+        maxLength: 20
       }
     },
     required: ['trade_date']
-  },
+  } as const,
+  outputSchema: {
+    type: 'object' as const,
+    properties: {
+      content: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            type: { type: 'string' as const },
+            text: { type: 'string' as const }
+          },
+          required: ['type', 'text']
+        }
+      },
+      isError: { type: 'boolean' as const }
+    },
+    required: ['content']
+  } as const,
   async run(args: { trade_date: string; ts_code?: string }) {
     try {
       if (!args.trade_date || args.trade_date.trim().length !== 8) {

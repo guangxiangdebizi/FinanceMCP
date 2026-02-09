@@ -2,37 +2,68 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const moneyFlow = {
   name: "money_flow",
-  description: "获取个股、大盘和板块资金流向数据，包括主力资金、超大单、大单、中单、小单的净流入净额和净占比数据",
-  parameters: {
-    type: "object",
+  description: "获取个股、大盘和板块资金流向数据，包括主力资金、超大单、大单、中单、小单的净流入净额和净占比数据。示例：moneyFlow(start_date='20240901', end_date='20240930', ts_code='000001.SZ')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       query_type: {
-        type: "string",
-        description: "查询类型：stock=个股，market=大盘，sector=板块。默认根据ts_code自动判断"
+        type: "string" as const,
+        description: "查询类型：stock=个股，market=大盘，sector=板块。默认根据ts_code自动判断",
+        enum: ["stock", "market", "sector"]
       },
       ts_code: {
-        type: "string",
-        description: "股票代码或板块代码。个股如'000001.SZ'，板块如'BK0447'(东财板块代码)。不填写则查询大盘资金流向"
+        type: "string" as const,
+        description: "股票代码或板块代码。个股如'000001.SZ'，板块如'BK0447'(东财板块代码)。不填写则查询大盘资金流向",
+        minLength: 1,
+        maxLength: 20
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20240901'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20240901'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20240930'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20240930'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       content_type: {
-        type: "string",
-        description: "板块资金类型，仅在查询板块时有效。可选：行业、概念、地域"
+        type: "string" as const,
+        description: "板块资金类型，仅在查询板块时有效。可选：行业、概念、地域",
+        enum: ["行业", "概念", "地域"]
       },
       trade_date: {
-        type: "string",
-        description: "单独查询某个交易日的数据，格式为YYYYMMDD。如填写则忽略start_date和end_date"
+        type: "string" as const,
+        description: "单独查询某个交易日的数据，格式为YYYYMMDD。如填写则忽略start_date和end_date",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["start_date", "end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     query_type?: string;
     ts_code?: string; 
@@ -42,7 +73,6 @@ export const moneyFlow = {
     trade_date?: string;
   }) {
     try {
-      console.log('资金流向数据查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -117,7 +147,6 @@ export const moneyFlow = {
       };
 
     } catch (error) {
-      console.error('资金流向数据查询错误:', error);
       return {
         content: [{ 
           type: "text", 
@@ -210,7 +239,6 @@ async function callTushareAPI(params: any, apiUrl: string) {
   const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
 
   try {
-    console.log(`请求Tushare API: ${params.api_name}，参数:`, params.params);
     
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -247,7 +275,6 @@ async function callTushareAPI(params: any, apiUrl: string) {
       return result;
     });
     
-    console.log(`成功获取到${convertedData.length}条资金流向数据记录`);
     
     return {
       data: convertedData,

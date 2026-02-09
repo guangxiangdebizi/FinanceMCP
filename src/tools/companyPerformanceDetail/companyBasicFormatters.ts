@@ -32,7 +32,6 @@ export function formatCompanyBasic(data: CompanyBasicData[]): string {
     return "未找到上市公司基本信息。";
   }
 
-  console.log(`开始格式化${data.length}条公司基本信息记录`);
 
   let result = `## 🏢 上市公司基本信息\n\n`;
 

@@ -19,6 +19,10 @@ dependencies:
 build:
   dockerfile: Dockerfile          # 相对路径，默认为仓库根下的 Dockerfile
   dockerBuildPath: "."            # 构建上下文，默认为仓库根
+  # 构建后钩子：安装依赖并构建项目
+  postBuild:
+    - npm install
+    - npm run build
 
 # ---------- 启动配置 ----------
 startCommand:

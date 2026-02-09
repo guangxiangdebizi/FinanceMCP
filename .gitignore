@@ -1,28 +1,70 @@
+# 环境变量
 .env
-!.env.example
 
-# Node/TypeScript
+# 依赖目录
 node_modules/
+
+# 构建输出（编译产物，由 prepublishOnly 和 prepare 自动生成）
 build/
-dist/
-*.tsbuildinfo
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Logs
-logs/
+# 日志文件
 *.log
+logs/
+*.log.*  # 日志轮转文件（如 combined-2025-01-07-123456.log）
 
-# OS/IDE
+# 编辑器和IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/
+desktop.ini
+
+# 临时文件
+*.tmp
+temp/
+
+# 个人笔记和实习相关（这些文件不应该提交到项目）
+小红书推广文档.txt
+任务.docx
+日志.md
+实习日志-*.md
+实习日志-*.docx
+实习日志*
+~$日志*
+工作任务跟踪表-*.csv
+工作任务跟踪表-*.txt
+~$*.docx
+*.pptx
+股东数据模块技术文档.*
+大宗交易数据模块技术文档.*
+资金流向数据模块技术文档.*
+现金流量表模块技术文档.md
+利润表模块技术文档.md
+国金证券合作伙伴深度调研报告.md
+技术指标实现文档.*
+MCP业务层构建指南.md
+实习项目总结*.pdf
+generate_ppt.py
+main.py
+FinanceMCP_方案说明.md
+FinanceMCP_项目深度分析文档.md
+streamable-http-prompt.txt
+pain-method-gain.html
+
+# Python缓存（如果有Python脚本）
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# 测试覆盖率
+coverage/
+.nyc_output/
+
+# 构建工具
+dist/

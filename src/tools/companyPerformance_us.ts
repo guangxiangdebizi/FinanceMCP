@@ -6,34 +6,63 @@ import { formatUsIndicatorData } from './companyPerformanceDetail_us/usIndicator
 
 export const companyPerformance_us = {
   name: "company_performance_us",
-  description: "获取美股上市公司综合表现数据，包括利润表、资产负债表、现金流量表和财务指标数据",
-  parameters: {
-    type: "object",
+  description: "获取美股公司财务数据。示例：companyPerformance_us(ts_code='AAPL', data_type='income', start_date='20230101', end_date='20231231')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       ts_code: {
-        type: "string",
-        description: "美股代码，如'NVDA'表示英伟达，'AAPL'表示苹果，'TSLA'表示特斯拉"
+        type: "string" as const,
+        description: "美股代码，如'NVDA'表示英伟达，'AAPL'表示苹果，'TSLA'表示特斯拉",
+        minLength: 1,
+        maxLength: 20
       },
       data_type: {
-        type: "string",
+        type: "string" as const,
         description: "数据类型：income(利润表)、balance(资产负债表)、cashflow(现金流量表)、indicator(财务指标)",
         enum: ["income", "balance", "cashflow", "indicator"]
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20231231'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20231231'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       period: {
-        type: "string",
-        description: "特定报告期，格式为YYYYMMDD，如'20231231'表示2023年年报。指定此参数时将忽略start_date和end_date"
+        type: "string" as const,
+        description: "特定报告期，格式为YYYYMMDD，如'20231231'表示2023年年报。指定此参数时将忽略start_date和end_date",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       }
     },
     required: ["ts_code", "data_type", "start_date", "end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     ts_code: string; 
     data_type: string; 
@@ -42,7 +71,6 @@ export const companyPerformance_us = {
     period?: string;
   }) {
     try {
-      console.log('美股公司综合表现查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -114,7 +142,6 @@ export const companyPerformance_us = {
       }
 
     } catch (error) {
-      console.error('美股公司业绩查询错误:', error);
       return {
         content: [
           {

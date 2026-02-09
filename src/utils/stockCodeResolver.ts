@@ -45,7 +45,7 @@ export async function resolveStockCodes(stockCodes: string[]): Promise<string> {
 
     return explanation;
   } catch (error) {
-    console.error('获取股票基本信息失败:', error);
+    // 获取股票基本信息失败，静默返回空字符串
     return '';
   }
 }
@@ -104,8 +104,7 @@ async function fetchStockBasicInfo(stockCodes: string[]): Promise<StockInfo[]> {
       const batchResults = await fetchBatchStockInfo(batch);
       results.push(...batchResults);
     } catch (error) {
-      console.error(`批次 ${Math.floor(i/batchSize) + 1} 查询失败:`, error);
-      // 继续处理其他批次
+      // 批次查询失败，静默跳过，继续处理其他批次
     }
   }
 

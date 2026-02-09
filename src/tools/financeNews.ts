@@ -12,17 +12,36 @@ export interface NewsItem {
 
 export const financeNews = {
   name: "finance_news",
-  description: "通过真正的搜索API获取主流财经媒体的新闻内容，支持单个或多个关键词智能搜索",
-  parameters: {
-    type: "object",
+  description: "通过真正的搜索API获取主流财经媒体的新闻内容，支持单个或多个关键词智能搜索。示例：'药明康德'、'美联储 加息'、'比特币 监管'",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       query: {
-        type: "string",
-        description: "搜索关键词，支持单个关键词如'药明康德'、'腾讯'，或多个关键词用空格分开如'美联储 加息'、'比特币 监管'等。系统会智能搜索相关历史新闻"
+        type: "string" as const,
+        description: "搜索关键词，支持单个关键词如'药明康德'、'腾讯'，或多个关键词用空格分开如'美联储 加息'、'比特币 监管'等。系统会智能搜索相关历史新闻",
+        minLength: 1,
+        maxLength: 100
       }
     },
     required: ["query"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     query: string;
   }) {
@@ -33,7 +52,6 @@ export const financeNews = {
       
       const query = args.query.trim();
       
-      console.log(`开始搜索财经新闻，关键词: ${query}，使用有效的新闻接口`);
       
       const newsResults = await searchFinanceNews(query);
     
@@ -48,7 +66,6 @@ export const financeNews = {
         };
       }
     
-      console.log(`搜索完成，共找到 ${newsResults.length} 条新闻`);
       
       // 简化返回格式，参考stock_data的格式
       const formattedNews = newsResults.map((news) => {
@@ -64,7 +81,6 @@ export const financeNews = {
         ]
       };
     } catch (error) {
-      console.error('搜索财经新闻时发生错误:', error);
       return {
         content: [
           {
@@ -93,9 +109,7 @@ async function searchFinanceNews(query: string): Promise<NewsItem[]> {
       const sourceNames = ['百度新闻'];
       if (result.status === 'fulfilled') {
         news.push(...result.value);
-        console.log(`${sourceNames[index]} 搜索成功，获得 ${result.value.length} 条新闻`);
       } else {
-        console.error(`${sourceNames[index]} 搜索失败:`, result.reason);
       }
     });
 
@@ -104,7 +118,6 @@ async function searchFinanceNews(query: string): Promise<NewsItem[]> {
     return uniqueNews.slice(0, 20); // 最多返回20条
     
   } catch (error) {
-    console.error('并发搜索时发生错误:', error);
     return [];
   }
 }

@@ -5,38 +5,69 @@ import { formatHkCashflowData } from './companyPerformanceDetail_hk/hkCashflowFo
 
 export const companyPerformance_hk = {
   name: "company_performance_hk",
-  description: "获取港股上市公司综合表现数据，包括利润表、资产负债表、现金流量表等财务报表数据",
-  parameters: {
-    type: "object",
+  description: "获取港股公司财务数据。示例：companyPerformance_hk(ts_code='00700.HK', data_type='income', start_date='20230101', end_date='20231231')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       ts_code: {
-        type: "string",
-        description: "港股代码，如'00700.HK'表示腾讯控股，'00939.HK'表示建设银行"
+        type: "string" as const,
+        description: "港股代码，如'00700.HK'表示腾讯控股，'00939.HK'表示建设银行",
+        minLength: 1,
+        maxLength: 20
       },
       data_type: {
-        type: "string",
+        type: "string" as const,
         description: "数据类型：income(利润表)、balance(资产负债表)、cashflow(现金流量表)",
         enum: ["income", "balance", "cashflow"]
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20231231'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20231231'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       period: {
-        type: "string",
-        description: "特定报告期，格式为YYYYMMDD，如'20231231'表示2023年年报。指定此参数时将忽略start_date和end_date"
+        type: "string" as const,
+        description: "特定报告期，格式为YYYYMMDD，如'20231231'表示2023年年报。指定此参数时将忽略start_date和end_date",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       ind_name: {
-        type: "string",
-        description: "指定财务科目名称，如'营业额'、'毛利'、'除税后溢利'等，不指定则返回全部科目"
+        type: "string" as const,
+        description: "指定财务科目名称，如'营业额'、'毛利'、'除税后溢利'等，不指定则返回全部科目",
+        minLength: 1,
+        maxLength: 50
       }
     },
     required: ["ts_code", "data_type", "start_date", "end_date"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { 
     ts_code: string; 
     data_type: string; 
@@ -46,7 +77,6 @@ export const companyPerformance_hk = {
     ind_name?: string;
   }) {
     try {
-      console.log('港股公司综合表现查询参数:', args);
       
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
@@ -115,7 +145,6 @@ export const companyPerformance_hk = {
       }
 
     } catch (error) {
-      console.error('港股公司业绩查询错误:', error);
       return {
         content: [
           {

@@ -1,10 +1,12 @@
 import { TUSHARE_CONFIG } from '../config.js';
 import { resolveStockCodes } from '../utils/stockCodeResolver.js';
-import { 
-  calculateMACD, 
-  calculateKDJ, 
-  calculateRSI, 
-  calculateBOLL, 
+// 触发 logger.ts 编译（即使不立即使用，也需要保留引用）
+import { logger } from '../utils/logger.js';
+import {
+  calculateMACD,
+  calculateKDJ,
+  calculateRSI,
+  calculateBOLL,
   calculateSMA,
   parseIndicatorParams,
   formatIndicatorParams,
@@ -15,50 +17,76 @@ import {
 
 export const stockData = {
   name: "stock_data",
-  description: "获取指定股票/加密资产的历史行情数据，支持A股、美股、港股、外汇、期货、基金、债券逆回购、可转债、期权、加密货币(通过CoinGecko)",
-  parameters: {
-    type: "object",
+  description: "获取指定股票/加密资产的历史行情数据，支持A股、美股、港股、外汇、期货、基金、债券逆回购、可转债、期权、加密货币(通过Binance)。示例：stock_data(code='000001.SZ', market_type='cn', start_date='20240101', end_date='20240131', indicators='ma(5) macd(12,26,9)')",
+  inputSchema: {
+    type: "object" as const,
     properties: {
       code: {
-        type: "string",
-        description: "股票/合约/加密资产代码。股票示例：'000001.SZ'(A股平安银行)、'AAPL'(美股)、'00700.HK'(港股)、'USDCNH.FXCM'(外汇)、'CU2501.SHF'(期货)、'159919.SZ'(基金)、'204001.SH'(逆回购)、'113008.SH'(可转债)、'10001313.SH'(期权)。加密示例(需 market_type=crypto，Binance)：推荐标准写法 'BTCUSDT'、'ETHUSDT'、'USDCUSDT'、'FDUSDUSDT' 等；也兼容 'BTC-USDT' 或 'BTC/USDT'。常见报价币：USDT、USDC、FDUSD、TUSD、BUSD、BTC、ETH。注意：若写 'USD' 会自动映射为 'USDT'（如 'BTC-USD' → 'BTCUSDT'）。"
+        type: "string" as const,
+        description: "股票/合约/加密资产代码。股票示例：'000001.SZ'(A股平安银行)、'AAPL'(美股)、'00700.HK'(港股)、'USDCNH.FXCM'(外汇)、'CU2501.SHF'(期货)、'159919.SZ'(基金)、'204001.SH'(逆回购)、'113008.SH'(可转债)、'10001313.SH'(期权)。加密示例(需 market_type=crypto，Binance)：推荐标准写法 'BTCUSDT'、'ETHUSDT'、'USDCUSDT'、'FDUSDUSDT' 等；也兼容 'BTC-USDT' 或 'BTC/USDT'。常见报价币：USDT、USDC、FDUSD、TUSD、BUSD、BTC、ETH。注意：若写 'USD' 会自动映射为 'USDT'（如 'BTC-USD' → 'BTCUSDT'）。",
+        minLength: 1,
+        maxLength: 50
       },
       market_type: {
-        type: "string",
-        description: "市场类型（必需），可选值：cn(A股),us(美股),hk(港股),fx(外汇),futures(期货),fund(基金),repo(债券逆回购),convertible_bond(可转债),options(期权),crypto(加密货币/CoinGecko)"
+        type: "string" as const,
+        description: "市场类型（必需），可选值：cn(A股),us(美股),hk(港股),fx(外汇),futures(期货),fund(基金),repo(债券逆回购),convertible_bond(可转债),options(期权),crypto(加密货币/Binance)",
+        enum: ["cn", "us", "hk", "fx", "futures", "fund", "repo", "convertible_bond", "options", "crypto"]
       },
       start_date: {
-        type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        type: "string" as const,
+        description: "起始日期，格式为YYYYMMDD，如'20230101'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       end_date: {
-        type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'"
+        type: "string" as const,
+        description: "结束日期，格式为YYYYMMDD，如'20230131'",
+        pattern: "^[0-9]{8}$",
+        minLength: 8,
+        maxLength: 8
       },
       indicators: {
-        type: "string",
-        description: "需要计算的技术指标，多个指标用空格分隔。支持的指标：macd(MACD指标)、rsi(相对强弱指标)、kdj(随机指标)、boll(布林带)、ma(均线指标)。必须明确指定参数，例如：'macd(12,26,9) rsi(14) kdj(9,3,3) boll(20,2) ma(10)'"
+        type: "string" as const,
+        description: "需要计算的技术指标，多个指标用空格分隔。支持的指标：macd(MACD指标)、rsi(相对强弱指标)、kdj(随机指标)、boll(布林带)、ma(均线指标)。必须明确指定参数，例如：'macd(12,26,9) rsi(14) kdj(9,3,3) boll(20,2) ma(10)'",
+        minLength: 1,
+        maxLength: 200
       }
     },
     required: ["code", "market_type"]
-  },
+  } as const,
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      content: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            type: { type: "string" as const },
+            text: { type: "string" as const }
+          },
+          required: ["type", "text"]
+        }
+      },
+      isError: { type: "boolean" as const }
+    },
+    required: ["content"]
+  } as const,
   async run(args: { code: string; market_type: string; start_date?: string; end_date?: string; indicators?: string }) {
+    const startTime = Date.now();
     try {
-      // 添加调试日志
-      console.log('接收到的参数:', args);
-      
+      logger.debug('开始获取股票数据', { code: args.code, market_type: args.market_type });
+
       // 检查market_type参数
       if (!args.market_type) {
         throw new Error('请指定market_type参数：cn(A股)、us(美股)、hk(港股)、fx(外汇)、futures(期货)、fund(基金)、repo(债券逆回购)、convertible_bond(可转债)、options(期权)');
       }
       
       const marketType = args.market_type.trim().toLowerCase();
-      console.log(`使用的市场类型: ${marketType}`);
-      console.log(`使用Tushare API获取${marketType}市场股票${args.code}的行情数据`);
       
       // 解析技术指标参数
       const requestedIndicators = args.indicators ? args.indicators.trim().split(/\s+/) : [];
-      console.log('请求的技术指标:', requestedIndicators);
       
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
@@ -83,7 +111,6 @@ export const stockData = {
       if (requestedIndicators.length > 0) {
         const requiredDays = calculateRequiredDays(requestedIndicators);
         actualStartDate = calculateExtendedStartDate(userStartDate, requiredDays);
-        console.log(`技术指标需要${requiredDays}天历史数据，扩展开始日期从 ${userStartDate} 到 ${actualStartDate}`);
       }
 
       // 验证市场类型
@@ -94,7 +121,6 @@ export const stockData = {
       
       // 加密货币市场（Binance）分支：
       if (marketType === 'crypto') {
-        console.log(`使用 Binance 获取加密资产 ${args.code} 的逐日K线 (OHLCV)`);
 
         // 日期与符号解析
         const toYMD = (d: Date): string => {
@@ -150,7 +176,6 @@ export const stockData = {
         const maxPages = 100; // 安全上限，防止极端情况下的无限循环
         while (startMs < endMs && pageIndex < maxPages) {
           const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=1d&startTime=${startMs}&endTime=${endMs}&limit=1000`;
-          console.log(`Binance Klines URL[${pageIndex + 1}]:`, url);
 
           const resp = await fetch(url);
           if (!resp.ok) {
@@ -201,7 +226,6 @@ export const stockData = {
           stockData = stockData.filter(r => r.trade_date >= userStartDate && r.trade_date <= userEndDate);
         }
         stockData.sort((a, b) => b.trade_date.localeCompare(a.trade_date));
-        console.log(`Binance 分页返回 共${allKlines.length} 根K线，过滤后 ${stockData.length} 条记录`);
         
         // 计算技术指标
         let indicators: Record<string, any> = {};
@@ -238,7 +262,6 @@ export const stockData = {
                   throw new Error(`不支持的技术指标: ${name}`);
               }
             } catch (e) {
-              console.error(`解析技术指标 ${indicator} 时出错:`, e);
               throw new Error(`技术指标参数错误: ${indicator}`);
             }
           }
@@ -258,7 +281,6 @@ export const stockData = {
           });
           // 过滤到用户指定区间
           stockData = filterDataToUserRange(stockData, userStartDate, userEndDate);
-          console.log(`过滤到用户请求时间范围，剩余${stockData.length}条记录`);
         }
         
         // 表格输出（走默认分支样式）
@@ -447,15 +469,12 @@ export const stockData = {
           break;
       }
       
-      console.log(`选择的API接口: ${params.api_name}`);
-      console.log(`字段设置: 返回所有可用字段`);
       
       // 设置请求超时
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
       
       try {
-        console.log(`请求Tushare API: ${params.api_name}，参数:`, params.params);
         
         // 发送请求
         const response = await fetch(TUSHARE_API_URL, {
@@ -495,7 +514,6 @@ export const stockData = {
           return result;
         });
         
-                console.log(`成功获取到${stockData.length}条${args.code}股票数据记录（扩展数据范围）`);
         
         // 对A股强制应用前复权（qfq）：使用最新交易日因子进行归一
         if (marketType === 'cn' && stockData.length > 0) {
@@ -553,12 +571,9 @@ export const stockData = {
                 }
                 return row;
               });
-              console.log(`已应用前复权(基于最新交易日因子)到 ${args.code} 的OHLC价格`);
             } else {
-              console.warn('未找到最新交易日复权因子，跳过前复权');
             }
           } catch (e) {
-            console.warn('应用前复权失败，继续返回未复权数据:', e);
           }
         }
         
@@ -631,7 +646,6 @@ export const stockData = {
                   throw new Error(`不支持的技术指标: ${name}，支持的指标：macd(12,26,9)、rsi(14)、kdj(9,3,3)、boll(20,2)、ma(周期)`);
               }
             } catch (error) {
-              console.error(`解析技术指标 ${indicator} 时出错:`, error);
               throw new Error(`技术指标参数错误: ${indicator}`);
             }
           }
@@ -656,8 +670,7 @@ export const stockData = {
          // 过滤数据到用户请求的时间范围
          if (requestedIndicators.length > 0) {
            stockData = filterDataToUserRange(stockData, userStartDate, userEndDate);
-           console.log(`过滤到用户请求时间范围，剩余${stockData.length}条记录`);
-         }
+          }
         
         // 生成市场类型标题
         const marketTitleMap: Record<string, string> = {
@@ -1060,12 +1073,16 @@ export const stockData = {
             }
           ]
         };
+
+        const duration = Date.now() - startTime;
+        logger.toolCall('stock_data', args, duration);
+
       } finally {
         clearTimeout(timeoutId);
       }
     } catch (error) {
-      console.error("获取股票数据失败:", error);
-      
+      logger.toolError('stock_data', error, args);
+
       return {
         content: [
           {
@@ -1076,4 +1093,6 @@ export const stockData = {
       };
     }
   }
-}; 
+};
+
+// MCP 标准工具 - 已清理所有 console 输出

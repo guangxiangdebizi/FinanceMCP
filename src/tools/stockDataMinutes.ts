@@ -10,33 +10,59 @@ import { resolveStockCodes } from '../utils/stockCodeResolver.js';
  */
 export const stockDataMinutes = {
   name: 'stock_data_minutes',
-  description: '获取分钟K线数据：A股/加密。支持1MIN/5MIN/15MIN/30MIN/60MIN，时间范围需提供起止日期时间',
-  parameters: {
-    type: 'object',
+  description: '获取分钟K线数据：A股/加密。支持1MIN/5MIN/15MIN/30MIN/60MIN，时间范围需提供起止日期时间。示例：stock_data_minutes(code="600519.SH", market_type="cn", start_datetime="20240101093000", end_datetime="20240101150000", freq="1MIN")',
+  inputSchema: {
+    type: 'object' as const,
     properties: {
       code: {
-        type: 'string',
-        description: "股票代码，如 '600519.SH' 或 '000001.SZ'"
+        type: 'string' as const,
+        description: "股票代码，如 '600519.SH' 或 '000001.SZ'。加密货币如 'BTCUSDT'、'ETHUSDT'",
+        minLength: 1,
+        maxLength: 50
       },
       market_type: {
-        type: 'string',
-        description: "市场类型：'cn'（A股，Tushare）、'crypto'（加密币对，Binance）"
+        type: 'string' as const,
+        description: "市场类型：'cn'（A股，Tushare）、'crypto'（加密币对，Binance）",
+        enum: ['cn', 'crypto']
       },
       start_datetime: {
-        type: 'string',
-        description: "起始日期时间，支持 'YYYYMMDDHHmmss' 或 'YYYY-MM-DD HH:mm:ss'"
+        type: 'string' as const,
+        description: "起始日期时间，支持 'YYYYMMDDHHmmss' 或 'YYYY-MM-DD HH:mm:ss'",
+        minLength: 14,
+        maxLength: 19
       },
       end_datetime: {
-        type: 'string',
-        description: "结束日期时间，支持 'YYYYMMDDHHmmss' 或 'YYYY-MM-DD HH:mm:ss'"
+        type: 'string' as const,
+        description: "结束日期时间，支持 'YYYYMMDDHHmmss' 或 'YYYY-MM-DD HH:mm:ss'",
+        minLength: 14,
+        maxLength: 19
       },
       freq: {
-        type: 'string',
-        description: "分钟周期：1MIN/5MIN/15MIN/30MIN/60MIN（不区分大小写）"
+        type: 'string' as const,
+        description: "分钟周期：1MIN/5MIN/15MIN/30MIN/60MIN（不区分大小写）",
+        enum: ['1MIN', '5MIN', '15MIN', '30MIN', '60MIN', '1min', '5min', '15min', '30min', '60min']
       }
     },
     required: ['code', 'market_type', 'start_datetime', 'end_datetime', 'freq']
-  },
+  } as const,
+  outputSchema: {
+    type: 'object' as const,
+    properties: {
+      content: {
+        type: 'array' as const,
+        items: {
+          type: 'object' as const,
+          properties: {
+            type: { type: 'string' as const },
+            text: { type: 'string' as const }
+          },
+          required: ['type', 'text']
+        }
+      },
+      isError: { type: 'boolean' as const }
+    },
+    required: ['content']
+  } as const,
   async run(args: { code: string; market_type: string; start_datetime: string; end_datetime: string; freq: string }) {
     try {
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
