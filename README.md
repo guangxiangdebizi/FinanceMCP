@@ -1,7 +1,7 @@
 [![English](https://img.shields.io/badge/English-README_EN.md-blue?logo=github)](README_EN.md)
 
 <div align="center">
-  <img src="images/LOGO.png" alt="MarkiNote Logo" width="290"/>
+  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
 </div>
 
 <div align="center">
