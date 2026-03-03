@@ -1,16 +1,15 @@
 [![中文版](https://img.shields.io/badge/中文-README.md-red?logo=github)](README.md)
-
-<div align="center">
-  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
-</div>
-
-<div align="center">
   
 # FinanceMCP - Professional Financial Data MCP Server 🚀
 
+<div align="center">
+  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
+  
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
 
 **Professional financial data server based on MCP protocol, integrating Tushare API to provide real-time financial data and technical indicator analysis for Claude and other AI assistants.**
+
+</div>
 
 ## 📑 Table of Contents
 
