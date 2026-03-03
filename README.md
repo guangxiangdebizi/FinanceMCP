@@ -6,9 +6,9 @@
   <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
 
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
-</div>
 
 **基于MCP协议的专业金融数据服务器，集成Tushare API，为Claude等AI助手提供实时金融数据和技术指标分析。**
+</div>
 
 ## 📑 目录
 
