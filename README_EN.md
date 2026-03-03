@@ -1,5 +1,11 @@
 [![中文版](https://img.shields.io/badge/中文-README.md-red?logo=github)](README.md)
 
+<div align="center">
+  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
+</div>
+
+<div align="center">
+  
 # FinanceMCP - Professional Financial Data MCP Server 🚀
 
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
