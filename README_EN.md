@@ -1,6 +1,6 @@
 [![中文版](https://img.shields.io/badge/中文-README.md-red?logo=github)](README.md)
   
-# FinanceMCP - Professional Financial Data MCP Server 🚀
+# FinanceMCP (Synapse) - Professional Financial Data MCP Server 🚀
 
 <div align="center">
   <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
