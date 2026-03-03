@@ -1,14 +1,12 @@
 [![English](https://img.shields.io/badge/English-README_EN.md-blue?logo=github)](README_EN.md)
-
-<div align="center">
-  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
-</div>
-
-<div align="center">
   
 # FinanceMCP - 专业金融数据MCP服务器 🚀
 
+<div align="center">
+  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
+
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
+</div>
 
 **基于MCP协议的专业金融数据服务器，集成Tushare API，为Claude等AI助手提供实时金融数据和技术指标分析。**
 
