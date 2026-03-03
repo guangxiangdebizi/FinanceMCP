@@ -1,5 +1,11 @@
 [![English](https://img.shields.io/badge/English-README_EN.md-blue?logo=github)](README_EN.md)
 
+<div align="center">
+  <img src="images/LOGO.png" alt="MarkiNote Logo" width="290"/>
+</div>
+
+<div align="center">
+  
 # FinanceMCP - 专业金融数据MCP服务器 🚀
 
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
