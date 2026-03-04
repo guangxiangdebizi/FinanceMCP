@@ -521,9 +521,21 @@ npm run start:http
 
 ## 🆕 最新更新
 
+### 🔧 版本 4.7.1 - Streamable HTTP 兼容性补丁
+
+**最新更新**：修复部分 MCP 客户端调用 `resources/templates/list` 时返回 `Method not found` 的兼容性问题。
+
+<details>
+<summary><strong>🎯 v4.7.1 补丁内容</strong></summary>
+
+- **🛠️ 协议兼容修复**：新增 `resources/templates/list` 方法处理，返回空模板列表，避免 Streamable HTTP 初始化报错。
+- **✅ 部署更稳定**：兼容会主动探测 `resources/templates/list` 的 MCP 客户端配置。
+
+</details>
+
 ### 💰 版本 4.7.0 - 板块资金流向功能
 
-**最新更新**：资金流向工具全面升级，新增东方财富板块资金流向功能！
+资金流向工具全面升级，新增东方财富板块资金流向功能。
 
 <details>
 <summary><strong>🎯 v4.7.0 新功能</strong></summary>

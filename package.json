@@ -1,6 +1,6 @@
 {
   "name": "finance-mcp",
-  "version": "4.7.0",
+  "version": "4.7.1",
   "description": "A Model Context Protocol server",
   "type": "module",
   "bin": {

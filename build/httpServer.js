@@ -206,6 +206,10 @@ app.post('/mcp', async (req, res) => {
         console.log(`📋 [MCP-resources/list] Not supported, returning empty list`);
         return res.json({ jsonrpc: '2.0', result: { resources: [] }, id: body.id });
     }
+    if (method === 'resources/templates/list') {
+        console.log(`📋 [MCP-resources/templates/list] Not supported, returning empty list`);
+        return res.json({ jsonrpc: '2.0', result: { resourceTemplates: [] }, id: body.id });
+    }
     if (method === 'prompts/list') {
         console.log(`📋 [MCP-prompts/list] Not supported, returning empty list`);
         return res.json({ jsonrpc: '2.0', result: { prompts: [] }, id: body.id });
