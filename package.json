@@ -4,8 +4,8 @@
   "description": "A Model Context Protocol server",
   "type": "module",
   "bin": {
-    "finance-mcp": "./build/index.js",
-    "finance-mcp-http": "./build/httpServer.js"
+    "finance-mcp": "build/index.js",
+    "finance-mcp-http": "build/httpServer.js"
   },
   "files": [
     "build"
