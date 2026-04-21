@@ -124,7 +124,7 @@
 | 👨‍💼 **fund_manager_by_name** | 基金经理查询 | 个人背景、管理基金列表 |
 | 🪙 **convertible_bond** | 可转债数据 | 基本信息+发行数据+转换条款 |
 | 🔄 **block_trade** | 大宗交易数据 | 交易详情+交易对手信息 |
-| 💹 **money_flow** | 资金流向数据 | 个股/大盘/板块资金流向，主力/超大单/大单/中单/小单分析 |
+| 💹 **money_flow** | 资金流向数据 | 个股(moneyflow,2000分)/大盘(moneyflow_mkt_dc,5000分)/板块(moneyflow_ind_dc,6000分)，主力+超大/大/中/小单分析 |
 | 💰 **margin_trade** | 融资融券数据 | 4个API：标的股票/汇总/明细/转融券 |
 | 🐯 **dragon_tiger_inst** | 龙虎榜机构明细 | 指定交易日(可选代码)，买卖额/比例/净额/理由表格 |
 | 🔥 **hot_news_7x24** | 7×24 热点 | 基于 Tushare 最新批次（单次至多1500条），内容相似度80%去重，条目间以`---`分隔 |
@@ -202,7 +202,7 @@
 <summary><strong>💰 资金流向分析</strong></summary>
 
 ```
-"查询证券板块(BK0447)近一个月的资金流向情况"
+"查询证券板块(BK0486.DC)近一个月的资金流向情况"
 "分析2024年9月27日所有行业板块的资金流入排名"
 "比亚迪(002594.SZ)最近的主力资金流向和超大单净流入"
 "查看大盘整体资金流向，分析市场情绪"
@@ -521,9 +521,21 @@ npm run start:http
 
 ## 🆕 最新更新
 
-### 🔧 版本 4.7.1 - Streamable HTTP 兼容性补丁
+### 💹 版本 4.7.2 - money_flow 个股接口切换 & 文案同步
 
-**最新更新**：修复部分 MCP 客户端调用 `resources/templates/list` 时返回 `Method not found` 的兼容性问题。
+**最新更新**：修复个股资金流向被 Tushare 限制"每天 2 次"的问题，同时同步工具描述与 README 文案。
+
+<details>
+<summary><strong>🎯 v4.7.2 修复内容</strong></summary>
+
+- **💹 个股接口切换**：`money_flow` 工具的**个股**数据源由东财试用接口 `moneyflow_dc` 切换为 Tushare 标准接口 `moneyflow`（2000 积分即可正式调取），彻底解决高积分 Token 仍被限制"每天 2 次"的问题。字段做兼容映射：主力净额使用 `net_mf_amount`，各档净额按"买入-卖出"计算，量纲统一为元。
+- **⚠️ 大盘 / 板块**：Tushare 无非 DC 替代接口，仍使用 `moneyflow_mkt_dc` / `moneyflow_ind_dc`。遇到积分不足导致的限流，会返回清晰的"访问受限 + 去 tushare.pro 查看积分"提示，不再是晦涩的原始错误。
+- **📝 工具 description & 参数示例同步**：明确三类接口名称、积分门槛与字段缺失情况；板块代码示例从 `BK0447` 修正为 `BK0486.DC`（带 `.DC` 后缀，避免查询返回 0 条）。
+- **📋 个股表格增加提示**：说明 `收盘价 / 涨跌% / 净占比%` 因接口不返回而显示 N/A 属正常现象。
+
+</details>
+
+### 🔧 版本 4.7.1 - Streamable HTTP 兼容性补丁
 
 <details>
 <summary><strong>🎯 v4.7.1 补丁内容</strong></summary>
@@ -550,7 +562,7 @@ npm run start:http
 ```javascript
 // 查询特定板块资金流向
 {
-  "ts_code": "BK0447",  // 东财板块代码
+  "ts_code": "BK0486.DC",  // 东财板块代码（带 .DC 后缀）
   "start_date": "20240901",
   "end_date": "20240930"
 }

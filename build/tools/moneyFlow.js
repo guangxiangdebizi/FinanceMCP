@@ -1,7 +1,14 @@
 import { TUSHARE_CONFIG } from '../config.js';
 export const moneyFlow = {
     name: "money_flow",
-    description: "获取个股、大盘和板块资金流向数据，包括主力资金、超大单、大单、中单、小单的净流入净额和净占比数据",
+    description: [
+        "获取个股/大盘/板块的资金流向数据（主力、超大单、大单、中单、小单的净流入净额与净占比）。",
+        "数据源与接口：",
+        "1) 个股 → Tushare 标准接口 moneyflow（沪深A股主动买卖单统计，2000 积分可正式调取；个股无涨跌幅/净占比字段，输出会显示 N/A）。",
+        "2) 大盘 → Tushare 东方财富接口 moneyflow_mkt_dc（5000 积分可正式调取）。",
+        "3) 板块（行业/概念/地域）→ Tushare 东方财富接口 moneyflow_ind_dc（6000 积分可正式调取，板块代码形如 'BK0486.DC'）。",
+        "注意：大盘与板块接口为东财数据源，若 Token 积分未达门槛，Tushare 会限制为每小时/每日仅 2 次试用，此时会返回明确的访问受限提示。"
+    ].join(" "),
     parameters: {
         type: "object",
         properties: {
@@ -11,7 +18,7 @@ export const moneyFlow = {
             },
             ts_code: {
                 type: "string",
-                description: "股票代码或板块代码。个股如'000001.SZ'，板块如'BK0447'(东财板块代码)。不填写则查询大盘资金流向"
+                description: "股票代码或板块代码。个股形如 '000001.SZ'；东财板块代码带 .DC 后缀，形如 'BK0486.DC'（可先用 trade_date + query_type='sector' 查全板块列表以获取代码）。不填写则查询大盘资金流向。"
             },
             start_date: {
                 type: "string",
@@ -92,6 +99,8 @@ export const moneyFlow = {
     }
 };
 // 获取大盘资金流向数据
+// 说明：Tushare 没有非 DC 版本的大盘资金流向接口，只能使用 moneyflow_mkt_dc；
+// 该接口需 5000 积分才能正式调取，低积分 Token 每日仅能试用 2 次。
 async function fetchMarketMoneyFlow(startDate, endDate, apiKey, apiUrl) {
     const params = {
         api_name: "moneyflow_mkt_dc",
@@ -105,20 +114,72 @@ async function fetchMarketMoneyFlow(startDate, endDate, apiKey, apiUrl) {
     return await callTushareAPI(params, apiUrl);
 }
 // 获取个股资金流向数据
+// 使用 Tushare 标准接口 moneyflow（2000积分可正式调用），
+// 而非 moneyflow_dc（东财试用接口，低积分每日仅可试用2次，故弃用）。
 async function fetchStockMoneyFlow(tsCode, startDate, endDate, apiKey, apiUrl) {
     const params = {
-        api_name: "moneyflow_dc",
+        api_name: "moneyflow",
         token: apiKey,
         params: {
             ts_code: tsCode,
             start_date: startDate,
             end_date: endDate
         },
-        fields: "ts_code,trade_date,close,pct_change,net_amount,net_amount_rate,buy_elg_amount,buy_elg_amount_rate,buy_lg_amount,buy_lg_amount_rate,buy_md_amount,buy_md_amount_rate,buy_sm_amount,buy_sm_amount_rate"
+        // moneyflow 返回的是分买卖的量与金额，以及 net_mf_amount（万元）
+        fields: "ts_code,trade_date,buy_sm_amount,sell_sm_amount,buy_md_amount,sell_md_amount,buy_lg_amount,sell_lg_amount,buy_elg_amount,sell_elg_amount,net_mf_amount"
     };
-    return await callTushareAPI(params, apiUrl);
+    const result = await callTushareAPI(params, apiUrl);
+    // 将 moneyflow 的字段映射/归一化为下游格式化函数期望的字段名：
+    //   net_amount           = net_mf_amount（主力净流入，万元 → 元，保持与 DC 版本同量纲）
+    //   buy_elg_amount       = 超大单净额 = buy_elg_amount - sell_elg_amount
+    //   buy_lg_amount        = 大单净额   = buy_lg_amount  - sell_lg_amount
+    //   buy_md_amount        = 中单净额   = buy_md_amount  - sell_md_amount
+    //   buy_sm_amount        = 小单净额   = buy_sm_amount  - sell_sm_amount
+    // moneyflow 接口不返回 close / pct_change / *_rate 占比字段，置空由格式化层显示 N/A。
+    const WAN = 10000; // DC 接口单位为元，moneyflow 单位为万元，这里统一成"元"
+    const toNum = (v) => {
+        const n = parseFloat(v);
+        return isNaN(n) ? 0 : n;
+    };
+    const mapped = result.data.map((row) => {
+        const elgNet = (toNum(row.buy_elg_amount) - toNum(row.sell_elg_amount)) * WAN;
+        const lgNet = (toNum(row.buy_lg_amount) - toNum(row.sell_lg_amount)) * WAN;
+        const mdNet = (toNum(row.buy_md_amount) - toNum(row.sell_md_amount)) * WAN;
+        const smNet = (toNum(row.buy_sm_amount) - toNum(row.sell_sm_amount)) * WAN;
+        const netAmt = toNum(row.net_mf_amount) * WAN;
+        return {
+            ts_code: row.ts_code,
+            trade_date: row.trade_date,
+            close: '',
+            pct_change: '',
+            net_amount: netAmt,
+            net_amount_rate: '',
+            buy_elg_amount: elgNet,
+            buy_elg_amount_rate: '',
+            buy_lg_amount: lgNet,
+            buy_lg_amount_rate: '',
+            buy_md_amount: mdNet,
+            buy_md_amount_rate: '',
+            buy_sm_amount: smNet,
+            buy_sm_amount_rate: ''
+        };
+    });
+    return {
+        data: mapped,
+        fields: [
+            'ts_code', 'trade_date', 'close', 'pct_change',
+            'net_amount', 'net_amount_rate',
+            'buy_elg_amount', 'buy_elg_amount_rate',
+            'buy_lg_amount', 'buy_lg_amount_rate',
+            'buy_md_amount', 'buy_md_amount_rate',
+            'buy_sm_amount', 'buy_sm_amount_rate'
+        ]
+    };
 }
 // 获取板块资金流向数据（东财）
+// 说明：板块（行业/概念/地域）资金流向使用 DC 板块代码体系（如 BK0447），
+// Tushare 没有等价的标准接口，只能使用 moneyflow_ind_dc；
+// 该接口需 6000 积分才能正式调取，低积分 Token 每日仅能试用 2 次。
 async function fetchSectorMoneyFlow(tsCode, tradeDate, startDate, endDate, contentType, apiKey, apiUrl) {
     const params = {
         api_name: "moneyflow_ind_dc",
@@ -161,7 +222,15 @@ async function callTushareAPI(params, apiUrl) {
         }
         const data = await response.json();
         if (data.code !== 0) {
-            throw new Error(`Tushare API错误: ${data.msg}`);
+            const rawMsg = data.msg || '';
+            // 对 Tushare 常见的积分不足 / 试用次数耗尽错误，给出更清晰的指引
+            const hitQuota = /(权限|积分|次数|频次|每天|每日|试用|超出)/i.test(rawMsg);
+            if (hitQuota) {
+                throw new Error(`Tushare API 访问受限（接口：${params.api_name}）：${rawMsg}。\n` +
+                    `提示：该接口对积分有门槛，未达标时每日仅能试用少数几次。` +
+                    `请在 https://tushare.pro 查看接口所需积分并提升权限后重试。`);
+            }
+            throw new Error(`Tushare API错误 (${params.api_name}): ${rawMsg}`);
         }
         if (!data.data || !data.data.items) {
             throw new Error(`未找到资金流向数据`);
@@ -239,12 +308,17 @@ function formatMoneyFlowData(data, fields, queryType, tsCode) {
     output += `\n## 📈 最近资金流向趋势\n\n`;
     recentData.forEach(item => {
         const netAmount = parseFloat(item.net_amount) || 0;
-        const netAmountRate = parseFloat(item.net_amount_rate) || 0;
+        const rateRaw = item.net_amount_rate;
+        const hasRate = rateRaw !== '' && rateRaw !== null && rateRaw !== undefined && !isNaN(parseFloat(rateRaw));
         const trend = netAmount > 0 ? '🟢' : '🔴';
         const direction = netAmount > 0 ? '净流入' : '净流出';
-        output += `${item.trade_date} ${trend} 主力${direction} ${formatMoney(Math.abs(netAmount))} (${Math.abs(netAmountRate).toFixed(2)}%)\n`;
+        const rateSuffix = hasRate ? ` (${Math.abs(parseFloat(rateRaw)).toFixed(2)}%)` : '';
+        output += `${item.trade_date} ${trend} 主力${direction} ${formatMoney(Math.abs(netAmount))}${rateSuffix}\n`;
     });
-    output += `\n---\n*数据来源: [Tushare](https://tushare.pro) - 东方财富(DC)*`;
+    const sourceLabel = queryType === 'market' ? 'Tushare · 东方财富 (moneyflow_mkt_dc)'
+        : queryType === 'sector' ? 'Tushare · 东方财富 (moneyflow_ind_dc)'
+            : 'Tushare 标准接口 (moneyflow，沪深A股主动买卖单统计)';
+    output += `\n---\n*数据来源: [${sourceLabel}](https://tushare.pro)*`;
     return output;
 }
 // 格式化大盘资金流向表格
@@ -273,6 +347,7 @@ function formatMarketFlowTable(data) {
 // 格式化个股资金流向表格
 function formatStockFlowTable(data) {
     let output = `## 📋 个股资金流向明细\n\n`;
+    output += `> 说明：使用 Tushare 标准接口 moneyflow（主动买卖单统计）。该接口不提供「收盘价 / 涨跌% / 净占比%」字段，故相关列显示为 N/A，属正常现象。\n\n`;
     output += `| 交易日期 | 收盘价 | 涨跌% | 主力净流入(万元) | 净占比% | 超大单净流入(万元) | 大单净流入(万元) | 中单净流入(万元) | 小单净流入(万元) |\n`;
     output += `|---------|--------|------|------------|--------|------------|------------|------------|------------|\n`;
     data.forEach(item => {
