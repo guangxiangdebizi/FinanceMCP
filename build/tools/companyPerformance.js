@@ -18,7 +18,7 @@ import { formatTop10Holders, formatTop10FloatHolders } from './companyPerformanc
 import { formatPledgeStat, formatPledgeDetail } from './companyPerformanceDetail/pledgeFormatters.js';
 export const companyPerformance = {
     name: "company_performance",
-    description: "获取上市公司综合表现数据，包括业绩预告、业绩快报、财务指标、分红送股、主营业务构成、股东变动数据、管理层信息、公司基本信息、资产负债表、现金流量表、利润表等完整财务报表数据",
+    description: "获取上市公司综合表现数据，包括业绩预告、业绩快报、财务指标、分红送股、主营业务构成、股东变动数据、管理层信息、公司基本信息、资产负债表、现金流量表、利润表、每日估值指标、股票基本信息和新股上市数据",
     parameters: {
         type: "object",
         properties: {
@@ -28,7 +28,7 @@ export const companyPerformance = {
             },
             data_type: {
                 type: "string",
-                description: "数据类型：forecast(业绩预告)、express(业绩快报)、indicators(财务指标-包含盈利能力/偿债能力/营运能力/成长能力等全面指标)、dividend(分红送股)、mainbz(主营业务构成-融合产品/地区/行业)、holder_number(股东人数)、holder_trade(股东增减持)、managers(管理层信息)、audit(财务审计意见)、company_basic(公司基本信息)、balance_basic(核心资产负债表)、balance_all(完整资产负债表)、cashflow_basic(基础现金流)、cashflow_all(完整现金流)、income_basic(核心利润表)、income_all(完整利润表)、share_float(限售股解禁)、repurchase(股票回购)、top10_holders(前十大股东)、top10_floatholders(前十大流通股东)、pledge_stat(股权质押统计)、pledge_detail(股权质押明细)、daily_basic(每日指标-市盈率/市净率/换手率/市值等)、stk_basic(股票基本信息-行业/上市日期/市场等)",
+                description: "数据类型：forecast(业绩预告)、express(业绩快报)、indicators(财务指标-包含盈利能力/偿债能力/营运能力/成长能力等全面指标)、dividend(分红送股)、mainbz(主营业务构成-融合产品/地区/行业)、holder_number(股东人数)、holder_trade(股东增减持)、managers(管理层信息)、audit(财务审计意见)、company_basic(公司基本信息)、balance_basic(核心资产负债表)、balance_all(完整资产负债表)、cashflow_basic(基础现金流)、cashflow_all(完整现金流)、income_basic(核心利润表)、income_all(完整利润表)、share_float(限售股解禁)、repurchase(股票回购)、top10_holders(前十大股东)、top10_floatholders(前十大流通股东)、pledge_stat(股权质押统计)、pledge_detail(股权质押明细)、daily_basic(每日指标-市盈率/市净率/换手率/市值等)、stk_basic(股票基本信息-行业/上市日期/市场等)、ipo(新股上市数据-按发行/上市日期查询IPO信息)",
                 enum: ["forecast", "express", "indicators", "dividend", "mainbz", "holder_number", "holder_trade", "managers", "audit", "company_basic", "balance_basic", "balance_all", "cashflow_basic", "cashflow_all", "income_basic", "income_all", "share_float", "repurchase", "top10_holders", "top10_floatholders", "pledge_stat", "pledge_detail", "daily_basic", "stk_basic", "ipo"]
             },
             start_date: {

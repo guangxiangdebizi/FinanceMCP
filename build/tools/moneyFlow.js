@@ -3,11 +3,12 @@ import { callTushare } from '../utils/tushareClient.js';
 export const moneyFlow = {
     name: "money_flow",
     description: [
-        "获取个股/大盘/板块的资金流向数据（主力、超大单、大单、中单、小单的净流入净额与净占比）。",
+        "获取个股/大盘/板块/北向资金的资金流向数据（主力、超大单、大单、中单、小单的净流入净额与净占比，以及港股通持股/沪深港通十大成交股）。",
         "数据源与接口：",
         "1) 个股 → Tushare 标准接口 moneyflow（沪深A股主动买卖单统计，2000 积分可正式调取；个股无涨跌幅/净占比字段，输出会显示 N/A）。",
         "2) 大盘 → Tushare 东方财富接口 moneyflow_mkt_dc（5000 积分可正式调取）。",
         "3) 板块（行业/概念/地域）→ Tushare 东方财富接口 moneyflow_ind_dc（6000 积分可正式调取，板块代码形如 'BK0486.DC'）。",
+        "4) 北向资金 → hk_hold / hsgt_top10（港股通持股明细 / 沪深港通十大成交股）。",
         "注意：大盘与板块接口为东财数据源，若 Token 积分未达门槛，Tushare 会限制为每小时/每日仅 2 次试用，此时会返回明确的访问受限提示。"
     ].join(" "),
     parameters: {

@@ -2,17 +2,17 @@ import { TUSHARE_CONFIG } from '../config.js';
 import { callTushare } from '../utils/tushareClient.js';
 export const convertibleBond = {
     name: "convertible_bond",
-    description: "获取可转债非行情数据，支持两种查询方式：1)使用issue类型按时间范围查询可转债发行数据；2)使用info类型按代码查询可转债详细信息",
+    description: "获取可转债非行情与生命周期数据，支持发行数据、详细信息、强赎数据和转股数据查询",
     parameters: {
         type: "object",
         properties: {
             ts_code: {
                 type: "string",
-                description: "可转债代码，如'110001.SH'表示国电转债，'128001.SZ'表示平安转债。配合info类型使用可查询详细信息"
+                description: "可转债代码，如'110001.SH'表示国电转债，'128001.SZ'表示平安转债。info/call/conversion 类型通常需要提供该参数"
             },
             data_type: {
                 type: "string",
-                description: "数据类型：issue(可转债发行数据)、info(可转债详细信息，通过代码查询，已废弃，建议改用 basic+issue)、call(强赎数据，需ts_code)、conversion(转股数据，需ts_code)",
+                description: "数据类型：issue(可转债发行数据)、info(可转债详细信息，通过代码查询，已废弃，建议改用显式分支)、call(强赎数据，需ts_code)、conversion(转股数据，需ts_code)",
                 enum: ["issue", "info", "call", "conversion"]
             },
             start_date: {

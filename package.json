@@ -1,7 +1,7 @@
 {
   "name": "finance-mcp",
-  "version": "4.7.2",
-  "description": "A Model Context Protocol server",
+  "version": "4.8.0",
+  "description": "Professional financial data MCP server with Tushare-based multi-market and aggregate analytics",
   "type": "module",
   "bin": {
     "finance-mcp": "build/index.js",
