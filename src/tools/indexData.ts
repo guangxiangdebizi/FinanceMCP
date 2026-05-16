@@ -1,8 +1,9 @@
 import { TUSHARE_CONFIG } from '../config.js';
+import { callTushare } from '../utils/tushareClient.js';
 
 export const indexData = {
   name: "index_data",
-  description: "获取指定股票指数的数据，支持日线行情和指数基本信息",
+  description: "获取指定股票指数的数据，支持日线行情、指数基本信息和估值指标",
   parameters: {
     type: "object",
     properties: {
@@ -12,16 +13,16 @@ export const indexData = {
       },
       start_date: {
         type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'（data_type=daily时有效）"
+        description: "起始日期，格式为YYYYMMDD，如'20230101'（data_type=daily/valuation时有效）"
       },
       end_date: {
         type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'（data_type=daily时有效）"
+        description: "结束日期，格式为YYYYMMDD，如'20230131'（data_type=daily/valuation时有效）"
       },
       data_type: {
         type: "string",
-        description: "数据类型：daily(日线行情，默认)、basic(指数基本信息-名称/发布方/基期/权重规则等)",
-        enum: ["daily", "basic"]
+        description: "数据类型：daily(日线行情，默认)、basic(指数基本信息)、valuation(估值指标-市盈率/市净率/换手率/总市值等，使用index_dailybasic接口)",
+        enum: ["daily", "basic", "valuation"]
       }
     },
     required: ["code"]
@@ -90,6 +91,37 @@ export const indexData = {
         }
       }
       
+      // valuation 分支：index_dailybasic 估值指标
+      if (args.data_type === 'valuation') {
+        const today = new Date();
+        const defaultEnd = today.toISOString().slice(0, 10).replace(/-/g, '');
+        const oneMonthAgo = new Date(); oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        const defaultStart = oneMonthAgo.toISOString().slice(0, 10).replace(/-/g, '');
+        const { data, fields } = await callTushare(
+          'index_dailybasic',
+          {
+            ts_code: args.code,
+            start_date: args.start_date || defaultStart,
+            end_date: args.end_date || defaultEnd,
+          },
+          'ts_code,trade_date,total_mv,float_mv,total_share,float_share,free_share,turnover_rate,turnover_rate_f,pe,pe_ttm,pb'
+        );
+        if (!data.length) throw new Error(`未找到指数${args.code}的估值数据`);
+        const sorted = data.sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+        const startD = sorted[sorted.length - 1]?.trade_date;
+        const endD = sorted[0]?.trade_date;
+        let text = `# ${args.code} 指数估值指标 (${startD} 至 ${endD})\n\n`;
+        text += `| 日期 | 总市值(亿) | 流通市值(亿) | 换手率% | 换手率(自由)% | PE | PE(TTM) | PB |\n`;
+        text += `|------|-----------|------------|--------|------------|----|---------|----|  \n`;
+        sorted.forEach(r => {
+          const mv = (v: any) => v != null ? (parseFloat(v) / 1e8).toFixed(2) : 'N/A';
+          const n2 = (v: any) => v != null ? parseFloat(v).toFixed(2) : 'N/A';
+          text += `| ${r.trade_date} | ${mv(r.total_mv)} | ${mv(r.float_mv)} | ${n2(r.turnover_rate)} | ${n2(r.turnover_rate_f)} | ${n2(r.pe)} | ${n2(r.pe_ttm)} | ${n2(r.pb)} |\n`;
+        });
+        text += `\n---\n*数据来源: Tushare index_dailybasic*`;
+        return { content: [{ type: 'text', text }] };
+      }
+
       // 默认参数设置
       const today = new Date();
       const defaultEndDate = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -177,20 +209,18 @@ export const indexData = {
         // 格式化输出日期范围
         const startDate = indexData[indexData.length - 1]?.trade_date || args.start_date || defaultStartDate;
         const endDate = indexData[0]?.trade_date || args.end_date || defaultEndDate;
-        
-        // 格式化输出
-        const formattedData = indexData.map((data: Record<string, any>) => {
-          return `## ${data.trade_date}\n开盘: ${data.open}  最高: ${data.high}  最低: ${data.low}  收盘: ${data.close}\n涨跌: ${data.change}  涨跌幅: ${data.pct_chg}%  成交量: ${data.vol}  成交额: ${data.amount}\n`;
-        }).join('\n---\n\n');
-        
+
+        // 表格格式输出
+        let tableOutput = `# ${args.code}指数日线行情 (${startDate} 至 ${endDate})\n\n`;
+        tableOutput += `## 期间走势: ${trend}\n${trendAnalysis}\n\n`;
+        tableOutput += `| 日期 | 开盘 | 最高 | 最低 | 收盘 | 涨跌 | 涨跌幅% | 成交量(手) | 成交额(千元) |\n`;
+        tableOutput += `|------|------|------|------|------|------|---------|-----------|------------|\n`;
+        indexData.forEach((d: Record<string, any>) => {
+          tableOutput += `| ${d.trade_date} | ${d.open} | ${d.high} | ${d.low} | ${d.close} | ${d.change} | ${d.pct_chg} | ${d.vol} | ${d.amount} |\n`;
+        });
+
         return {
-          content: [
-            {
-              type: "text",
-              text: `# ${args.code}指数数据 (${startDate} 至 ${endDate})\n\n` +
-                   `## 期间走势: ${trend}\n${trendAnalysis}\n\n---\n\n${formattedData}`
-            }
-          ]
+          content: [{ type: "text", text: tableOutput }]
         };
       } finally {
         clearTimeout(timeoutId);

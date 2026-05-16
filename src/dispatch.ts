@@ -16,6 +16,7 @@ import { companyPerformance_us } from './tools/companyPerformance_us.js';
 import { csiIndexConstituents } from './tools/csiIndexConstituents.js';
 import { dragonTigerInst } from './tools/dragonTigerInst.js';
 import { hotNews } from './tools/hotNews.js';
+import { futuresData } from './tools/futuresData.js';
 
 export const toolList = [
   { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
@@ -36,6 +37,7 @@ export const toolList = [
   { name: csiIndexConstituents.name, description: csiIndexConstituents.description, inputSchema: csiIndexConstituents.parameters },
   { name: dragonTigerInst.name, description: dragonTigerInst.description, inputSchema: dragonTigerInst.parameters },
   { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.parameters },
+  { name: futuresData.name, description: futuresData.description, inputSchema: futuresData.parameters },
 ];
 
 export async function dispatchTool(name: string, args: Record<string, any>): Promise<any> {
@@ -76,10 +78,10 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
       });
     case 'company_performance':
       return await companyPerformance.run({
-        ts_code: String(args?.ts_code),
+        ts_code: args?.ts_code ? String(args.ts_code) : undefined,
         data_type: String(args?.data_type),
-        start_date: String(args?.start_date),
-        end_date: String(args?.end_date),
+        start_date: args?.start_date ? String(args.start_date) : undefined,
+        end_date: args?.end_date ? String(args.end_date) : undefined,
         period: args?.period ? String(args.period) : undefined,
       });
     case 'fund_data':
@@ -112,8 +114,8 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
       return await moneyFlow.run({
         query_type: args?.query_type ? String(args.query_type) : undefined,
         ts_code: args?.ts_code ? String(args.ts_code) : undefined,
-        start_date: String(args?.start_date),
-        end_date: String(args?.end_date),
+        start_date: args?.start_date ? String(args.start_date) : undefined,
+        end_date: args?.end_date ? String(args.end_date) : undefined,
         content_type: args?.content_type ? String(args.content_type) : undefined,
         trade_date: args?.trade_date ? String(args.trade_date) : undefined,
       });
@@ -155,6 +157,12 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
       });
     case 'hot_news_7x24':
       return await hotNews.run({});
+    case 'futures_data':
+      return await futuresData.run({
+        trade_date: String(args?.trade_date),
+        symbol: args?.symbol ? String(args.symbol) : undefined,
+        broker: args?.broker ? String(args.broker) : undefined,
+      });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

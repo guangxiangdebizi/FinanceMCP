@@ -1,4 +1,5 @@
 import { TUSHARE_CONFIG } from '../config.js';
+import { callTushare } from '../utils/tushareClient.js';
 export const convertibleBond = {
     name: "convertible_bond",
     description: "获取可转债非行情数据，支持两种查询方式：1)使用issue类型按时间范围查询可转债发行数据；2)使用info类型按代码查询可转债详细信息",
@@ -11,8 +12,8 @@ export const convertibleBond = {
             },
             data_type: {
                 type: "string",
-                description: "数据类型，可选值：issue(可转债发行数据)、info(可转债详细信息，通过代码查询)",
-                enum: ["issue", "info"]
+                description: "数据类型：issue(可转债发行数据)、info(可转债详细信息，通过代码查询，已废弃，建议改用 basic+issue)、call(强赎数据，需ts_code)、conversion(转股数据，需ts_code)",
+                enum: ["issue", "info", "call", "conversion"]
             },
             start_date: {
                 type: "string",
@@ -32,6 +33,40 @@ export const convertibleBond = {
             const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
             if (!TUSHARE_API_KEY) {
                 throw new Error('请配置TUSHARE_TOKEN环境变量');
+            }
+            // V2: call 分支 — 强赎数据 (cb_call)
+            if (args.data_type === 'call') {
+                if (!args.ts_code)
+                    throw new Error('data_type=call 需要提供 ts_code（可转债代码）');
+                const { data } = await callTushare('cb_call', { ts_code: args.ts_code }, 'ts_code,ann_date,call_date,call_price,call_price_tax,call_vol,call_amount,payment_date,face_value,delist_date');
+                if (!data.length)
+                    throw new Error(`未找到 ${args.ts_code} 的强赎数据`);
+                let text = `# 🔔 可转债强赎数据 — ${args.ts_code}\n\n`;
+                text += `| 公告日 | 强赎日 | 强赎价(含税) | 强赎价(税后) | 强赎量(张) | 强赎金额 | 付款日 | 摘牌日 |\n`;
+                text += `|--------|--------|------------|------------|-----------|---------|--------|--------|\n`;
+                data.forEach(r => {
+                    const n = (v) => v != null && v !== '' ? String(v) : 'N/A';
+                    text += `| ${n(r.ann_date)} | ${n(r.call_date)} | ${n(r.call_price)} | ${n(r.call_price_tax)} | ${n(r.call_vol)} | ${n(r.call_amount)} | ${n(r.payment_date)} | ${n(r.delist_date)} |\n`;
+                });
+                text += `\n---\n*数据来源: Tushare cb_call*`;
+                return { content: [{ type: 'text', text }] };
+            }
+            // V2: conversion 分支 — 转股数据 (cb_share)
+            if (args.data_type === 'conversion') {
+                if (!args.ts_code)
+                    throw new Error('data_type=conversion 需要提供 ts_code（可转债代码）');
+                const { data } = await callTushare('cb_share', { ts_code: args.ts_code }, 'ts_code,end_date,ann_date,convert_price,convert_val,convert_vol,convert_ratio,acc_convert_val,acc_convert_vol,acc_convert_ratio,remain_size,total_shares');
+                if (!data.length)
+                    throw new Error(`未找到 ${args.ts_code} 的转股数据`);
+                let text = `# 🔄 可转债转股数据 — ${args.ts_code}\n\n`;
+                text += `| 报告期 | 公告日 | 转股价 | 本期转股额(万) | 本期转股量(张) | 本期转股比例% | 累计转股额(万) | 剩余规模(亿) |\n`;
+                text += `|--------|--------|--------|-------------|-------------|------------|-------------|------------|\n`;
+                data.forEach(r => {
+                    const n = (v) => v != null && v !== '' ? String(v) : 'N/A';
+                    text += `| ${n(r.end_date)} | ${n(r.ann_date)} | ${n(r.convert_price)} | ${n(r.convert_val)} | ${n(r.convert_vol)} | ${n(r.convert_ratio)} | ${n(r.acc_convert_val)} | ${n(r.remain_size)} |\n`;
+                });
+                text += `\n---\n*数据来源: Tushare cb_share*`;
+                return { content: [{ type: 'text', text }] };
             }
             // 默认日期设置
             const today = new Date();
@@ -173,6 +208,7 @@ async function fetchConvertibleBondData(dataType, tsCode, startDate, endDate, ap
 function formatConvertibleBondData(results, tsCode) {
     let output = ` 🪙 可转债数据报告${tsCode ? ` - ${tsCode}` : ''}\n\n`;
     output += `📅 查询时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n\n`;
+    output += `> ⚠️ 提示：data_type=info 已废弃，建议改用 data_type=call（强赎）或 data_type=conversion（转股）获取更精确的数据。\n\n`;
     results.forEach((result, index) => {
         if (result.error) {
             output += ` ❌ ${getDataTypeName(result.type)}查询失败\n\n`;

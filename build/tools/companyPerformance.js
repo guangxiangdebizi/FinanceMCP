@@ -1,4 +1,5 @@
 import { TUSHARE_CONFIG } from '../config.js';
+import { callTushare } from '../utils/tushareClient.js';
 import { formatBasicBalance, formatAllBalance } from './companyPerformanceDetail/balanceFormatters.js';
 import { formatBasicCashFlow, formatCashflowAll } from './companyPerformanceDetail/cashflowFormatters.js';
 import { formatBasicIncome, formatAllIncome } from './companyPerformanceDetail/incomeFormatters.js';
@@ -28,11 +29,11 @@ export const companyPerformance = {
             data_type: {
                 type: "string",
                 description: "数据类型：forecast(业绩预告)、express(业绩快报)、indicators(财务指标-包含盈利能力/偿债能力/营运能力/成长能力等全面指标)、dividend(分红送股)、mainbz(主营业务构成-融合产品/地区/行业)、holder_number(股东人数)、holder_trade(股东增减持)、managers(管理层信息)、audit(财务审计意见)、company_basic(公司基本信息)、balance_basic(核心资产负债表)、balance_all(完整资产负债表)、cashflow_basic(基础现金流)、cashflow_all(完整现金流)、income_basic(核心利润表)、income_all(完整利润表)、share_float(限售股解禁)、repurchase(股票回购)、top10_holders(前十大股东)、top10_floatholders(前十大流通股东)、pledge_stat(股权质押统计)、pledge_detail(股权质押明细)、daily_basic(每日指标-市盈率/市净率/换手率/市值等)、stk_basic(股票基本信息-行业/上市日期/市场等)",
-                enum: ["forecast", "express", "indicators", "dividend", "mainbz", "holder_number", "holder_trade", "managers", "audit", "company_basic", "balance_basic", "balance_all", "cashflow_basic", "cashflow_all", "income_basic", "income_all", "share_float", "repurchase", "top10_holders", "top10_floatholders", "pledge_stat", "pledge_detail", "daily_basic", "stk_basic"]
+                enum: ["forecast", "express", "indicators", "dividend", "mainbz", "holder_number", "holder_trade", "managers", "audit", "company_basic", "balance_basic", "balance_all", "cashflow_basic", "cashflow_all", "income_basic", "income_all", "share_float", "repurchase", "top10_holders", "top10_floatholders", "pledge_stat", "pledge_detail", "daily_basic", "stk_basic", "ipo"]
             },
             start_date: {
                 type: "string",
-                description: "起始日期，格式为YYYYMMDD，如'20230101'"
+                description: "起始日期，格式为YYYYMMDD，如'20230101'。ipo类型按发行日期范围查询；其他类型按报告期范围查询"
             },
             end_date: {
                 type: "string",
@@ -43,7 +44,7 @@ export const companyPerformance = {
                 description: "特定报告期，格式为YYYYMMDD，如'20231231'表示2023年年报。指定此参数时将忽略start_date和end_date"
             }
         },
-        required: ["ts_code", "data_type", "start_date", "end_date"]
+        required: ["data_type"]
     },
     async run(args) {
         try {
@@ -54,6 +55,34 @@ export const companyPerformance = {
                 throw new Error('请配置TUSHARE_TOKEN环境变量');
             }
             const results = [];
+            // V2: ipo 分支 — 新股上市数据 (new_share)
+            if (args.data_type === 'ipo') {
+                const today = new Date();
+                const defaultEnd = today.toISOString().slice(0, 10).replace(/-/g, '');
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                const defaultStart = oneYearAgo.toISOString().slice(0, 10).replace(/-/g, '');
+                const ipoParams = {
+                    start_date: args.start_date || defaultStart,
+                    end_date: args.end_date || defaultEnd,
+                };
+                if (args.ts_code)
+                    ipoParams.ts_code = args.ts_code;
+                const { data } = await callTushare('new_share', ipoParams, 'ts_code,sub_code,name,ipo_date,issue_date,amount,market_amount,price,pe,limit_amount,funds,ballot');
+                if (!data.length)
+                    throw new Error('未找到指定范围内的新股数据');
+                const sorted = [...data].sort((a, b) => (b.ipo_date || '').localeCompare(a.ipo_date || ''));
+                let text = `# 📋 新股上市数据 (${ipoParams.start_date} 至 ${ipoParams.end_date})\n\n`;
+                text += `共 ${sorted.length} 只新股\n\n`;
+                text += `| 代码 | 名称 | 上市日期 | 发行日期 | 发行价 | 市盈率 | 发行量(万股) | 募资(亿) | 中签率% |\n`;
+                text += `|------|------|---------|---------|--------|--------|------------|---------|--------|\n`;
+                sorted.forEach(r => {
+                    const n = (v) => v != null && v !== '' ? String(v) : 'N/A';
+                    text += `| ${n(r.ts_code)} | ${n(r.name)} | ${n(r.ipo_date)} | ${n(r.issue_date)} | ${n(r.price)} | ${n(r.pe)} | ${n(r.amount)} | ${n(r.funds)} | ${n(r.ballot)} |\n`;
+                });
+                text += `\n---\n*数据来源: Tushare new_share*`;
+                return { content: [{ type: 'text', text }] };
+            }
             // 处理主营业务融合调用
             if (args.data_type === 'mainbz') {
                 // 主营业务融合模式：直接在这里处理三个主营业务类型
@@ -399,7 +428,7 @@ async function fetchFinancialData(dataType, tsCode, period, startDate, endDate, 
                 if (!annDate)
                     return true; // 如果没有公告日期，保留数据
                 // 转换日期格式进行比较 (YYYYMMDD格式)
-                return annDate >= startDate && annDate <= endDate;
+                return annDate >= (startDate ?? '') && annDate <= (endDate ?? '');
             });
             console.log(`日期范围过滤后剩余${resultData.length}条分红记录`);
         }
@@ -411,7 +440,7 @@ async function fetchFinancialData(dataType, tsCode, period, startDate, endDate, 
                 if (!endDateItem)
                     return true; // 如果没有截止日期，保留数据
                 // 转换日期格式进行比较 (YYYYMMDD格式)
-                return endDateItem >= startDate && endDateItem <= endDate;
+                return endDateItem >= (startDate ?? '') && endDateItem <= (endDate ?? '');
             });
             console.log(`日期范围过滤后剩余${resultData.length}条股权质押统计记录`);
         }

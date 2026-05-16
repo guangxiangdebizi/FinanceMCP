@@ -1,4 +1,5 @@
 import { TUSHARE_CONFIG } from '../config.js';
+import { callTushare } from '../utils/tushareClient.js';
 
 export const moneyFlow = {
   name: "money_flow",
@@ -15,7 +16,7 @@ export const moneyFlow = {
     properties: {
       query_type: {
         type: "string",
-        description: "查询类型：stock=个股，market=大盘，sector=板块。默认根据ts_code自动判断"
+        description: "查询类型：stock=个股，market=大盘，sector=板块，northbound=北向资金（港股通持股/沪深港通十大成交股）。默认根据ts_code自动判断"
       },
       ts_code: {
         type: "string",
@@ -35,16 +36,16 @@ export const moneyFlow = {
       },
       trade_date: {
         type: "string",
-        description: "单独查询某个交易日的数据，格式为YYYYMMDD。如填写则忽略start_date和end_date"
+        description: "单独查询某个交易日的数据，格式为YYYYMMDD。northbound查询时为主要输入；其他类型填写则忽略start_date和end_date"
       }
     },
-    required: ["start_date", "end_date"]
+    required: []
   },
-  async run(args: { 
+  async run(args: {
     query_type?: string;
-    ts_code?: string; 
-    start_date: string; 
-    end_date: string;
+    ts_code?: string;
+    start_date?: string;
+    end_date?: string;
     content_type?: string;
     trade_date?: string;
   }) {
@@ -60,6 +61,16 @@ export const moneyFlow = {
 
       // 判断查询类型
       let queryType = args.query_type;
+
+      // northbound 分支：北向资金（港股通持股 / 沪深港通十大成交股）
+      if (queryType === 'northbound') {
+        const result = await fetchNorthboundFlow(args.ts_code, args.trade_date, TUSHARE_API_KEY, TUSHARE_API_URL);
+        if (!result.data || result.data.length === 0) {
+          throw new Error('未找到北向资金数据，请确认 trade_date 为有效交易日');
+        }
+        return { content: [{ type: 'text', text: formatNorthboundData(result.data, result.apiUsed, args.ts_code) }] };
+      }
+
       if (!queryType) {
         // 自动判断：没有ts_code=大盘，有BK开头=板块，否则=个股
         if (!args.ts_code || args.ts_code.trim() === '') {
@@ -78,8 +89,8 @@ export const moneyFlow = {
         // 查询大盘资金流向
         targetName = '大盘';
         result = await fetchMarketMoneyFlow(
-          args.trade_date || args.start_date,
-          args.trade_date || args.end_date,
+          (args.trade_date || args.start_date) ?? '',
+          (args.trade_date || args.end_date) ?? '',
           TUSHARE_API_KEY,
           TUSHARE_API_URL
         );
@@ -89,8 +100,8 @@ export const moneyFlow = {
         result = await fetchSectorMoneyFlow(
           args.ts_code,
           args.trade_date,
-          args.start_date,
-          args.end_date,
+          args.start_date ?? '',
+          args.end_date ?? '',
           args.content_type,
           TUSHARE_API_KEY,
           TUSHARE_API_URL
@@ -100,8 +111,8 @@ export const moneyFlow = {
         targetName = `股票${args.ts_code}`;
         result = await fetchStockMoneyFlow(
           args.ts_code!,
-          args.trade_date || args.start_date,
-          args.trade_date || args.end_date,
+          (args.trade_date || args.start_date) ?? '',
+          (args.trade_date || args.end_date) ?? '',
           TUSHARE_API_KEY,
           TUSHARE_API_URL
         );
@@ -267,7 +278,66 @@ async function fetchSectorMoneyFlow(
   return await callTushareAPI(params, apiUrl);
 }
 
-// 调用Tushare API的通用函数
+// ── V2: 北向资金 ──────────────────────────────────────────────────────────────
+
+async function fetchNorthboundFlow(
+  tsCode: string | undefined,
+  tradeDate: string | undefined,
+  _apiKey: string,
+  _apiUrl: string
+): Promise<{ data: Record<string, any>[]; apiUsed: string }> {
+  if (tsCode) {
+    // 有具体港股代码 → hk_hold（港股通持股明细）
+    const params: Record<string, any> = { ts_code: tsCode };
+    if (tradeDate) params.trade_date = tradeDate;
+    const { data } = await callTushare(
+      'hk_hold',
+      params,
+      'ts_code,trade_date,exchange_id,by_vol,by_ratio,sell_vol,sell_ratio,hold_vol,hold_ratio'
+    );
+    return { data, apiUsed: 'hk_hold' };
+  } else {
+    // 无代码 → hsgt_top10（沪深港通十大成交股）
+    if (!tradeDate) throw new Error('northbound 查询无 ts_code 时，trade_date 为必填项');
+    const { data } = await callTushare(
+      'hsgt_top10',
+      { trade_date: tradeDate },
+      'trade_date,ts_code,name,close,change,rank,market_type,amount,net_amount,buy,sell'
+    );
+    return { data, apiUsed: 'hsgt_top10' };
+  }
+}
+
+function formatNorthboundData(data: Record<string, any>[], apiUsed: string, tsCode?: string): string {
+  const sorted = [...data].sort((a, b) => {
+    const rankCmp = (a.rank ?? 99) - (b.rank ?? 99);
+    if (rankCmp !== 0) return rankCmp;
+    return (b.trade_date || '').localeCompare(a.trade_date || '');
+  });
+
+  let out = `# 🌐 北向资金数据\n\n`;
+  if (apiUsed === 'hk_hold') {
+    out += `**查询方式**: 港股通持股明细 (hk_hold)  股票: ${tsCode}\n\n`;
+    out += `| 日期 | 交易所 | 买入量(股) | 买入占比% | 卖出量(股) | 卖出占比% | 持股量(股) | 持股占比% |\n`;
+    out += `|------|--------|-----------|---------|-----------|---------|-----------|--------|\n`;
+    sorted.forEach(r => {
+      const n = (v: any) => v != null ? String(v) : 'N/A';
+      out += `| ${n(r.trade_date)} | ${n(r.exchange_id)} | ${n(r.by_vol)} | ${n(r.by_ratio)} | ${n(r.sell_vol)} | ${n(r.sell_ratio)} | ${n(r.hold_vol)} | ${n(r.hold_ratio)} |\n`;
+    });
+  } else {
+    out += `**查询方式**: 沪深港通十大成交股 (hsgt_top10)  日期: ${sorted[0]?.trade_date || ''}\n\n`;
+    out += `| 排名 | 代码 | 名称 | 收盘价 | 涨跌% | 市场 | 成交额(万) | 净买入(万) | 买入(万) | 卖出(万) |\n`;
+    out += `|------|------|------|--------|------|------|-----------|-----------|---------|--------|\n`;
+    sorted.forEach(r => {
+      const n = (v: any) => v != null ? String(v) : 'N/A';
+      out += `| ${n(r.rank)} | ${n(r.ts_code)} | ${n(r.name)} | ${n(r.close)} | ${n(r.change)} | ${n(r.market_type)} | ${n(r.amount)} | ${n(r.net_amount)} | ${n(r.buy)} | ${n(r.sell)} |\n`;
+    });
+  }
+  out += `\n---\n*数据来源: Tushare ${apiUsed}*`;
+  return out;
+}
+
+// ── 原有 Tushare 调用函数（stock/market/sector 分支保留）────────────────────
 async function callTushareAPI(params: any, apiUrl: string) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
