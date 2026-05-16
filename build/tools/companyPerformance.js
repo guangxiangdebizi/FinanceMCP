@@ -27,8 +27,8 @@ export const companyPerformance = {
             },
             data_type: {
                 type: "string",
-                description: "数据类型：forecast(业绩预告)、express(业绩快报)、indicators(财务指标-包含盈利能力/偿债能力/营运能力/成长能力等全面指标)、dividend(分红送股)、mainbz(主营业务构成-融合产品/地区/行业)、holder_number(股东人数)、holder_trade(股东增减持)、managers(管理层信息)、audit(财务审计意见)、company_basic(公司基本信息)、balance_basic(核心资产负债表)、balance_all(完整资产负债表)、cashflow_basic(基础现金流)、cashflow_all(完整现金流)、income_basic(核心利润表)、income_all(完整利润表)、share_float(限售股解禁)、repurchase(股票回购)、top10_holders(前十大股东)、top10_floatholders(前十大流通股东)、pledge_stat(股权质押统计)、pledge_detail(股权质押明细)",
-                enum: ["forecast", "express", "indicators", "dividend", "mainbz", "holder_number", "holder_trade", "managers", "audit", "company_basic", "balance_basic", "balance_all", "cashflow_basic", "cashflow_all", "income_basic", "income_all", "share_float", "repurchase", "top10_holders", "top10_floatholders", "pledge_stat", "pledge_detail"]
+                description: "数据类型：forecast(业绩预告)、express(业绩快报)、indicators(财务指标-包含盈利能力/偿债能力/营运能力/成长能力等全面指标)、dividend(分红送股)、mainbz(主营业务构成-融合产品/地区/行业)、holder_number(股东人数)、holder_trade(股东增减持)、managers(管理层信息)、audit(财务审计意见)、company_basic(公司基本信息)、balance_basic(核心资产负债表)、balance_all(完整资产负债表)、cashflow_basic(基础现金流)、cashflow_all(完整现金流)、income_basic(核心利润表)、income_all(完整利润表)、share_float(限售股解禁)、repurchase(股票回购)、top10_holders(前十大股东)、top10_floatholders(前十大流通股东)、pledge_stat(股权质押统计)、pledge_detail(股权质押明细)、daily_basic(每日指标-市盈率/市净率/换手率/市值等)、stk_basic(股票基本信息-行业/上市日期/市场等)",
+                enum: ["forecast", "express", "indicators", "dividend", "mainbz", "holder_number", "holder_trade", "managers", "audit", "company_basic", "balance_basic", "balance_all", "cashflow_basic", "cashflow_all", "income_basic", "income_all", "share_float", "repurchase", "top10_holders", "top10_floatholders", "pledge_stat", "pledge_detail", "daily_basic", "stk_basic"]
             },
             start_date: {
                 type: "string",
@@ -228,6 +228,14 @@ async function fetchFinancialData(dataType, tsCode, period, startDate, endDate, 
         pledge_detail: {
             api_name: "pledge_detail",
             default_fields: "ts_code,ann_date,holder_name,pledge_amount,start_date,end_date,is_release,release_date,pledgor,holding_amount,pledged_amount,p_total_ratio,h_total_ratio,is_buyback"
+        },
+        daily_basic: {
+            api_name: "daily_basic",
+            default_fields: "ts_code,trade_date,close,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv"
+        },
+        stk_basic: {
+            api_name: "stock_basic",
+            default_fields: "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs"
         }
     };
     const config = apiConfigs[dataType];
@@ -341,6 +349,14 @@ async function fetchFinancialData(dataType, tsCode, period, startDate, endDate, 
     else if (dataType === 'pledge_detail') {
         // 股权质押明细数据 - 只需要ts_code，不需要日期参数
     }
+    else if (dataType === 'daily_basic') {
+        // 每日指标数据 - 按日期范围查询
+        params.params.start_date = startDate;
+        params.params.end_date = endDate;
+    }
+    else if (dataType === 'stk_basic') {
+        // 股票基本信息 - 只需要ts_code，无日期参数
+    }
     console.log(`请求${dataType}数据，API: ${config.api_name}，参数:`, params.params);
     // 设置请求超时
     const controller = new AbortController();
@@ -432,7 +448,9 @@ function formatFinancialData(results, tsCode) {
         top10_holders: '👥 前十大股东',
         top10_floatholders: '🌊 前十大流通股东',
         pledge_stat: '📊 股权质押统计',
-        pledge_detail: '📋 股权质押明细'
+        pledge_detail: '📋 股权质押明细',
+        daily_basic: '📈 每日指标（市盈率/市净率/换手率/市值）',
+        stk_basic: '🏷️ 股票基本信息'
     };
     for (const result of results) {
         const typeName = dataTypeNames[result.type] || result.type;
@@ -512,6 +530,12 @@ function formatFinancialData(results, tsCode) {
                 break;
             case 'pledge_detail':
                 output += formatPledgeDetail(result.data);
+                break;
+            case 'daily_basic':
+                output += formatGenericData(result.data, result.fields);
+                break;
+            case 'stk_basic':
+                output += formatGenericData(result.data, result.fields);
                 break;
             default:
                 output += formatGenericData(result.data, result.fields);

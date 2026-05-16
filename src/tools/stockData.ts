@@ -15,7 +15,7 @@ import {
 
 export const stockData = {
   name: "stock_data",
-  description: "获取指定股票/加密资产的历史行情数据，支持A股、美股、港股、外汇、期货、基金、债券逆回购、可转债、期权、加密货币(通过CoinGecko)",
+  description: "获取指定股票/加密资产的历史行情数据，支持A股、美股、港股、外汇、期货、基金、债券逆回购、可转债、期权、加密货币(通过Binance)",
   parameters: {
     type: "object",
     properties: {
@@ -25,7 +25,7 @@ export const stockData = {
       },
       market_type: {
         type: "string",
-        description: "市场类型（必需），可选值：cn(A股),us(美股),hk(港股),fx(外汇),futures(期货),fund(基金),repo(债券逆回购),convertible_bond(可转债),options(期权),crypto(加密货币/CoinGecko)"
+        description: "市场类型（必需），可选值：cn(A股),us(美股),hk(港股),fx(外汇),futures(期货),fund(基金),repo(债券逆回购),convertible_bond(可转债),options(期权),crypto(加密货币/Binance)"
       },
       start_date: {
         type: "string",
@@ -38,11 +38,15 @@ export const stockData = {
       indicators: {
         type: "string",
         description: "需要计算的技术指标，多个指标用空格分隔。支持的指标：macd(MACD指标)、rsi(相对强弱指标)、kdj(随机指标)、boll(布林带)、ma(均线指标)。必须明确指定参数，例如：'macd(12,26,9) rsi(14) kdj(9,3,3) boll(20,2) ma(10)'"
+      },
+      timeframe: {
+        type: "string",
+        description: "K线周期，可选值：daily(日线，默认)、weekly(周线)、monthly(月线)。weekly/monthly 仅支持 cn(A股) 市场，其他市场忽略此参数。"
       }
     },
     required: ["code", "market_type"]
   },
-  async run(args: { code: string; market_type: string; start_date?: string; end_date?: string; indicators?: string }) {
+  async run(args: { code: string; market_type: string; start_date?: string; end_date?: string; indicators?: string; timeframe?: string }) {
     try {
       // 添加调试日志
       console.log('接收到的参数:', args);
@@ -370,77 +374,76 @@ export const stockData = {
 
       // 根据不同市场类型设置不同的API名称和参数，默认返回所有字段
       switch(marketType) {
-        case 'cn':
-          params.api_name = "daily";
-          // 不设置fields，返回所有可用字段
+        case 'cn': {
+          const timeframe = (args.timeframe || 'daily').toLowerCase();
+          if (timeframe === 'weekly') {
+            params.api_name = "weekly";
+          } else if (timeframe === 'monthly') {
+            params.api_name = "monthly";
+          } else {
+            params.api_name = "daily";
+          }
+          // 显式字段预算：A股日/周/月线核心字段
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
           break;
-          
+        }
+
         case 'us':
           params.api_name = "us_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
           break;
-          
+
         case 'hk':
           params.api_name = "hk_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
           break;
-          
+
         case 'fx':
           params.api_name = "fx_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,bid_open,bid_high,bid_low,bid_close,ask_open,ask_high,ask_low,ask_close,tick_qty";
           break;
-          
+
         case 'futures':
           params.api_name = "fut_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,open,high,low,close,settle,change1,change2,vol,amount,oi";
           break;
-          
+
         case 'fund':
           params.api_name = "fund_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
           break;
-          
+
         case 'repo':
           params.api_name = "repo_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,name,rate,vol,amount";
           break;
-          
+
         case 'convertible_bond':
           params.api_name = "cb_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount,bond_value,bond_over_rate,cb_value,cb_over_rate";
           break;
-          
+
         case 'options':
           params.api_name = "opt_daily";
-          // 不设置fields，返回所有可用字段
+          params.fields = "ts_code,trade_date,exchange,pre_settle,pre_close,open,high,low,close,settle,vol,amount,oi";
           // 期权接口优先使用trade_date，如果没有指定则使用end_date作为trade_date
           if (requestedIndicators.length > 0) {
-            // 如请求技术指标，必须用区间以便获取足够历史
             params.params = {
               ts_code: args.code,
               start_date: actualStartDate,
               end_date: actualEndDate
             };
-            // 统一将 amount 列名标注为（万元）
           } else if (!args.start_date && !args.end_date) {
-            // 如果都没指定，使用默认的end_date作为trade_date
-            params.params = {
-              trade_date: actualEndDate
-            };
+            params.params = { trade_date: actualEndDate };
           } else if (args.end_date && !args.start_date) {
-            // 只指定了end_date，使用作为trade_date
-            params.params = {
-              trade_date: actualEndDate
-            };
+            params.params = { trade_date: actualEndDate };
           } else {
-            // 如果指定了start_date或日期范围，保持原有逻辑但添加ts_code
             params.params = {
               ts_code: args.code,
               start_date: actualStartDate,
               end_date: actualEndDate
             };
           }
-          // 如果指定了具体的期权代码，添加到params中
           if (args.code && args.code.length > 0) {
             params.params.ts_code = args.code;
           }
@@ -497,8 +500,9 @@ export const stockData = {
         
                 console.log(`成功获取到${stockData.length}条${args.code}股票数据记录（扩展数据范围）`);
         
-        // 对A股强制应用前复权（qfq）：使用最新交易日因子进行归一
-        if (marketType === 'cn' && stockData.length > 0) {
+        // 对A股日线强制应用前复权（qfq）：使用最新交易日因子进行归一
+        // 周线/月线跳过复权（adj_factor 为日频，无法直接对应）
+        if (marketType === 'cn' && (!args.timeframe || args.timeframe === 'daily') && stockData.length > 0) {
           try {
             const afParams = {
               api_name: 'adj_factor',
@@ -683,7 +687,9 @@ export const stockData = {
         // 格式化输出（根据不同市场类型构建表格格式）
         let formattedData = '';
         let indicatorData = '';
-        const titleSuffix = marketType === 'cn' ? '（前复权）' : '';
+        const titleSuffix = marketType === 'cn'
+          ? (args.timeframe === 'weekly' ? '（周线）' : args.timeframe === 'monthly' ? '（月线）' : '（前复权）')
+          : '';
         
         if (marketType === 'fx') {
           // 外汇数据表格展示（追加技术指标列）

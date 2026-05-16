@@ -2,7 +2,7 @@ import { TUSHARE_CONFIG } from '../config.js';
 
 export const indexData = {
   name: "index_data",
-  description: "获取指定股票指数的数据，例如上证指数、深证成指等",
+  description: "获取指定股票指数的数据，支持日线行情和指数基本信息",
   parameters: {
     type: "object",
     properties: {
@@ -12,22 +12,83 @@ export const indexData = {
       },
       start_date: {
         type: "string",
-        description: "起始日期，格式为YYYYMMDD，如'20230101'"
+        description: "起始日期，格式为YYYYMMDD，如'20230101'（data_type=daily时有效）"
       },
       end_date: {
         type: "string",
-        description: "结束日期，格式为YYYYMMDD，如'20230131'"
+        description: "结束日期，格式为YYYYMMDD，如'20230131'（data_type=daily时有效）"
+      },
+      data_type: {
+        type: "string",
+        description: "数据类型：daily(日线行情，默认)、basic(指数基本信息-名称/发布方/基期/权重规则等)",
+        enum: ["daily", "basic"]
       }
     },
-    required: ["code", "start_date", "end_date"]
+    required: ["code"]
   },
-  async run(args: { code: string; start_date?: string; end_date?: string }) {
+  async run(args: { code: string; start_date?: string; end_date?: string; data_type?: string }) {
     try {
       console.log(`使用Tushare API获取指数${args.code}的数据`);
-      
+
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
+
+      // index_basic 分支：返回指数基本信息，不需要日期参数
+      if (args.data_type === 'basic') {
+        const params = {
+          api_name: "index_basic",
+          token: TUSHARE_API_KEY,
+          params: { ts_code: args.code },
+          fields: "ts_code,name,fullname,market,publisher,index_type,category,base_date,base_point,list_date,weight_rule,desc,exp_date"
+        };
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
+        try {
+          const response = await fetch(TUSHARE_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(params),
+            signal: controller.signal
+          });
+          if (!response.ok) throw new Error(`Tushare API请求失败: ${response.status}`);
+          const data = await response.json();
+          if (data.code !== 0) throw new Error(`Tushare API错误: ${data.msg}`);
+          if (!data.data || !data.data.items || data.data.items.length === 0) {
+            throw new Error(`未找到指数${args.code}的基本信息`);
+          }
+          const fields: string[] = data.data.fields;
+          const rows = data.data.items.map((item: any) => {
+            const r: Record<string, any> = {};
+            fields.forEach((f, i) => { r[f] = item[i]; });
+            return r;
+          });
+          const row = rows[0];
+          const text = [
+            `# ${row.name || args.code} 指数基本信息`,
+            ``,
+            `| 字段 | 值 |`,
+            `|------|-----|`,
+            `| 代码 | ${row.ts_code || 'N/A'} |`,
+            `| 名称 | ${row.name || 'N/A'} |`,
+            `| 全称 | ${row.fullname || 'N/A'} |`,
+            `| 市场 | ${row.market || 'N/A'} |`,
+            `| 发布方 | ${row.publisher || 'N/A'} |`,
+            `| 指数类型 | ${row.index_type || 'N/A'} |`,
+            `| 类别 | ${row.category || 'N/A'} |`,
+            `| 基期 | ${row.base_date || 'N/A'} |`,
+            `| 基点 | ${row.base_point || 'N/A'} |`,
+            `| 上市日期 | ${row.list_date || 'N/A'} |`,
+            `| 权重规则 | ${row.weight_rule || 'N/A'} |`,
+            `| 终止日期 | ${row.exp_date || 'N/A'} |`,
+            ``,
+            row.desc ? `**描述**: ${row.desc}` : ''
+          ].filter(l => l !== undefined).join('\n');
+          return { content: [{ type: "text", text }] };
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
       
       // 默认参数设置
       const today = new Date();
