@@ -3,7 +3,7 @@ import { callTushare } from '../utils/tushareClient.js';
 
 export const convertibleBond = {
   name: "convertible_bond",
-  description: "获取可转债非行情与生命周期数据，支持发行数据、详细信息、强赎数据和转股数据查询",
+  description: "获取可转债非行情与生命周期数据，支持发行、强赎、转股、票面利率、评级和十大持有人查询",
   parameters: {
     type: "object",
     properties: {
@@ -13,8 +13,8 @@ export const convertibleBond = {
       },
       data_type: {
         type: "string",
-        description: "数据类型：issue(可转债发行数据)、info(可转债详细信息，通过代码查询，已废弃，建议改用显式分支)、call(强赎数据，需ts_code)、conversion(转股数据，需ts_code)",
-        enum: ["issue", "info", "call", "conversion"]
+        description: "数据类型：issue(可转债发行数据)、info(可转债详细信息，通过代码查询，已废弃，建议改用显式分支)、call(强赎数据，需ts_code)、conversion(转股数据，需ts_code)、rate(票面利率，需ts_code)、rating(评级历史，需ts_code)、holders(十大持有人，需ts_code)",
+        enum: ["issue", "info", "call", "conversion", "rate", "rating", "holders"]
       },
       start_date: {
         type: "string",
@@ -23,6 +23,10 @@ export const convertibleBond = {
       end_date: {
         type: "string",
         description: "结束日期，格式为YYYYMMDD，如'20230131'。用于查询发行数据的公告日期范围"
+      },
+      period: {
+        type: "string",
+        description: "报告期，格式为YYYYMMDD。用于 holders 分支，例如'20240630'"
       }
     },
     required: ["data_type"]
@@ -32,6 +36,7 @@ export const convertibleBond = {
     data_type: string; 
     start_date?: string; 
     end_date?: string;
+    period?: string;
   }) {
     try {
       console.log('可转债数据查询参数:', args);
@@ -81,6 +86,46 @@ export const convertibleBond = {
         });
         text += `\n---\n*数据来源: Tushare cb_share*`;
         return { content: [{ type: 'text', text }] };
+      }
+
+      if (args.data_type === 'rate') {
+        if (!args.ts_code) throw new Error('data_type=rate 需要提供 ts_code（可转债代码）');
+        const { data } = await callTushare(
+          'cb_rate',
+          { ts_code: args.ts_code },
+          'ts_code,rate_freq,coupon_rate,rate_start_date,rate_end_date'
+        );
+        if (!data.length) throw new Error(`未找到 ${args.ts_code} 的票面利率数据`);
+        return { content: [{ type: 'text', text: formatCbRate(data, args.ts_code) }] };
+      }
+
+      if (args.data_type === 'rating') {
+        if (!args.ts_code) throw new Error('data_type=rating 需要提供 ts_code（可转债代码）');
+        const { data } = await callTushare(
+          'cb_rating',
+          { ts_code: args.ts_code },
+          'ts_code,ann_date,rating_date,rating_com_name,rating_way,rating_type,rating,rating_outlook'
+        );
+        if (!data.length) throw new Error(`未找到 ${args.ts_code} 的评级数据`);
+        return { content: [{ type: 'text', text: formatCbRating(data, args.ts_code) }] };
+      }
+
+      if (args.data_type === 'holders') {
+        if (!args.ts_code) throw new Error('data_type=holders 需要提供 ts_code（可转债代码）');
+        const params: Record<string, any> = { ts_code: args.ts_code };
+        if (args.period) {
+          params.period = args.period;
+        } else {
+          if (args.start_date) params.start_date = args.start_date;
+          if (args.end_date) params.end_date = args.end_date;
+        }
+        const { data } = await callTushare(
+          'top10_cb_holders',
+          params,
+          'ts_code,end_date,holder_rank,holder_name,hold_amount,hold_ratio'
+        );
+        if (!data.length) throw new Error(`未找到 ${args.ts_code} 的十大持有人数据`);
+        return { content: [{ type: 'text', text: formatCbHolders(data, args.ts_code) }] };
       }
 
       // 默认日期设置
@@ -409,6 +454,47 @@ function formatGenericCBData(data: any[], fields: string[]): string {
     
     return output + '\n';
   }).join('---\n\n');
+}
+
+function formatCbRate(data: Record<string, any>[], tsCode: string): string {
+  const sorted = [...data].sort((a, b) => (a.rate_start_date || '').localeCompare(b.rate_start_date || ''));
+  let out = `# 可转债票面利率 — ${tsCode}\n\n`;
+  out += `| 起息日 | 结束日 | 付息频率(次/年) | 票面利率% |\n`;
+  out += `|--------|--------|----------------|----------|\n`;
+  sorted.forEach(r => {
+    out += `| ${formatDate(r.rate_start_date) || 'N/A'} | ${formatDate(r.rate_end_date) || 'N/A'} | ${r.rate_freq || 'N/A'} | ${formatPercent(r.coupon_rate)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare cb_rate*`;
+  return out;
+}
+
+function formatCbRating(data: Record<string, any>[], tsCode: string): string {
+  const sorted = [...data].sort((a, b) => (b.rating_date || b.ann_date || '').localeCompare(a.rating_date || a.ann_date || ''));
+  let out = `# 可转债评级历史 — ${tsCode}\n\n`;
+  out += `| 评级日 | 公告日 | 评级机构 | 评级方式 | 评级类型 | 评级 | 展望 |\n`;
+  out += `|--------|--------|----------|----------|----------|------|------|\n`;
+  sorted.forEach(r => {
+    const n = (v: any) => v !== undefined && v !== null && v !== '' ? String(v) : 'N/A';
+    out += `| ${formatDate(r.rating_date) || 'N/A'} | ${formatDate(r.ann_date) || 'N/A'} | ${n(r.rating_com_name)} | ${n(r.rating_way)} | ${n(r.rating_type)} | ${n(r.rating)} | ${n(r.rating_outlook)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare cb_rating*`;
+  return out;
+}
+
+function formatCbHolders(data: Record<string, any>[], tsCode: string): string {
+  const sorted = [...data].sort((a, b) => {
+    const dateCmp = (b.end_date || '').localeCompare(a.end_date || '');
+    if (dateCmp !== 0) return dateCmp;
+    return (parseFloat(a.holder_rank) || 99) - (parseFloat(b.holder_rank) || 99);
+  });
+  let out = `# 可转债前十大持有人 — ${tsCode}\n\n`;
+  out += `| 报告期 | 排名 | 持有人 | 持有数量 | 持有比例% |\n`;
+  out += `|--------|------|--------|----------|----------|\n`;
+  sorted.forEach(r => {
+    out += `| ${formatDate(r.end_date) || 'N/A'} | ${r.holder_rank || 'N/A'} | ${r.holder_name || 'N/A'} | ${formatNumber(r.hold_amount)} | ${formatPercent(r.hold_ratio)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare top10_cb_holders*`;
+  return out;
 }
 
 function formatNumber(num: any): string {

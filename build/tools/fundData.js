@@ -1,7 +1,7 @@
 import { TUSHARE_CONFIG } from '../config.js';
 export const fundData = {
     name: "fund_data",
-    description: "获取公募基金全面数据，包括基金列表、基金经理、基金净值、基金分红、基金持仓等数据。",
+    description: "获取公募基金和ETF相关数据，包括基金列表、基金经理、基金净值、基金分红、基金持仓、基金公司、ETF复权因子、销售保有规模和场内基金专业因子等数据。",
     parameters: {
         type: "object",
         properties: {
@@ -11,8 +11,8 @@ export const fundData = {
             },
             data_type: {
                 type: "string",
-                description: "数据类型，可选值：basic(基金列表)、manager(基金经理)、nav(基金净值)、dividend(基金分红)、portfolio(基金持仓)、all(全部数据)",
-                enum: ["basic", "manager", "nav", "dividend", "portfolio", "all"]
+                description: "数据类型，可选值：basic(基金列表)、manager(基金经理)、nav(基金净值)、dividend(基金分红)、portfolio(基金持仓)、company(基金管理人列表)、adjustment(ETF/基金复权因子)、sales_volume(销售机构公募基金保有规模)、factor(场内基金专业技术因子)、all(基础组合数据)",
+                enum: ["basic", "manager", "nav", "dividend", "portfolio", "company", "adjustment", "sales_volume", "factor", "all"]
             },
             start_date: {
                 type: "string",
@@ -25,9 +25,25 @@ export const fundData = {
             period: {
                 type: "string",
                 description: "特定报告期，格式为YYYYMMDD。例如：'20231231'表示2023年年报，'20240630'表示2024年中报，'20220630'表示2022年三季报，'20240331'表示2024年一季报。指定此参数时将忽略start_date和end_date"
+            },
+            trade_date: {
+                type: "string",
+                description: "交易日期，格式为YYYYMMDD。用于 adjustment/factor 等按交易日查询的分支"
+            },
+            name: {
+                type: "string",
+                description: "机构名称。用于 sales_volume 查询销售机构保有规模"
+            },
+            year: {
+                type: "string",
+                description: "年度。用于 sales_volume，例如'2024'"
+            },
+            quarter: {
+                type: "string",
+                description: "季度。用于 sales_volume，例如'1'、'2'、'3'、'4'"
             }
         },
-        required: ["data_type", "ts_code"]
+        required: ["data_type"]
     },
     async run(args) {
         try {
@@ -58,7 +74,12 @@ export const fundData = {
                         });
                         continue;
                     }
-                    const result = await fetchFundData(dataType, args.ts_code, args.period, args.start_date || defaultStartDate, args.end_date || defaultEndDate, TUSHARE_API_KEY, TUSHARE_API_URL);
+                    const result = await fetchFundData(dataType, args.ts_code, args.period, args.start_date || defaultStartDate, args.end_date || defaultEndDate, {
+                        tradeDate: args.trade_date,
+                        name: args.name,
+                        year: args.year,
+                        quarter: args.quarter,
+                    }, TUSHARE_API_KEY, TUSHARE_API_URL);
                     if (result.data && result.data.length > 0) {
                         results.push({
                             type: dataType,
@@ -96,7 +117,7 @@ export const fundData = {
     }
 };
 // 获取基金数据的通用函数
-async function fetchFundData(dataType, tsCode, period, startDate, endDate, apiKey, apiUrl) {
+async function fetchFundData(dataType, tsCode, period, startDate, endDate, options, apiKey, apiUrl) {
     const apiConfigs = {
         basic: {
             api_name: "fund_basic",
@@ -117,6 +138,22 @@ async function fetchFundData(dataType, tsCode, period, startDate, endDate, apiKe
         portfolio: {
             api_name: "fund_portfolio",
             default_fields: "ts_code,ann_date,end_date,symbol,mkv,amount,stk_mkv_ratio,stk_float_ratio"
+        },
+        company: {
+            api_name: "fund_company",
+            default_fields: "name,shortname,province,city,address,phone,office,website,chairman,manager,reg_capital,setup_date,end_date,employees,main_business,org_code,credit_code,short_enname"
+        },
+        adjustment: {
+            api_name: "fund_adj",
+            default_fields: "ts_code,trade_date,adj_factor"
+        },
+        sales_volume: {
+            api_name: "fund_sales_vol",
+            default_fields: "year,quarter,inst_name,fund_scale,scale,rank"
+        },
+        factor: {
+            api_name: "fund_factor_pro",
+            default_fields: "ts_code,trade_date,open,high,low,close,pre_close,change,pct_change,vol,amount,ma_bfq_5,ma_bfq_10,ma_bfq_20,ma_bfq_60,macd_dif_bfq,macd_dea_bfq,macd_bfq,kdj_k_bfq,kdj_d_bfq,kdj_bfq,rsi_bfq_6,rsi_bfq_12,rsi_bfq_24,boll_upper_bfq,boll_mid_bfq,boll_lower_bfq"
         }
     };
     const config = apiConfigs[dataType];
@@ -169,7 +206,44 @@ async function fetchFundData(dataType, tsCode, period, startDate, endDate, apiKe
                 params.params.end_date = endDate;
         }
     }
-    console.log(`调用${config.api_name} API，参数:`, JSON.stringify(params, null, 2));
+    else if (dataType === 'company') {
+        // fund_company has no useful filter in the official schema.
+    }
+    else if (dataType === 'adjustment') {
+        if (tsCode)
+            params.params.ts_code = tsCode;
+        if (options?.tradeDate || period) {
+            params.params.trade_date = options?.tradeDate || period;
+        }
+        else {
+            if (startDate)
+                params.params.start_date = startDate;
+            if (endDate)
+                params.params.end_date = endDate;
+        }
+    }
+    else if (dataType === 'sales_volume') {
+        if (options?.name)
+            params.params.name = options.name;
+        if (options?.year)
+            params.params.year = options.year;
+        if (options?.quarter)
+            params.params.quarter = options.quarter;
+    }
+    else if (dataType === 'factor') {
+        if (tsCode)
+            params.params.ts_code = tsCode;
+        if (options?.tradeDate || period) {
+            params.params.trade_date = options?.tradeDate || period;
+        }
+        else {
+            if (startDate)
+                params.params.start_date = startDate;
+            if (endDate)
+                params.params.end_date = endDate;
+        }
+    }
+    console.log(`调用${config.api_name} API，参数:`, JSON.stringify(redactToken(params), null, 2));
     // 设置请求超时
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
@@ -265,7 +339,7 @@ async function fetchFundShareData(tsCode, startDate, endDate, period, apiKey, ap
         if (endDate)
             params.params.end_date = endDate;
     }
-    console.log(`调用fund_share API，参数:`, JSON.stringify(params, null, 2));
+    console.log(`调用fund_share API，参数:`, JSON.stringify(redactToken(params), null, 2));
     // 设置请求超时
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
@@ -337,6 +411,18 @@ function formatFundData(results, tsCode) {
                 case 'portfolio':
                     output += formatPortfolioData(result.data);
                     break;
+                case 'company':
+                    output += formatFundCompanyData(result.data);
+                    break;
+                case 'adjustment':
+                    output += formatFundAdjustmentData(result.data);
+                    break;
+                case 'sales_volume':
+                    output += formatFundSalesVolumeData(result.data);
+                    break;
+                case 'factor':
+                    output += formatFundFactorData(result.data);
+                    break;
                 default:
                     output += formatGenericFundData(result.data, result.fields);
             }
@@ -351,7 +437,11 @@ function getDataTypeName(type) {
         manager: '基金经理',
         nav: '基金净值',
         dividend: '基金分红',
-        portfolio: '基金持仓'
+        portfolio: '基金持仓',
+        company: '基金管理人列表',
+        adjustment: 'ETF/基金复权因子',
+        sales_volume: '销售机构公募基金保有规模',
+        factor: '场内基金专业技术因子'
     };
     return names[type] || type;
 }
@@ -482,6 +572,50 @@ function formatPortfolioData(data) {
     });
     return output;
 }
+function formatFundCompanyData(data) {
+    let output = '| 管理人 | 简称 | 地区 | 注册资本 | 成立日期 | 员工数 | 网站 |\n';
+    output += '|--------|------|------|----------|----------|--------|------|\n';
+    data.slice(0, 80).forEach(item => {
+        output += `| ${item.name || 'N/A'} | ${item.shortname || 'N/A'} | ${[item.province, item.city].filter(Boolean).join('/') || 'N/A'} | ${formatNumber(item.reg_capital)} | ${item.setup_date || 'N/A'} | ${item.employees || 'N/A'} | ${item.website || 'N/A'} |\n`;
+    });
+    if (data.length > 80)
+        output += `\n注：仅显示前80条，共${data.length}条。\n`;
+    return output;
+}
+function formatFundAdjustmentData(data) {
+    const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+    let output = '| 交易日期 | 基金代码 | 复权因子 |\n';
+    output += '|----------|----------|----------|\n';
+    sorted.forEach(item => {
+        output += `| ${item.trade_date || 'N/A'} | ${item.ts_code || 'N/A'} | ${formatNumber(item.adj_factor)} |\n`;
+    });
+    return output;
+}
+function formatFundSalesVolumeData(data) {
+    const sorted = [...data].sort((a, b) => {
+        const periodB = `${b.year || ''}${b.quarter || ''}`;
+        const periodA = `${a.year || ''}${a.quarter || ''}`;
+        const periodCmp = periodB.localeCompare(periodA);
+        if (periodCmp !== 0)
+            return periodCmp;
+        return (parseFloat(a.rank) || 9999) - (parseFloat(b.rank) || 9999);
+    });
+    let output = '| 年度 | 季度 | 排名 | 机构 | 股票+混合基金保有规模 | 非货基金保有规模 |\n';
+    output += '|------|------|------|------|----------------------|----------------|\n';
+    sorted.forEach(item => {
+        output += `| ${item.year || 'N/A'} | ${item.quarter || 'N/A'} | ${item.rank || 'N/A'} | ${item.inst_name || 'N/A'} | ${formatNumber(item.fund_scale)} | ${formatNumber(item.scale)} |\n`;
+    });
+    return output;
+}
+function formatFundFactorData(data) {
+    const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+    let output = '| 日期 | 代码 | 收盘 | 涨跌幅% | 成交量 | MA5 | MA20 | MACD | KDJ-K | RSI6 | BOLL上轨 | BOLL中轨 | BOLL下轨 |\n';
+    output += '|------|------|------|---------|--------|-----|------|------|-------|------|----------|----------|----------|\n';
+    sorted.forEach(item => {
+        output += `| ${item.trade_date || 'N/A'} | ${item.ts_code || 'N/A'} | ${formatNumber(item.close)} | ${formatPercent(item.pct_change)} | ${formatNumber(item.vol)} | ${formatNumber(item.ma_bfq_5)} | ${formatNumber(item.ma_bfq_20)} | ${formatNumber(item.macd_bfq)} | ${formatNumber(item.kdj_k_bfq)} | ${formatNumber(item.rsi_bfq_6)} | ${formatNumber(item.boll_upper_bfq)} | ${formatNumber(item.boll_mid_bfq)} | ${formatNumber(item.boll_lower_bfq)} |\n`;
+    });
+    return output;
+}
 function formatGenericFundData(data, fields) {
     let output = '';
     if (data.length === 0)
@@ -527,4 +661,10 @@ function formatPercent(num) {
     if (isNaN(value))
         return 'N/A';
     return value.toFixed(2);
+}
+function redactToken(payload) {
+    return {
+        ...payload,
+        token: payload.token ? '[redacted]' : payload.token
+    };
 }

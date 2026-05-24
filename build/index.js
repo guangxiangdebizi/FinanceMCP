@@ -3,7 +3,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { toolList, dispatchTool } from "./dispatch.js";
-const server = new Server({ name: "FinanceMCP", version: "1.0.0" }, { capabilities: { tools: {} } });
+const server = new Server({ name: "FinanceMCP", version: "4.8.1" }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: toolList };
 });

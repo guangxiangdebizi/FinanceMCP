@@ -120,7 +120,7 @@ app.post('/mcp', async (req, res) => {
         sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
         res.setHeader('Mcp-Session-Id', newId);
         console.log(`✅ [MCP-initialize] New session created: ${newId}`);
-        return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '1.0.0' } }, id: body.id });
+        return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.8.1' } }, id: body.id });
     }
     if (method === 'tools/list') {
         console.log(`📋 [MCP-tools/list] Returning ${toolList.length} tools`);

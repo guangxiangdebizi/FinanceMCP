@@ -3,7 +3,7 @@ import { callTushare } from '../utils/tushareClient.js';
 
 export const indexData = {
   name: "index_data",
-  description: "获取指定股票指数的数据，支持日线行情、指数基本信息和估值指标",
+  description: "获取指定股票指数的数据，支持日线/周线/月线行情、国际主要指数、指数基本信息和估值指标",
   parameters: {
     type: "object",
     properties: {
@@ -21,8 +21,8 @@ export const indexData = {
       },
       data_type: {
         type: "string",
-        description: "数据类型：daily(日线行情，默认)、basic(指数基本信息)、valuation(估值指标-市盈率/市净率/换手率/总市值等，使用index_dailybasic接口)",
-        enum: ["daily", "basic", "valuation"]
+        description: "数据类型：daily(日线行情，默认)、weekly(周线行情)、monthly(月线行情)、global(国际主要指数日线)、basic(指数基本信息)、valuation(估值指标-市盈率/市净率/换手率/总市值等，使用index_dailybasic接口)",
+        enum: ["daily", "weekly", "monthly", "global", "basic", "valuation"]
       }
     },
     required: ["code"]
@@ -120,6 +120,25 @@ export const indexData = {
         });
         text += `\n---\n*数据来源: Tushare index_dailybasic*`;
         return { content: [{ type: 'text', text }] };
+      }
+
+      if (args.data_type === 'weekly' || args.data_type === 'monthly' || args.data_type === 'global') {
+        const today = new Date();
+        const defaultEnd = today.toISOString().slice(0, 10).replace(/-/g, '');
+        const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        const defaultStart = oneYearAgo.toISOString().slice(0, 10).replace(/-/g, '');
+        const config = getIndexHistoryConfig(args.data_type);
+        const { data } = await callTushare(
+          config.apiName,
+          {
+            ts_code: args.code,
+            start_date: args.start_date || defaultStart,
+            end_date: args.end_date || defaultEnd,
+          },
+          config.fields
+        );
+        if (!data.length) throw new Error(`未找到指数${args.code}的${config.title}数据`);
+        return { content: [{ type: 'text', text: formatIndexHistory(data, args.code, config.title, config.apiName) }] };
       }
 
       // 默认参数设置
@@ -239,3 +258,48 @@ export const indexData = {
     }
   }
 }; 
+
+function getIndexHistoryConfig(dataType: string) {
+  if (dataType === 'weekly') {
+    return {
+      apiName: 'index_weekly',
+      title: '周线行情',
+      fields: 'ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount'
+    };
+  }
+  if (dataType === 'monthly') {
+    return {
+      apiName: 'index_monthly',
+      title: '月线行情',
+      fields: 'ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount'
+    };
+  }
+  return {
+    apiName: 'index_global',
+    title: '国际主要指数日线行情',
+    fields: 'ts_code,trade_date,open,close,high,low,pre_close,change,pct_chg,swing,vol,amount'
+  };
+}
+
+function formatIndexHistory(data: Record<string, any>[], code: string, title: string, apiName: string): string {
+  const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+  const startDate = sorted[sorted.length - 1]?.trade_date || '';
+  const endDate = sorted[0]?.trade_date || '';
+  const hasSwing = sorted.some(r => r.swing !== undefined && r.swing !== null && r.swing !== '');
+
+  let text = `# ${code} 指数${title} (${startDate} 至 ${endDate})\n\n`;
+  text += hasSwing
+    ? `| 日期 | 开盘 | 最高 | 最低 | 收盘 | 涨跌 | 涨跌幅% | 振幅% | 成交量 | 成交额 |\n`
+    : `| 日期 | 开盘 | 最高 | 最低 | 收盘 | 涨跌 | 涨跌幅% | 成交量 | 成交额 |\n`;
+  text += hasSwing
+    ? `|------|------|------|------|------|------|---------|-------|--------|--------|\n`
+    : `|------|------|------|------|------|------|---------|--------|--------|\n`;
+  sorted.forEach(r => {
+    const n = (v: any) => v !== undefined && v !== null && v !== '' ? String(v) : 'N/A';
+    text += hasSwing
+      ? `| ${n(r.trade_date)} | ${n(r.open)} | ${n(r.high)} | ${n(r.low)} | ${n(r.close)} | ${n(r.change)} | ${n(r.pct_chg)} | ${n(r.swing)} | ${n(r.vol)} | ${n(r.amount)} |\n`
+      : `| ${n(r.trade_date)} | ${n(r.open)} | ${n(r.high)} | ${n(r.low)} | ${n(r.close)} | ${n(r.change)} | ${n(r.pct_chg)} | ${n(r.vol)} | ${n(r.amount)} |\n`;
+  });
+  text += `\n---\n*数据来源: Tushare ${apiName}*`;
+  return text;
+}

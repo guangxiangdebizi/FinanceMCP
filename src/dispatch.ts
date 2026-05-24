@@ -91,6 +91,10 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
         start_date: args?.start_date ? String(args.start_date) : undefined,
         end_date: args?.end_date ? String(args.end_date) : undefined,
         period: args?.period ? String(args.period) : undefined,
+        trade_date: args?.trade_date ? String(args.trade_date) : undefined,
+        name: args?.name ? String(args.name) : undefined,
+        year: args?.year ? String(args.year) : undefined,
+        quarter: args?.quarter ? String(args.quarter) : undefined,
       });
     case 'fund_manager_by_name':
       return await runFundManagerByName({
@@ -103,6 +107,7 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
         data_type: String(args?.data_type),
         start_date: args?.start_date ? String(args.start_date) : undefined,
         end_date: args?.end_date ? String(args.end_date) : undefined,
+        period: args?.period ? String(args.period) : undefined,
       });
     case 'block_trade':
       return await blockTrade.run({

@@ -4,12 +4,13 @@ import { callTushare } from '../utils/tushareClient.js';
 export const moneyFlow = {
   name: "money_flow",
   description: [
-    "获取个股/大盘/板块/北向资金的资金流向数据（主力、超大单、大单、中单、小单的净流入净额与净占比，以及港股通持股/沪深港通十大成交股）。",
+    "获取个股/大盘/板块/北向资金的资金流向数据（主力、超大单、大单、中单、小单的净流入净额与净占比，以及沪深港通流量、港股通持股/沪深港通十大成交股）。",
     "数据源与接口：",
     "1) 个股 → Tushare 标准接口 moneyflow（沪深A股主动买卖单统计，2000 积分可正式调取；个股无涨跌幅/净占比字段，输出会显示 N/A）。",
     "2) 大盘 → Tushare 东方财富接口 moneyflow_mkt_dc（5000 积分可正式调取）。",
     "3) 板块（行业/概念/地域）→ Tushare 东方财富接口 moneyflow_ind_dc（6000 积分可正式调取，板块代码形如 'BK0486.DC'）。",
-    "4) 北向资金 → hk_hold / hsgt_top10（港股通持股明细 / 沪深港通十大成交股）。",
+    "4) 北向资金 → moneyflow_hsgt / hk_hold / hsgt_top10（沪深港通每日资金流 / 港股通持股明细 / 沪深港通十大成交股）。",
+    "5) 同花顺资金流 → moneyflow_ths / moneyflow_cnt_ths（个股与概念板块）。",
     "注意：大盘与板块接口为东财数据源，若 Token 积分未达门槛，Tushare 会限制为每小时/每日仅 2 次试用，此时会返回明确的访问受限提示。"
   ].join(" "),
   parameters: {
@@ -17,7 +18,7 @@ export const moneyFlow = {
     properties: {
       query_type: {
         type: "string",
-        description: "查询类型：stock=个股，market=大盘，sector=板块，northbound=北向资金（港股通持股/沪深港通十大成交股）。默认根据ts_code自动判断"
+        description: "查询类型：stock=个股，market=大盘，sector=板块，northbound=北向资金持股/十大成交，hsgt_flow=沪深港通每日资金流，stock_ths=同花顺个股资金流，concept_ths=同花顺概念板块资金流。默认根据ts_code自动判断"
       },
       ts_code: {
         type: "string",
@@ -70,6 +71,24 @@ export const moneyFlow = {
           throw new Error('未找到北向资金数据，请确认 trade_date 为有效交易日');
         }
         return { content: [{ type: 'text', text: formatNorthboundData(result.data, result.apiUsed, args.ts_code) }] };
+      }
+
+      if (queryType === 'hsgt_flow') {
+        const { data } = await fetchHsgtMoneyFlow(args.trade_date, args.start_date, args.end_date);
+        if (!data.length) throw new Error('未找到沪深港通资金流数据，请确认日期参数');
+        return { content: [{ type: 'text', text: formatHsgtMoneyFlow(data) }] };
+      }
+
+      if (queryType === 'stock_ths') {
+        const { data } = await fetchThsStockMoneyFlow(args.ts_code, args.trade_date, args.start_date, args.end_date);
+        if (!data.length) throw new Error('未找到同花顺个股资金流数据，请确认股票代码或日期参数');
+        return { content: [{ type: 'text', text: formatThsStockMoneyFlow(data, args.ts_code) }] };
+      }
+
+      if (queryType === 'concept_ths') {
+        const { data } = await fetchThsConceptMoneyFlow(args.ts_code, args.trade_date, args.start_date, args.end_date);
+        if (!data.length) throw new Error('未找到同花顺概念资金流数据，请确认概念代码或日期参数');
+        return { content: [{ type: 'text', text: formatThsConceptMoneyFlow(data, args.ts_code) }] };
       }
 
       if (!queryType) {
@@ -338,6 +357,107 @@ function formatNorthboundData(data: Record<string, any>[], apiUsed: string, tsCo
   return out;
 }
 
+// ── V3: 沪深港通与同花顺资金流 ─────────────────────────────────────────────
+
+async function fetchHsgtMoneyFlow(
+  tradeDate?: string,
+  startDate?: string,
+  endDate?: string
+) {
+  const params: Record<string, any> = {};
+  if (tradeDate) {
+    params.trade_date = tradeDate;
+  } else {
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+  }
+  return await callTushare(
+    'moneyflow_hsgt',
+    params,
+    'trade_date,ggt_ss,ggt_sz,hgt,sgt,north_money,south_money'
+  );
+}
+
+async function fetchThsStockMoneyFlow(
+  tsCode?: string,
+  tradeDate?: string,
+  startDate?: string,
+  endDate?: string
+) {
+  const params: Record<string, any> = {};
+  if (tsCode) params.ts_code = tsCode;
+  if (tradeDate) {
+    params.trade_date = tradeDate;
+  } else {
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+  }
+  return await callTushare(
+    'moneyflow_ths',
+    params,
+    'trade_date,ts_code,name,pct_change,latest,net_amount,net_d5_amount,buy_lg_amount,buy_lg_amount_rate,buy_md_amount,buy_md_amount_rate,buy_sm_amount,buy_sm_amount_rate'
+  );
+}
+
+async function fetchThsConceptMoneyFlow(
+  tsCode?: string,
+  tradeDate?: string,
+  startDate?: string,
+  endDate?: string
+) {
+  const params: Record<string, any> = {};
+  if (tsCode) params.ts_code = tsCode;
+  if (tradeDate) {
+    params.trade_date = tradeDate;
+  } else {
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+  }
+  return await callTushare(
+    'moneyflow_cnt_ths',
+    params,
+    'trade_date,ts_code,name,lead_stock,close_price,pct_change,industry_index,company_num,pct_change_stock,net_buy_amount,net_sell_amount,net_amount'
+  );
+}
+
+function formatHsgtMoneyFlow(data: Record<string, any>[]): string {
+  const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+  let out = `# 沪深港通每日资金流\n\n`;
+  out += `| 日期 | 港股通沪(亿) | 港股通深(亿) | 沪股通(亿) | 深股通(亿) | 北向资金(亿) | 南向资金(亿) |\n`;
+  out += `|------|-------------|-------------|-----------|-----------|-------------|-------------|\n`;
+  sorted.forEach(r => {
+    out += `| ${r.trade_date || 'N/A'} | ${formatMoneyWan(r.ggt_ss)} | ${formatMoneyWan(r.ggt_sz)} | ${formatMoneyWan(r.hgt)} | ${formatMoneyWan(r.sgt)} | ${formatMoneyWan(r.north_money)} | ${formatMoneyWan(r.south_money)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare moneyflow_hsgt*`;
+  return out;
+}
+
+function formatThsStockMoneyFlow(data: Record<string, any>[], tsCode?: string): string {
+  const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+  const title = tsCode ? `同花顺个股资金流 — ${tsCode}` : '同花顺个股资金流';
+  let out = `# ${title}\n\n`;
+  out += `| 日期 | 代码 | 名称 | 最新价 | 涨跌幅% | 当日净额(万) | 5日净额(万) | 大单净额(万) | 大单占比% | 中单净额(万) | 小单净额(万) |\n`;
+  out += `|------|------|------|--------|---------|------------|------------|------------|----------|------------|------------|\n`;
+  sorted.forEach(r => {
+    out += `| ${r.trade_date || 'N/A'} | ${r.ts_code || 'N/A'} | ${r.name || 'N/A'} | ${formatNumber(r.latest)} | ${formatPercent(r.pct_change)} | ${formatNumber(r.net_amount)} | ${formatNumber(r.net_d5_amount)} | ${formatNumber(r.buy_lg_amount)} | ${formatPercent(r.buy_lg_amount_rate)} | ${formatNumber(r.buy_md_amount)} | ${formatNumber(r.buy_sm_amount)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare moneyflow_ths*`;
+  return out;
+}
+
+function formatThsConceptMoneyFlow(data: Record<string, any>[], tsCode?: string): string {
+  const sorted = [...data].sort((a, b) => (b.trade_date || '').localeCompare(a.trade_date || ''));
+  const title = tsCode ? `同花顺概念资金流 — ${tsCode}` : '同花顺概念资金流';
+  let out = `# ${title}\n\n`;
+  out += `| 日期 | 概念代码 | 概念 | 领涨股 | 收盘价 | 涨跌幅% | 公司数 | 上涨家数% | 净买入(万) | 净卖出(万) | 净额(万) |\n`;
+  out += `|------|----------|------|--------|--------|---------|--------|----------|------------|------------|----------|\n`;
+  sorted.forEach(r => {
+    out += `| ${r.trade_date || 'N/A'} | ${r.ts_code || 'N/A'} | ${r.name || 'N/A'} | ${r.lead_stock || 'N/A'} | ${formatNumber(r.close_price)} | ${formatPercent(r.pct_change)} | ${r.company_num || 'N/A'} | ${formatPercent(r.pct_change_stock)} | ${formatNumber(r.net_buy_amount)} | ${formatNumber(r.net_sell_amount)} | ${formatNumber(r.net_amount)} |\n`;
+  });
+  out += `\n---\n*数据来源: Tushare moneyflow_cnt_ths*`;
+  return out;
+}
+
 // ── 原有 Tushare 调用函数（stock/market/sector 分支保留）────────────────────
 async function callTushareAPI(params: any, apiUrl: string) {
   const controller = new AbortController();
@@ -578,6 +698,13 @@ function formatMoney(amount: number): string {
     return (amountInWan / 10000).toFixed(2) + '亿';
   }
   return amountInWan.toFixed(2) + '万';
+}
+
+function formatMoneyWan(num: any): string {
+  if (num === null || num === undefined || num === '' || isNaN(parseFloat(num))) {
+    return 'N/A';
+  }
+  return parseFloat(num).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
 // 格式化数字
