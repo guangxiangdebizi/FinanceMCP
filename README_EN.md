@@ -11,6 +11,16 @@
 
 </div>
 
+## 🔗 Project Integration: FinNote Intelligent Financial Document System
+
+FinanceMCP has been integrated with [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) to form **FinNote**, an end-to-end system designed for financial research, AI analysis, and intelligent document management. FinNote participated in the Shanghai Collegiate Computer Application Ability Competition and won the provincial second prize. The online deployment is available at: [https://finvestai.top/](https://finvestai.top/).
+
+In the FinNote architecture, FinanceMCP serves as the backend financial data MCP server. Built with Node.js, Express, and MCP SDK, it encapsulates and standardizes multi-source financial data capabilities. The system integrates 100+ financial data interfaces and organizes them into 18 MCP tools, enabling large language models to access stocks, funds, bonds, macroeconomic indicators, financial news, technical indicators, and other financial data.
+
+The MarkiNote / FinNote frontend acts as the AI Agent-driven intelligent document system. It receives users' natural language requests, presents the AI analysis process, and stores the generated analysis results as manageable, traceable, and reusable document assets. The two components communicate through HTTP, forming a complete closed loop from financial data retrieval to intelligent analysis and finally to document preservation and knowledge management.
+
+Therefore, FinanceMCP can be used not only as an independent financial data MCP server for Claude, GPT, and other large language models, but also as the financial data backend of FinNote, providing real-time, structured, and callable data capabilities for the AI Agent document system.
+
 ## 📑 Table of Contents
 
 - [🌟 Public Cloud Service (Free)](#-public-cloud-service-free)
