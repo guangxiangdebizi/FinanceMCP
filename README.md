@@ -10,6 +10,16 @@
 **基于MCP协议的专业金融数据服务器，集成Tushare API，为Claude等AI助手提供实时金融数据和技术指标分析。**
 </div>
 
+## 🔗 项目联动：FinNote 智能金融文档系统
+
+FinanceMCP 已与 [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 进行项目联动与融合，形成面向金融投研与智能文档管理场景的一体化项目 **FinNote**。该项目已参加上海市大学生计算机应用能力大赛，并获得省级二等奖，在线体验地址为：[https://finvestai.top/](https://finvestai.top/)。
+
+在 FinNote 整体架构中，FinanceMCP 作为后端金融数据 MCP 服务器，基于 Node.js、Express 与 MCP SDK 构建，负责封装和标准化多源金融数据能力。目前系统聚合 100+ 金融数据接口，并整理为 18 个 MCP 工具，为大模型提供股票、基金、债券、宏观经济、财经新闻、技术指标等多类型金融数据调用能力。
+
+MarkiNote / FinNote 前端则作为 AI Agent 驱动的智能文档系统，负责接收用户自然语言需求，展示 AI 分析过程，并将分析结果保存为可管理、可追踪、可复用的文档资产。两者通过 HTTP 通讯，形成从“金融数据获取”到“智能分析”，再到“文档沉淀与知识管理”的完整闭环。
+
+因此，FinanceMCP 不仅可以作为独立的 MCP 金融数据服务器接入 Claude、GPT 等大模型，也可以作为 FinNote 的金融数据后端，为 AI Agent 文档系统提供实时、结构化、可调用的数据基础。
+
 ## 📑 目录
 
 - [🌟 公共云服务(免费)](#-公共云服务免费)
