@@ -2,6 +2,8 @@
   
 # FinanceMCP (Synapse) - 专业金融数据MCP服务器 🚀
 
+[![MCP Toplist](https://mcptoplist.com/badge/pulsemcp%2Fguangxiangdebizi-finance-market-data.svg)](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
+
 <div align="center">
   <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
 
