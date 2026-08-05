@@ -1,5 +1,12 @@
 import { TUSHARE_CONFIG } from '../config.js';
 import { callTushare } from '../utils/tushareClient.js';
+import {
+  INDEX_DATA_TYPES,
+  InvalidToolInputError,
+  normalizeFinancialCode,
+  normalizeOptionalDate,
+  normalizeOptionalEnumInput,
+} from '../utils/inputValidation.js';
 
 export const indexData = {
   name: "index_data",
@@ -9,6 +16,8 @@ export const indexData = {
     properties: {
       code: {
         type: "string",
+        maxLength: 32,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$",
         description: "指数代码，如'000001.SH'表示上证指数，'399001.SZ'表示深证成指"
       },
       start_date: {
@@ -29,7 +38,15 @@ export const indexData = {
   },
   async run(args: { code: string; start_date?: string; end_date?: string; data_type?: string }) {
     try {
-      console.log(`使用Tushare API获取指数${args.code}的数据`);
+      const code = normalizeFinancialCode(args.code, { maxLength: 32 });
+      args = {
+        ...args,
+        code,
+        start_date: normalizeOptionalDate(args.start_date, 'start_date'),
+        end_date: normalizeOptionalDate(args.end_date, 'end_date'),
+        data_type: normalizeOptionalEnumInput(args.data_type, INDEX_DATA_TYPES, 'data_type'),
+      };
+      console.log(`使用Tushare API获取指数${code}的数据`);
 
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
@@ -246,12 +263,15 @@ export const indexData = {
       }
     } catch (error) {
       console.error("获取指数数据失败:", error);
+      const message = error instanceof InvalidToolInputError
+        ? '输入参数无效，请按支持格式提交指数代码和数据类型。'
+        : '暂时无法获取指数数据，请稍后重试并检查参数。';
       
       return {
         content: [
           {
             type: "text",
-            text: `# 获取指数${args.code}数据失败\n\n无法从Tushare API获取数据：${error instanceof Error ? error.message : String(error)}\n\n请检查指数代码是否正确，常用指数代码：\n- 上证指数: 000001.SH\n- 深证成指: 399001.SZ\n- 创业板指: 399006.SZ\n- 沪深300: 000300.SH\n- 中证500: 000905.SH`
+            text: `# 获取指数数据失败\n\n${message}\n\n请检查指数代码是否正确，常用指数代码：\n- 上证指数: 000001.SH\n- 深证成指: 399001.SZ\n- 创业板指: 399006.SZ\n- 沪深300: 000300.SH\n- 中证500: 000905.SH`
           }
         ]
       };

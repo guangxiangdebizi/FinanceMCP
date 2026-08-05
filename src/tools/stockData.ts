@@ -1,5 +1,14 @@
 import { TUSHARE_CONFIG } from '../config.js';
 import { resolveStockCodes } from '../utils/stockCodeResolver.js';
+import {
+  InvalidToolInputError,
+  STOCK_MARKET_TYPES,
+  normalizeEnumInput,
+  normalizeFinancialCode,
+  normalizeOptionalDate,
+  normalizeOptionalEnumInput,
+  normalizeOptionalIndicatorList,
+} from '../utils/inputValidation.js';
 import { 
   calculateMACD, 
   calculateKDJ, 
@@ -21,10 +30,13 @@ export const stockData = {
     properties: {
       code: {
         type: "string",
+        maxLength: 40,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$",
         description: "股票/合约/加密资产代码。股票示例：'000001.SZ'(A股平安银行)、'AAPL'(美股)、'00700.HK'(港股)、'USDCNH.FXCM'(外汇)、'CU2501.SHF'(期货)、'159919.SZ'(基金)、'204001.SH'(逆回购)、'113008.SH'(可转债)、'10001313.SH'(期权)。加密示例(需 market_type=crypto，Binance)：推荐标准写法 'BTCUSDT'、'ETHUSDT'、'USDCUSDT'、'FDUSDUSDT' 等；也兼容 'BTC-USDT' 或 'BTC/USDT'。常见报价币：USDT、USDC、FDUSD、TUSD、BUSD、BTC、ETH。注意：若写 'USD' 会自动映射为 'USDT'（如 'BTC-USD' → 'BTCUSDT'）。"
       },
       market_type: {
         type: "string",
+        enum: [...STOCK_MARKET_TYPES],
         description: "市场类型（必需），可选值：cn(A股),us(美股),hk(港股),fx(外汇),futures(期货),fund(基金),repo(债券逆回购),convertible_bond(可转债),options(期权),crypto(加密货币/Binance)"
       },
       start_date: {
@@ -41,6 +53,7 @@ export const stockData = {
       },
       timeframe: {
         type: "string",
+        enum: ["daily", "weekly", "monthly"],
         description: "K线周期，可选值：daily(日线，默认)、weekly(周线)、monthly(月线)。weekly/monthly 仅支持 cn(A股) 市场，其他市场忽略此参数。"
       }
     },
@@ -48,17 +61,20 @@ export const stockData = {
   },
   async run(args: { code: string; market_type: string; start_date?: string; end_date?: string; indicators?: string; timeframe?: string }) {
     try {
-      // 添加调试日志
-      console.log('接收到的参数:', args);
-      
-      // 检查market_type参数
-      if (!args.market_type) {
-        throw new Error('请指定market_type参数：cn(A股)、us(美股)、hk(港股)、fx(外汇)、futures(期货)、fund(基金)、repo(债券逆回购)、convertible_bond(可转债)、options(期权)');
-      }
-      
-      const marketType = args.market_type.trim().toLowerCase();
+      const marketType = normalizeEnumInput(args.market_type, STOCK_MARKET_TYPES, 'market_type');
+      const code = normalizeFinancialCode(args.code, { allowSlash: marketType === 'crypto' });
+      args = {
+        ...args,
+        code,
+        market_type: marketType,
+        start_date: normalizeOptionalDate(args.start_date, 'start_date'),
+        end_date: normalizeOptionalDate(args.end_date, 'end_date'),
+        indicators: normalizeOptionalIndicatorList(args.indicators),
+        timeframe: normalizeOptionalEnumInput(args.timeframe, ['daily', 'weekly', 'monthly'] as const, 'timeframe'),
+      };
+
       console.log(`使用的市场类型: ${marketType}`);
-      console.log(`使用Tushare API获取${marketType}市场股票${args.code}的行情数据`);
+      console.log(`使用Tushare API获取${marketType}市场股票${code}的行情数据`);
       
       // 解析技术指标参数
       const requestedIndicators = args.indicators ? args.indicators.trim().split(/\s+/) : [];
@@ -90,12 +106,6 @@ export const stockData = {
         console.log(`技术指标需要${requiredDays}天历史数据，扩展开始日期从 ${userStartDate} 到 ${actualStartDate}`);
       }
 
-      // 验证市场类型
-      const validMarkets = ['cn', 'us', 'hk', 'fx', 'futures', 'fund', 'repo', 'convertible_bond', 'options', 'crypto'];
-      if (!validMarkets.includes(marketType)) {
-        throw new Error(`不支持的市场类型: ${marketType}。支持的类型有: ${validMarkets.join(', ')}`);
-      }
-      
       // 加密货币市场（Binance）分支：
       if (marketType === 'crypto') {
         console.log(`使用 Binance 获取加密资产 ${args.code} 的逐日K线 (OHLCV)`);
@@ -1071,12 +1081,15 @@ export const stockData = {
       }
     } catch (error) {
       console.error("获取股票数据失败:", error);
+      const message = error instanceof InvalidToolInputError
+        ? '输入参数无效，请按支持格式提交股票代码和市场类型。'
+        : '暂时无法获取数据，请稍后重试并检查参数。';
       
       return {
         content: [
           {
             type: "text",
-            text: `# 获取股票${args.code}数据失败\n\n无法从Tushare API获取数据：${error instanceof Error ? error.message : String(error)}\n\n请检查股票代码和市场类型是否正确：\n- A股格式："000001.SZ"\n- 美股格式："AAPL"\n- 港股格式："00700.HK"\n- 外汇格式："USDCNH.FXCM"（美元人民币）\n- 期货格式："CU2501.SHF"\n- 基金格式："159919.SZ"\n- 债券逆回购格式："204001.SH"\n- 可转债格式："113008.SH"\n- 期权格式："10001313.SH"\n\n技术指标使用说明（必须明确指定参数）：\n- **MACD**: macd(快线,慢线,信号线) - 例：macd(12,26,9)\n- **RSI**: rsi(周期) - 例：rsi(14)\n- **KDJ**: kdj(K周期,K平滑,D平滑) - 例：kdj(9,3,3)\n- **布林带**: boll(周期,标准差倍数) - 例：boll(20,2)\n- **移动平均线**: ma(周期) - 例：ma(5)、ma(10)、ma(20)\n\n使用示例：\n- "macd(12,26,9) rsi(14)"\n- "kdj(9,3,3) boll(20,2) ma(30)"\n- "macd(5,10,5) ma(5) ma(10)"`
+            text: `# 获取股票数据失败\n\n${message}\n\n请检查股票代码和市场类型是否正确：\n- A股格式："000001.SZ"\n- 美股格式："AAPL"\n- 港股格式："00700.HK"\n- 外汇格式："USDCNH.FXCM"（美元人民币）\n- 期货格式："CU2501.SHF"\n- 基金格式："159919.SZ"\n- 债券逆回购格式："204001.SH"\n- 可转债格式："113008.SH"\n- 期权格式："10001313.SH"\n\n技术指标使用说明（必须明确指定参数）：\n- **MACD**: macd(快线,慢线,信号线) - 例：macd(12,26,9)\n- **RSI**: rsi(周期) - 例：rsi(14)\n- **KDJ**: kdj(K周期,K平滑,D平滑) - 例：kdj(9,3,3)\n- **布林带**: boll(周期,标准差倍数) - 例：boll(20,2)\n- **移动平均线**: ma(周期) - 例：ma(5)、ma(10)、ma(20)\n\n使用示例：\n- "macd(12,26,9) rsi(14)"\n- "kdj(9,3,3) boll(20,2) ma(30)"\n- "macd(5,10,5) ma(5) ma(10)"`
           }
         ]
       };

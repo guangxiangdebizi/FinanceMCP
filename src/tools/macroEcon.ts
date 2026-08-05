@@ -1,4 +1,10 @@
 import { TUSHARE_CONFIG } from '../config.js';
+import {
+  MACRO_INDICATORS,
+  InvalidToolInputError,
+  normalizeEnumInput,
+  normalizeOptionalDate,
+} from '../utils/inputValidation.js';
 
 export const macroEcon = {
   name: "macro_econ",
@@ -8,6 +14,7 @@ export const macroEcon = {
     properties: {
       indicator: {
         type: "string",
+        enum: [...MACRO_INDICATORS],
         description: "指标类型，可选值：shibor(上海银行间同业拆放利率)、lpr(贷款市场报价利率)、gdp(国内生产总值)、cpi(居民消费价格指数)、ppi(工业生产者出厂价格指数)、cn_m(货币供应量)、cn_pmi(采购经理指数)、cn_sf(社会融资规模)、shibor_quote(Shibor银行报价数据)、libor(伦敦银行间同业拆借利率)、hibor(香港银行间同业拆借利率)"
       },
       start_date: {
@@ -23,18 +30,19 @@ export const macroEcon = {
   },
   async run(args: { indicator: string; start_date?: string; end_date?: string }) {
     try {
-      console.log(`使用Tushare API获取${args.indicator}宏观经济数据`);
+      const indicator = normalizeEnumInput(args.indicator, MACRO_INDICATORS, 'indicator');
+      args = {
+        ...args,
+        indicator,
+        start_date: normalizeOptionalDate(args.start_date, 'start_date'),
+        end_date: normalizeOptionalDate(args.end_date, 'end_date'),
+      };
+      console.log(`使用Tushare API获取${indicator}宏观经济数据`);
       
       // 使用全局配置中的Tushare API设置
       const TUSHARE_API_KEY = TUSHARE_CONFIG.API_TOKEN;
       const TUSHARE_API_URL = TUSHARE_CONFIG.API_URL;
       
-      // 验证指标类型
-      const validIndicators = ['shibor', 'lpr', 'gdp', 'cpi', 'ppi', 'cn_m', 'cn_pmi', 'cn_sf', 'shibor_quote', 'libor', 'hibor'];
-      if (!validIndicators.includes(args.indicator)) {
-        throw new Error(`不支持的指标类型: ${args.indicator}。支持的类型有: ${validIndicators.join(', ')}`);
-      }
-
       // 根据指标类型设置不同的默认时间范围
       const today = new Date();
       const defaultEndDate = today.toISOString().slice(0, 10).replace(/-/g, '');
@@ -423,12 +431,15 @@ ${tableRows.join('\n')}
       }
     } catch (error) {
       console.error("获取宏观经济数据失败:", error);
+      const message = error instanceof InvalidToolInputError
+        ? '输入参数无效，请选择受支持的宏观经济指标。'
+        : '暂时无法获取宏观经济数据，请稍后重试并检查参数。';
       
       return {
         content: [
           {
             type: "text",
-            text: ` 获取${args.indicator}宏观经济数据失败\n\n错误信息: ${error instanceof Error ? error.message : String(error)}\n\n支持的指标类型: \n- shibor: 上海银行间同业拆放利率\n- lpr: 贷款市场报价利率\n- gdp: 国内生产总值\n- cpi: 居民消费价格指数\n- ppi: 工业生产者出厂价格指数\n- cn_m: 货币供应量\n- cn_pmi: 采购经理指数\n- cn_sf: 社会融资规模\n- shibor_quote: Shibor银行报价数据\n- libor: 伦敦银行间同业拆借利率\n- hibor: 香港银行间同业拆借利率`
+            text: ` 获取宏观经济数据失败\n\n${message}\n\n支持的指标类型: \n- shibor: 上海银行间同业拆放利率\n- lpr: 贷款市场报价利率\n- gdp: 国内生产总值\n- cpi: 居民消费价格指数\n- ppi: 工业生产者出厂价格指数\n- cn_m: 货币供应量\n- cn_pmi: 采购经理指数\n- cn_sf: 社会融资规模\n- shibor_quote: Shibor银行报价数据\n- libor: 伦敦银行间同业拆借利率\n- hibor: 香港银行间同业拆借利率`
           }
         ]
       };
@@ -504,4 +515,4 @@ function dateToQuarter(dateStr: string): string {
 function dateToMonth(dateStr: string): string {
   if (!dateStr || dateStr.length < 8) return "";
   return dateStr.substring(0, 6);
-} 
+}

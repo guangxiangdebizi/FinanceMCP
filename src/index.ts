@@ -9,7 +9,7 @@ import {
 import { toolList, dispatchTool } from "./dispatch.js";
 
 const server = new Server(
-  { name: "FinanceMCP", version: "4.8.1" },
+  { name: "FinanceMCP", version: "4.8.2" },
   { capabilities: { tools: {} } }
 );
 
