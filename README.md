@@ -18,6 +18,11 @@
   </p>
 
   <p>
+    <a href="https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data"><img src="https://mcptoplist.com/badge/pulsemcp%2Fguangxiangdebizi-finance-market-data.svg" alt="FinanceMCP rank on MCP Toplist" /></a>
+    <a href="https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP"><img src="https://img.shields.io/badge/Smithery-Registry-171717?style=flat-square" alt="FinanceMCP on Smithery" /></a>
+  </p>
+
+  <p>
     <a href="#quick-start">快速开始</a> ·
     <a href="#routing">数据源路由</a> ·
     <a href="#providers">API 获取</a> ·
@@ -270,8 +275,15 @@ npm run start:http    # http://127.0.0.1:3000/mcp
 
 ## 🤝 生态与贡献
 
+<p align="center">
+  <a href="https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server">
+    <img width="380" height="200" src="https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server/badge" alt="FinanceMCP server card on Glama" />
+  </a>
+</p>
+
 - FinanceMCP 可作为 [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 的金融数据后端。
 - 在线体验：[finvestai.top](https://finvestai.top/)
+- MCP 生态收录：[Glama](https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server) · [Smithery](https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP) · [MCP Toplist](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
 - 视频教程：[FinanceMCP 完整使用指南](https://www.bilibili.com/video/BV1qeNnzEEQi/)
 - Bug 与功能建议：[GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)
 
