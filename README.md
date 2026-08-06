@@ -1,30 +1,66 @@
-[![English](https://img.shields.io/badge/English-README_EN.md-blue?logo=github)](README_EN.md)
-
-# FinanceMCP (Synapse)
-
-[![MCP Toplist](https://mcptoplist.com/badge/pulsemcp%2Fguangxiangdebizi-finance-market-data.svg)](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
-[![Smithery](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
-[![npm](https://img.shields.io/npm/v/finance-mcp)](https://www.npmjs.com/package/finance-mcp)
-
 <div align="center">
-  <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="290"/>
+  <a href="https://github.com/guangxiangdebizi/FinanceMCP">
+    <img src="LOGO/LOGO.png" alt="FinanceMCP Logo" width="250" />
+  </a>
+
+  <h1>FinanceMCP <sub>Synapse</sub></h1>
+
+  <p><strong>为 AI Agent 提供统一、可路由、可追溯的多市场金融数据</strong></p>
+  <p>19 个稳定 MCP Tools · Tushare / Qveris / Binance · stdio + Streamable HTTP</p>
+
+  <p>
+    <a href="https://www.npmjs.com/package/finance-mcp"><img src="https://img.shields.io/npm/v/finance-mcp?style=flat-square&logo=npm&color=cb3837" alt="npm version" /></a>
+    <a href="https://www.npmjs.com/package/finance-mcp"><img src="https://img.shields.io/npm/dm/finance-mcp?style=flat-square&logo=npm" alt="npm downloads" /></a>
+    <a href="https://github.com/guangxiangdebizi/FinanceMCP/releases"><img src="https://img.shields.io/github/v/release/guangxiangdebizi/FinanceMCP?style=flat-square&logo=github" alt="GitHub release" /></a>
+    <a href="https://github.com/guangxiangdebizi/FinanceMCP/stargazers"><img src="https://img.shields.io/github/stars/guangxiangdebizi/FinanceMCP?style=flat-square&logo=github&color=f5c542" alt="GitHub stars" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/guangxiangdebizi/FinanceMCP?style=flat-square" alt="MIT license" /></a>
+    <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 18+" />
+  </p>
+
+  <p>
+    <a href="#quick-start">快速开始</a> ·
+    <a href="#routing">数据源路由</a> ·
+    <a href="#providers">API 获取</a> ·
+    <a href="#tools">Tools</a> ·
+    <a href="#security">安全</a> ·
+    <a href="#stars">Star 趋势</a> ·
+    <a href="README_EN.md">English</a>
+  </p>
 </div>
 
-FinanceMCP 是面向 Claude、Cursor 等 MCP 客户端的金融数据服务器。当前版本为 **v4.9.0**，提供 19 个稳定工具，并在不改变工具名称和参数的前提下支持 Tushare、Qveris、Binance 等数据源路由。
+> [!IMPORTANT]
+> **v4.9.0** 在不新增 Tool、也不修改现有 Tool 参数的前提下，引入请求级 Qveris 数据源路由、自动降级和结果来源标注。现有客户端可以无缝升级。
 
-- **Tushare**：A 股、港股、美股、基金、债券、宏观和特色市场数据
-- **Qveris（可选）**：行情、公司资料、财务报表、宏观和新闻等扩展数据
-- **Binance**：加密资产日线和分钟 K 线，无需 API Key
-- **自动降级**：首选来源不支持或暂时不可用时，按请求级优先级继续尝试
-- **来源透明**：每次工具返回都会标注实际数据来源和发生过的降级路径
+## ✨ 核心亮点
 
-在线体验：[https://finvestai.top/](https://finvestai.top/)
+| | 能力 | 说明 |
+|---|---|---|
+| 🔌 | **无侵入式扩展** | 保持现有 19 个 Tool 名称和参数，数据源选择由请求上下文完成 |
+| 🧭 | **智能路由** | 同时支持 Tushare、Qveris、Binance 与公开新闻源 |
+| 🔁 | **自动降级** | 首选来源未覆盖、超时、限流或不可用时按优先级继续尝试 |
+| 🏷️ | **来源透明** | 每次返回都标注实际数据来源；发生降级时同时返回完整路由 |
+| 🛡️ | **请求级隔离** | HTTP Key 通过 AsyncLocalStorage 隔离，日志统一脱敏 |
+| 📈 | **多市场覆盖** | A 股、港股、美股、指数、基金、债券、期货、外汇、宏观与加密资产 |
+| 🧮 | **技术指标引擎** | MACD、RSI、KDJ、BOLL、MA 自动扩展历史窗口后再计算 |
+| 🚀 | **双传输模式** | 同时支持本地 stdio 与远程 Streamable HTTP |
 
-## 数据源路由
+<a id="routing"></a>
 
-### 无需修改 Tool 参数
+## 🧭 数据源路由
 
-v4.9.0 没有新增 MCP Tool，也没有给现有 Tool 增加 `data_source` 参数。HTTP 服务根据本次请求携带的凭证选择数据源：
+```mermaid
+flowchart LR
+    C[AI / MCP Client] -->|现有 19 个 Tools| R{FinanceMCP Router}
+    R -->|默认优先| T[Tushare]
+    R -->|可选扩展| Q[Qveris]
+    R -->|Crypto| B[Binance]
+    R -->|News / Time| L[公开源与本地计算]
+    Q -. 未覆盖 / 超时 / 限流 .-> T
+    T -. 不适用 .-> B
+    T & Q & B & L --> O[来源标注后的统一 MCP 结果]
+```
+
+### HTTP 请求头
 
 ```http
 X-Tushare-Token: YOUR_TUSHARE_TOKEN
@@ -32,20 +68,19 @@ X-Qveris-Api-Key: YOUR_QVERIS_API_KEY
 X-Finance-Source-Priority: qveris,tushare,binance
 ```
 
-默认优先级为：
+默认优先级：
 
 ```text
 tushare,qveris,binance
 ```
 
-路由规则：
+路由行为：
 
-1. 只有 Tushare Token 时使用 Tushare。
-2. 只有 Qveris Key 时，对已适配能力使用 Qveris。
-3. 两种凭证同时存在且未指定顺序时，Tushare 优先。
-4. 指定 `qveris,tushare,binance` 时先尝试 Qveris；接口未覆盖、参数无法适配、超时、限流或上游失败时降级。
-5. Header 中遗漏的数据源会按照默认顺序追加，重复项自动去重，未知项忽略。
-6. 正常的空结果不会触发降级，避免重复请求和不必要的 credits 消耗。
+1. 只传一种凭证时，优先使用该凭证对应的数据源。
+2. 同时传入 Tushare 与 Qveris 凭证时，默认 Tushare 优先。
+3. `X-Finance-Source-Priority` 可按请求调整顺序；未知项忽略、重复项去重、遗漏项按默认顺序补齐。
+4. 首选数据源接口未覆盖或调用失败时自动降级；正常空结果不会触发重复请求。
+5. Qveris 内部执行 **Discover → Inspect → Probe → Call**，每次 MCP 请求最多执行一次可能计费的 Call。
 
 返回示例：
 
@@ -56,9 +91,75 @@ tushare,qveris,binance
 原有工具结果……
 ```
 
-Qveris 在内部执行 Discover → Inspect → Probe → Call。Probe 用于免费校验参数和费用，只有明确路由到 Qveris 后才会执行可能消耗 credits 的 Call。参考 [Qveris REST API 文档](https://qveris.ai/docs/rest-api)。
+> [!NOTE]
+> Qveris 是可选扩展。未提供 `X-Qveris-Api-Key` / `QVERIS_API_KEY` 时不会调用 Qveris，也不会消耗 credits。接口契约参见 [Qveris REST API](https://qveris.ai/docs/rest-api)。
 
-### HTTP 配置
+<a id="providers"></a>
+
+## 🔑 数据源与 API 获取
+
+| 数据源 | 是否需要凭证 | 官方获取入口 | FinanceMCP 配置 |
+|---|---|---|---|
+| **Tushare Pro** | 需要 Token | [注册账号](https://tushare.pro/document/1?doc_id=38) · [获取 Token](https://tushare.pro/document/1?doc_id=39) | stdio：`TUSHARE_TOKEN`；HTTP：`X-Tushare-Token` |
+| **Qveris** | 需要 API Key | [Dashboard / API Keys](https://qveris.ai/account?page=api-keys) · [官方文档](https://qveris.ai/docs) | stdio：`QVERIS_API_KEY`；HTTP：`X-Qveris-Api-Key` |
+| **Binance Public API** | **不需要** | [Spot REST API 文档](https://developers.binance.com/docs/binance-spot-api-docs/rest-api) | 无需配置；加密资产行情自动使用公开接口 |
+| **百度新闻** | **不需要** | 无需申请 API | 无需配置；`finance_news` 使用公开新闻检索 |
+| **本地系统时钟** | **不需要** | 无 | 无需配置；仅供 `current_timestamp` 使用 |
+
+### Tushare Token
+
+1. 在 [Tushare](https://tushare.pro/) 注册并登录。
+2. 进入 **个人中心 → 账号与 TOKEN**，复制 Token；完整步骤见 [官方 Token 指南](https://tushare.pro/document/1?doc_id=39)。
+3. 将 Token 写入本地 `TUSHARE_TOKEN`，或在远程 MCP 请求中通过 `X-Tushare-Token` 传递。
+
+> [!TIP]
+> 🎓 **Tushare 高校学生认证可免费获得 2000 积分。** 当前官方流程要求完善学校和个人资料、加入高校用户群，并向管理员提交学生证或学信网截图及 Tushare ID。入口与最新步骤见 [学生免费积分获取](https://tushare.pro/document/1?doc_id=360)。Tushare 服务协议同时说明，高校学生和教师完成身份确认后分别可获得 **2000 / 5000 积分**权限。不同接口的积分门槛与频次不同，请以对应接口文档和[积分权限页面](https://tushare.pro/weborder/#/permission)为准。
+
+### Qveris API Key
+
+1. 登录 [Qveris](https://qveris.ai/)，打开 [Dashboard / API Keys](https://qveris.ai/account?page=api-keys)。
+2. 创建并复制 API Key。Qveris 当前为新账号提供 1000 credits；Discover、Inspect 免费，实际 Call 可能按能力计费。
+3. 将 Key 写入本地 `QVERIS_API_KEY`，或在远程 MCP 请求中通过独立的 `X-Qveris-Api-Key` 传递。
+
+### 无 Key 数据源
+
+- **Binance**：FinanceMCP 当前只调用安全类型为 `NONE` 的公开 K 线接口，不需要 Binance 账号、API Key 或交易权限。
+- **百度新闻**：使用公开新闻搜索，不需要开发者凭证；若网络或上游检索不可用，可按配置的优先级尝试 Qveris 新闻能力。
+
+> [!WARNING]
+> 不要把真实 Token / API Key 写进 README、MCP 配置示例或提交到 Git。推荐使用 `.env`、客户端环境变量或每次 HTTP 请求的 Header。
+
+<a id="quick-start"></a>
+
+## 🚀 快速开始
+
+### npm / stdio
+
+```bash
+npx -y finance-mcp
+```
+
+Claude Desktop、Cursor 等本地 MCP 客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "finance-mcp": {
+      "command": "npx",
+      "args": ["-y", "finance-mcp"],
+      "env": {
+        "TUSHARE_TOKEN": "YOUR_TUSHARE_TOKEN",
+        "QVERIS_API_KEY": "YOUR_QVERIS_API_KEY",
+        "FINANCE_SOURCE_PRIORITY": "tushare,qveris,binance"
+      }
+    }
+  }
+}
+```
+
+### Streamable HTTP
+
+在线 Endpoint：[`https://finvestai.top/mcp`](https://finvestai.top/mcp)
 
 ```json
 {
@@ -77,131 +178,105 @@ Qveris 在内部执行 Discover → Inspect → Probe → Call。Probe 用于免
 }
 ```
 
-两个 Key 都是可选的，可以只传其中一个。`Authorization: Bearer ...` 和 `X-Api-Key` 继续作为 Tushare Token 的兼容写法；Qveris 必须使用独立的 `X-Qveris-Api-Key`，避免凭证歧义。
+两个 Key 都是可选的，可以只传其中一个。`Authorization: Bearer ...` 与 `X-Api-Key` 继续兼容为 Tushare Token；Qveris 使用独立的 `X-Qveris-Api-Key`。
 
-### stdio 配置
-
-stdio 没有 HTTP Header，使用等价的环境变量：
-
-```json
-{
-  "mcpServers": {
-    "finance-mcp": {
-      "command": "npx",
-      "args": ["-y", "finance-mcp"],
-      "env": {
-        "TUSHARE_TOKEN": "YOUR_TUSHARE_TOKEN",
-        "QVERIS_API_KEY": "YOUR_QVERIS_API_KEY",
-        "FINANCE_SOURCE_PRIORITY": "tushare,qveris,binance"
-      }
-    }
-  }
-}
-```
-
-可选环境变量：
+<details>
+<summary><strong>环境变量</strong></summary>
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `TUSHARE_TOKEN` | 空 | Tushare 凭证 |
 | `QVERIS_API_KEY` | 空 | Qveris 凭证 |
 | `QVERIS_BASE_URL` | `https://qveris.ai/api/v1` | Qveris REST API 地址 |
-| `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | stdio 或服务端默认来源顺序 |
+| `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | stdio 或服务端默认优先级 |
 | `PORT` | `3000` | HTTP 服务端口 |
 
-## 工具列表
+</details>
 
-| Tool | 功能 |
-|---|---|
-| `current_timestamp` | UTC+8 当前时间戳 |
-| `finance_news` | 财经新闻关键词检索 |
-| `stock_data` | 股票、外汇、期货、基金、期权、加密资产行情及技术指标 |
-| `stock_data_minutes` | A 股和加密资产分钟 K 线 |
-| `index_data` | 指数日线、周线、月线、基本信息和估值 |
-| `macro_econ` | GDP、CPI、PPI、PMI、Shibor、LPR、Libor 等宏观数据 |
-| `company_performance` | A 股公司资料、财务报表、分红、股东和估值数据 |
-| `company_performance_hk` | 港股利润表、资产负债表和现金流量表 |
-| `company_performance_us` | 美股财务报表和财务指标 |
-| `fund_data` | 基金净值、持仓、分红和基础资料 |
-| `fund_manager_by_name` | 基金经理及管理基金查询 |
-| `convertible_bond` | 可转债基本资料、强赎、转股、评级和持有人数据 |
-| `block_trade` | 大宗交易明细 |
-| `money_flow` | 个股、大盘、行业和沪深港通资金流 |
-| `margin_trade` | 融资融券标的、汇总、明细和转融券数据 |
-| `csi_index_constituents` | CSI 指数区间表现、成分权重和财务摘要 |
-| `dragon_tiger_inst` | 龙虎榜机构交易明细 |
-| `hot_news_7x24` | 7×24 财经热点和相似内容去重 |
-| `futures_data` | 期货会员持仓排名 |
+<a id="tools"></a>
 
-其中 Qveris 当前适配行情、分钟行情、指数、公司财务、宏观、新闻和指数成分等通用能力。其他工具在 Qveris 优先时会明确标记“接口未覆盖”，然后继续使用其原生数据源。
+## 🧰 19 个 MCP Tools
 
-## 快速安装
+| Tool | 功能 | 数据源 / 接口商 |
+|---|---|---|
+| `current_timestamp` | UTC+8 当前时间戳 | 本地系统时钟 |
+| `finance_news` | 财经新闻关键词检索 | 百度新闻 · Qveris* |
+| `stock_data` | 多市场历史行情与技术指标 | Tushare Pro · Qveris* · Binance Public API（加密资产） |
+| `stock_data_minutes` | A 股与加密资产分钟 K 线 | Tushare Pro · Qveris* · Binance Public API（加密资产） |
+| `index_data` | 指数行情、基本信息与估值 | Tushare Pro · Qveris* |
+| `macro_econ` | GDP、CPI、PPI、PMI、Shibor、LPR、Libor、Hibor 等 | Tushare Pro · Qveris* |
+| `company_performance` | A 股公司、财务、分红、股东与估值数据 | Tushare Pro · Qveris* |
+| `company_performance_hk` | 港股利润表、资产负债表与现金流量表 | Tushare Pro · Qveris* |
+| `company_performance_us` | 美股财务报表与指标 | Tushare Pro · Qveris* |
+| `fund_data` | 基金净值、持仓、分红与基础资料 | Tushare Pro |
+| `fund_manager_by_name` | 基金经理及管理基金查询 | Tushare Pro |
+| `convertible_bond` | 可转债全生命周期数据 | Tushare Pro |
+| `block_trade` | 大宗交易明细 | Tushare Pro |
+| `money_flow` | 个股、大盘、行业与互联互通资金流 | Tushare Pro |
+| `margin_trade` | 融资融券与转融券数据 | Tushare Pro |
+| `csi_index_constituents` | CSI 指数表现、成分权重与财务摘要 | Tushare Pro · Qveris* |
+| `dragon_tiger_inst` | 龙虎榜机构交易明细 | Tushare Pro |
+| `hot_news_7x24` | 7×24 财经热点与内容去重 | Tushare Pro · Qveris* |
+| `futures_data` | 期货会员持仓排名 | Tushare Pro |
 
-### npm
+> **Qveris\*** 是动态数据能力路由层，会按查询自动选择已接入的实际接口商（例如 Finnhub、Tiingo 等）；最终选中的接口商、能力 ID 与数据来源会随 Tool 结果一起返回。未标记 Qveris 的 Tool 会明确返回“接口未覆盖”，再降级到表内原生数据源。
 
-```bash
-npm install -g finance-mcp
-finance-mcp
+## 📊 技术指标
+
+```text
+macd(12,26,9)   rsi(14)   kdj(9,3,3)   boll(20,2)   ma(5) ma(10) ma(20)
 ```
 
-也可以直接使用：
+`stock_data` 会自动预取指标所需的额外历史数据，计算完成后再裁剪到用户请求区间。带技术指标的请求保持使用原生数据源，确保既有计算与展示格式稳定。
 
-```bash
-npx -y finance-mcp
-```
-
-### 本地开发
+## 🛠️ 本地开发
 
 ```bash
 git clone https://github.com/guangxiangdebizi/FinanceMCP.git
 cd FinanceMCP
+cp .env.example .env
 npm ci
-```
-
-复制 `.env.example` 为 `.env`，按需填写凭证，然后：
-
-```bash
-npm run build
 npm test
-npm run start:stdio
 ```
-
-启动 Streamable HTTP：
 
 ```bash
-npm run start:http
+npm run start:stdio   # stdio
+npm run start:http    # http://127.0.0.1:3000/mcp
 ```
 
-- MCP Endpoint：`http://127.0.0.1:3000/mcp`
-- Health Check：`http://127.0.0.1:3000/health`
+`node_modules/` 与 `build/` 是本地生成物，不纳入 Git 跟踪。npm 发布时会通过 `prepare` 自动构建，仅打包运行所需的 `build/`。
 
-全局安装后可使用 `finance-mcp-http` 启动 HTTP 服务。
+<a id="security"></a>
 
-## 技术指标
+## 🛡️ 安全设计
 
-`stock_data` 支持显式参数化的指标：
+- API Key 仅从请求 Header 或环境变量读取，不写入仓库。
+- HTTP 请求凭证按请求隔离，敏感 Header 在日志中显示为 `[REDACTED]`。
+- `QVERIS_BASE_URL` 默认强制 HTTPS；仅 loopback 地址允许 HTTP 回归测试。
+- Qveris 候选能力经过只读过滤、参数 Probe、响应大小限制与超时控制。
+- `.env`、依赖目录、构建产物、日志和本地研究资料均由 Git ignore 规则管理。
 
-- MACD：`macd(12,26,9)`
-- RSI：`rsi(14)`
-- KDJ：`kdj(9,3,3)`
-- BOLL：`boll(20,2)`
-- MA：`ma(5) ma(10) ma(20)`
+<a id="stars"></a>
 
-请求指标时会自动扩展历史窗口，完成计算后再裁剪回用户日期范围。带技术指标的请求保持使用原生数据源，确保现有计算和展示格式不变。
+## ⭐ Star 趋势
 
-## 安全说明
+<p align="center">
+  <a href="https://github.com/guangxiangdebizi/FinanceMCP/stargazers">
+    <img src="docs/assets/star-history.svg" alt="FinanceMCP GitHub Star History" width="920" />
+  </a>
+</p>
 
-- 不要把真实 API Key 提交到 Git；`.env` 已被忽略。
-- HTTP 请求中的凭证按请求隔离，并在日志中统一显示为 `[REDACTED]`。
-- `QVERIS_BASE_URL` 默认要求 HTTPS；仅本地回归测试允许 loopback HTTP。
-- Qveris Call 可能消耗 credits。需要 Qveris 优先时请显式设置来源顺序。
+如果 FinanceMCP 对你有帮助，欢迎点一个 ⭐。趋势图由仓库自己的 GitHub Actions 每周一自动更新，也支持手动刷新；使用仓库临时 `GITHUB_TOKEN`，不依赖第三方 Star 抓取服务或长期凭证。
 
-## FinNote
+## 🤝 生态与贡献
 
-FinanceMCP 可作为 [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 的金融数据后端。在线体验：[https://finvestai.top/](https://finvestai.top/)。
+- FinanceMCP 可作为 [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 的金融数据后端。
+- 在线体验：[finvestai.top](https://finvestai.top/)
+- 视频教程：[FinanceMCP 完整使用指南](https://www.bilibili.com/video/BV1qeNnzEEQi/)
+- Bug 与功能建议：[GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)
 
-教程视频：[FinanceMCP 完整使用指南](https://www.bilibili.com/video/BV1qeNnzEEQi/)
+欢迎提交 Issue 或 Pull Request。新增数据能力时优先兼容现有聚合 Tool，避免一接口一 Tool 的表面扩张。
 
-## License
+## 📄 License
 
 [MIT](LICENSE)

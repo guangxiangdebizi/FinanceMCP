@@ -26,3 +26,16 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local research, presentations, and superseded notes
+/FinanceMCP_项目介绍.pptx
+/pain-method-gain.html
+/streamable-http-prompt.txt
+/论文.md
+/论文_计算机应用.md
+/港股模块说明.md
+/tushare-interfaces.md
+/DEPLOYMENT_MODES.md
+/SMITHERY_DEPLOYMENT.md
+/LOGGING_GUIDE.md
+/build-setup.js

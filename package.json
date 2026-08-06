@@ -17,7 +17,6 @@
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "dev": "node build/httpServer.js",
     "dev:sse": "node build/index.js",
-    "setup": "node build-setup.js",
     "start:http": "node build/httpServer.js",
     "start:stdio": "node build/index.js",
     "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100",

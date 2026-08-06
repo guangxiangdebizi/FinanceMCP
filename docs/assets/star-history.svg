@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title description" viewBox="0 0 920 380">
+  <title id="title">FinanceMCP GitHub stars over time</title>
+  <desc id="description">Cumulative GitHub star history for guangxiangdebizi/FinanceMCP</desc>
+  <defs>
+    <linearGradient id="line" x1="0" x2="1"><stop stop-color="#06b6d4"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#8b5cf6" stop-opacity=".30"/><stop offset="1" stop-color="#06b6d4" stop-opacity=".02"/></linearGradient>
+  </defs>
+  <style>
+    .background{fill:#ffffff;stroke:#e2e8f0}.title{fill:#0f172a;font:700 22px ui-sans-serif,system-ui}.subtitle{fill:#64748b;font:13px ui-sans-serif,system-ui}.count{fill:#7c3aed;font:700 28px ui-sans-serif,system-ui}.grid{stroke:#e2e8f0;stroke-width:1}.axis{fill:#64748b;font:12px ui-sans-serif,system-ui}
+    @media (prefers-color-scheme:dark){.background{fill:#0f172a;stroke:#334155}.title{fill:#f8fafc}.subtitle,.axis{fill:#94a3b8}.count{fill:#a78bfa}.grid{stroke:#334155}}
+  </style>
+  <rect class="background" x="1" y="1" width="918" height="378" rx="18"/>
+  <text class="title" x="68" y="38">GitHub Stars over time</text>
+  <text class="subtitle" x="68" y="61">guangxiangdebizi/FinanceMCP · updated 2026-08-06</text>
+  <text class="count" x="878" y="48" text-anchor="end">★ 641</text>
+  <line class="grid" x1="68" y1="326.00" x2="878" y2="326.00"/><text class="axis" x="54" y="330" text-anchor="end">0</text><line class="grid" x1="68" y1="277.20" x2="878" y2="277.20"/><text class="axis" x="54" y="281.2" text-anchor="end">129</text><line class="grid" x1="68" y1="228.40" x2="878" y2="228.40"/><text class="axis" x="54" y="232.4" text-anchor="end">258</text><line class="grid" x1="68" y1="179.60" x2="878" y2="179.60"/><text class="axis" x="54" y="183.6" text-anchor="end">387</text><line class="grid" x1="68" y1="130.80" x2="878" y2="130.80"/><text class="axis" x="54" y="134.8" text-anchor="end">516</text><line class="grid" x1="68" y1="82.00" x2="878" y2="82.00"/><text class="axis" x="54" y="86" text-anchor="end">645</text><line class="grid" x1="68.00" y1="82" x2="68.00" y2="326"/><text class="axis" x="68.00" y="356" text-anchor="middle">2025-05</text><line class="grid" x1="270.50" y1="82" x2="270.50" y2="326"/><text class="axis" x="270.50" y="356" text-anchor="middle">2025-08</text><line class="grid" x1="473.00" y1="82" x2="473.00" y2="326"/><text class="axis" x="473.00" y="356" text-anchor="middle">2025-12</text><line class="grid" x1="675.50" y1="82" x2="675.50" y2="326"/><text class="axis" x="675.50" y="356" text-anchor="middle">2026-04</text><line class="grid" x1="878.00" y1="82" x2="878.00" y2="326"/><text class="axis" x="878.00" y="356" text-anchor="middle">2026-08</text>
+  <path d="M 68.00 326.00 L 93.02 322.22 L 118.04 321.46 L 143.06 319.57 L 168.08 318.43 L 193.10 313.89 L 218.12 308.60 L 243.14 302.92 L 268.16 296.87 L 293.18 268.50 L 318.20 250.72 L 343.22 240.13 L 368.24 229.53 L 393.26 218.19 L 418.28 211.00 L 443.30 205.32 L 468.32 200.41 L 493.35 192.08 L 518.37 186.41 L 543.39 176.57 L 568.41 164.85 L 593.43 158.04 L 618.45 145.93 L 643.47 134.96 L 668.49 130.80 L 693.51 122.10 L 718.53 117.56 L 743.55 109.24 L 768.57 102.43 L 793.59 98.27 L 818.61 93.35 L 843.63 87.30 L 868.65 85.03 L 878.00 83.51 L 878.00 326.00 L 68.00 326.00 Z" fill="url(#area)"/>
+  <path d="M 68.00 326.00 L 93.02 322.22 L 118.04 321.46 L 143.06 319.57 L 168.08 318.43 L 193.10 313.89 L 218.12 308.60 L 243.14 302.92 L 268.16 296.87 L 293.18 268.50 L 318.20 250.72 L 343.22 240.13 L 368.24 229.53 L 393.26 218.19 L 418.28 211.00 L 443.30 205.32 L 468.32 200.41 L 493.35 192.08 L 518.37 186.41 L 543.39 176.57 L 568.41 164.85 L 593.43 158.04 L 618.45 145.93 L 643.47 134.96 L 668.49 130.80 L 693.51 122.10 L 718.53 117.56 L 743.55 109.24 L 768.57 102.43 L 793.59 98.27 L 818.61 93.35 L 843.63 87.30 L 868.65 85.03 L 878.00 83.51" fill="none" stroke="url(#line)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
