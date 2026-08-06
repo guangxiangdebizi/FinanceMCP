@@ -39,3 +39,12 @@ Thumbs.db
 /SMITHERY_DEPLOYMENT.md
 /LOGGING_GUIDE.md
 /build-setup.js
+
+# Browser automation and local validation artifacts
+/.playwright-mcp/
+/playwright-report/
+/test-results/
+/final-report-*.png
+/devtools/
+/docs/qveris-finance-capabilities.json
+/docs/qveris-interface-coverage.md
