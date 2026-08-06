@@ -209,6 +209,12 @@ async function getFinaIndicatorLatest(ts_code, end) {
         return null;
     }
 }
+export function parseCashDividendPerShare(value) {
+    if (value === null || value === undefined || value === '')
+        return null;
+    const cashDivPerShare = Number(value);
+    return Number.isFinite(cashDivPerShare) && cashDivPerShare > 0 ? cashDivPerShare : null;
+}
 async function getLatestCashDividendPerShare(ts_code, end) {
     const start = addDaysYYYYMMDD(end, -365 * 5);
     try {
@@ -217,10 +223,9 @@ async function getLatestCashDividendPerShare(ts_code, end) {
             return null;
         const sorted = [...rows].sort((a, b) => String(b.end_date || b.ann_date || '').localeCompare(String(a.end_date || a.ann_date || '')));
         for (const r of sorted) {
-            const cashDivPer10 = r.cash_div != null ? Number(r.cash_div) : null; // 每10股派现(元)
-            if (cashDivPer10 != null && isFinite(Number(cashDivPer10)) && cashDivPer10 > 0) {
-                return cashDivPer10 / 10; // 折为每股
-            }
+            const cashDivPerShare = parseCashDividendPerShare(r.cash_div);
+            if (cashDivPerShare !== null)
+                return cashDivPerShare;
         }
         return null;
     }

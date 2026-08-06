@@ -16,13 +16,15 @@ export function formatDividend(data) {
         output += ` ${item.end_date} 分红方案\n`;
         output += `公告日期: ${item.ann_date}  实施进度: ${item.div_proc || 'N/A'}\n`;
         if (item.stk_div)
-            output += `送股比例: 每10股送${item.stk_div}股\n`;
+            output += `每股送转: ${item.stk_div}股\n`;
         if (item.stk_bo_rate)
-            output += `转股比例: 每10股转${item.stk_bo_rate}股\n`;
+            output += `每股送股: ${item.stk_bo_rate}股\n`;
+        if (item.stk_co_rate)
+            output += `每股转增: ${item.stk_co_rate}股\n`;
         if (item.cash_div)
-            output += `现金分红: 每10股派${item.cash_div}元\n`;
+            output += `每股分红（税后）: ${item.cash_div}元\n`;
         if (item.cash_div_tax)
-            output += `税后分红: 每10股派${item.cash_div_tax}元\n`;
+            output += `每股分红（税前）: ${item.cash_div_tax}元\n`;
         if (item.record_date)
             output += `股权登记日: ${item.record_date}\n`;
         if (item.ex_date)

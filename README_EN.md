@@ -53,7 +53,7 @@ Visit our online experience website: **[https://finvestai.top/](https://finvesta
 
 ### ⚙️ Claude Desktop Configuration
 
-#### 🆕 Latest Version (v4.3.0) - Streamable HTTP with Your API Key
+#### 🆕 Latest Version (v4.8.3) - Streamable HTTP with Your API Key
 **🎯 Recommended for production use with your own Tushare token:**
 
 ```json
@@ -94,7 +94,7 @@ You can also use our shared service without API keys (may have rate limits):
 ```
 
 **Service Benefits:**
-- ✅ **Latest Version (v4.3.0)** - Use your own API key for unlimited access
+- ✅ **Latest Version (v4.8.3)** - Use your own API key for unlimited access
 - ✅ **24/7 Availability** - Server runs continuously
 - ✅ **Full Features** - All 14 tools and technical indicators
 - ✅ **Real-time Data** - Connected to Tushare professional data
