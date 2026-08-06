@@ -17,6 +17,7 @@ import { csiIndexConstituents } from './tools/csiIndexConstituents.js';
 import { dragonTigerInst } from './tools/dragonTigerInst.js';
 import { hotNews } from './tools/hotNews.js';
 import { futuresData } from './tools/futuresData.js';
+import { routeToolCall } from './utils/dataSourceRouter.js';
 export const toolList = [
     { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
     { name: financeNews.name, description: financeNews.description, inputSchema: financeNews.parameters },
@@ -38,7 +39,7 @@ export const toolList = [
     { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.parameters },
     { name: futuresData.name, description: futuresData.description, inputSchema: futuresData.parameters },
 ];
-export async function dispatchTool(name, args) {
+async function dispatchNativeTool(name, args) {
     switch (name) {
         case 'current_timestamp':
             return await timestampTool.run({ format: args?.format ? String(args.format) : undefined });
@@ -169,4 +170,10 @@ export async function dispatchTool(name, args) {
         default:
             throw new Error(`Unknown tool: ${name}`);
     }
+}
+export async function dispatchTool(name, args) {
+    if (!toolList.some(tool => tool.name === name)) {
+        throw new Error(`Unknown tool: ${name}`);
+    }
+    return routeToolCall(name, args, () => dispatchNativeTool(name, args));
 }

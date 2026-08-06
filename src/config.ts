@@ -6,8 +6,20 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // 2. 在Smithery部署时，从配置文件中加载
 dotenv.config();
 
-// 每请求上下文：用于透传用户在 Header 中提交的 Token（Tushare / CoinGecko）
-type RequestContext = { tushareToken?: string; coingeckoApiKey?: string; coingeckoProApiKey?: string; coingeckoDemoApiKey?: string };
+export const DATA_SOURCE_IDS = ['tushare', 'qveris', 'binance'] as const;
+export type DataSourceId = typeof DATA_SOURCE_IDS[number];
+
+export const DEFAULT_SOURCE_PRIORITY: DataSourceId[] = ['tushare', 'qveris', 'binance'];
+
+// 每请求上下文：用于透传用户在 Header 中提交的凭证和数据源优先级。
+type RequestContext = {
+  tushareToken?: string;
+  coingeckoApiKey?: string;
+  coingeckoProApiKey?: string;
+  coingeckoDemoApiKey?: string;
+  qverisApiKey?: string;
+  sourcePriority?: DataSourceId[];
+};
 const requestContext = new AsyncLocalStorage<RequestContext>();
 
 export function runWithRequestContext<T>(ctx: Partial<RequestContext>, fn: () => Promise<T>): Promise<T> {
@@ -15,7 +27,9 @@ export function runWithRequestContext<T>(ctx: Partial<RequestContext>, fn: () =>
     tushareToken: ctx.tushareToken,
     coingeckoApiKey: ctx.coingeckoApiKey,
     coingeckoProApiKey: ctx.coingeckoProApiKey,
-    coingeckoDemoApiKey: ctx.coingeckoDemoApiKey
+    coingeckoDemoApiKey: ctx.coingeckoDemoApiKey,
+    qverisApiKey: ctx.qverisApiKey,
+    sourcePriority: ctx.sourcePriority,
   }, fn);
 }
 
@@ -33,6 +47,26 @@ export function getCoinGeckoProApiKey(): string | undefined {
 
 export function getCoinGeckoDemoApiKey(): string | undefined {
   return requestContext.getStore()?.coingeckoDemoApiKey ?? process.env.COINGECKO_DEMO_API_KEY ?? undefined;
+}
+
+export function getQverisApiKey(): string | undefined {
+  return requestContext.getStore()?.qverisApiKey ?? process.env.QVERIS_API_KEY ?? undefined;
+}
+
+export function parseSourcePriority(value?: string | string[]): DataSourceId[] {
+  const raw = Array.isArray(value) ? value.join(',') : value;
+  const requested = (raw ?? '')
+    .slice(0, 256)
+    .toLowerCase()
+    .split(/[\s,>]+/)
+    .filter((item): item is DataSourceId => DATA_SOURCE_IDS.includes(item as DataSourceId));
+
+  return [...new Set([...requested, ...DEFAULT_SOURCE_PRIORITY])];
+}
+
+export function getSourcePriority(): DataSourceId[] {
+  return requestContext.getStore()?.sourcePriority
+    ?? parseSourcePriority(process.env.FINANCE_SOURCE_PRIORITY);
 }
 
 function resolveApiToken(): string | undefined {
@@ -84,6 +118,28 @@ export const COINGECKO_CONFIG = {
   },
   /** 超时 ms */
   TIMEOUT: 30000,
+};
+
+function resolveQverisBaseUrl(): string {
+  const configured = process.env.QVERIS_BASE_URL?.trim() || 'https://qveris.ai/api/v1';
+  const url = new URL(configured);
+  const localHttp = url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !localHttp) {
+    throw new Error('QVERIS_BASE_URL 必须使用 HTTPS（本地回归测试地址除外）');
+  }
+  return url.toString().replace(/\/+$/, '');
+}
+
+export const QVERIS_CONFIG = {
+  get API_KEY(): string {
+    return getQverisApiKey()?.trim() ?? '';
+  },
+  get BASE_URL(): string {
+    return resolveQverisBaseUrl();
+  },
+  DISCOVER_TIMEOUT: 30000,
+  EXECUTE_TIMEOUT: 120000,
+  MAX_RESPONSE_BYTES: 1024 * 1024,
 };
 
 // 开发态输出便于确认来源（不打印实际 Token 值）

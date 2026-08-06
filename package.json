@@ -1,7 +1,7 @@
 {
   "name": "finance-mcp",
-  "version": "4.8.3",
-  "description": "Professional financial data MCP server with Tushare-based multi-market and aggregate analytics",
+  "version": "4.9.0",
+  "description": "Multi-source financial data MCP server with Tushare, optional Qveris routing, and Binance crypto data",
   "type": "module",
   "bin": {
     "finance-mcp": "build/index.js",
@@ -20,13 +20,14 @@
     "setup": "node build-setup.js",
     "start:http": "node build/httpServer.js",
     "start:stdio": "node build/index.js",
-    "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100"
+    "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.19.2"
+    "express": "^4.22.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

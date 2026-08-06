@@ -31,6 +31,18 @@ startCommand:
         type: string
         title: "Tushare API Token (Optional)"
         description: "Optional default Tushare API token. Users can override this by providing their own token via X-Tushare-Token header or Authorization: Bearer <token> when connecting."
+      QVERIS_API_KEY:
+        type: string
+        title: "Qveris API Key (Optional)"
+        description: "Optional Qveris key. HTTP users can override it per request with X-Qveris-Api-Key."
+      QVERIS_BASE_URL:
+        type: string
+        title: "Qveris Base URL (Optional)"
+        description: "Defaults to https://qveris.ai/api/v1."
+      FINANCE_SOURCE_PRIORITY:
+        type: string
+        title: "Data Source Priority (Optional)"
+        description: "Comma-separated source order. Default: tushare,qveris,binance."
 
   # ——返回实际启动命令的 JS 函数——
   commandFunction: |-
@@ -40,10 +52,16 @@ startCommand:
       env: {
         NODE_ENV: "production",
         PORT: "3000",
-        TUSHARE_TOKEN: config.TUSHARE_TOKEN || ""
+        TUSHARE_TOKEN: config.TUSHARE_TOKEN || "",
+        QVERIS_API_KEY: config.QVERIS_API_KEY || "",
+        QVERIS_BASE_URL: config.QVERIS_BASE_URL || "",
+        FINANCE_SOURCE_PRIORITY: config.FINANCE_SOURCE_PRIORITY || "tushare,qveris,binance"
       }
     })
 
 # ---------- 示例配置，供 UI 展示 ----------
 exampleConfig:
   TUSHARE_TOKEN: "your_tushare_token_here_or_leave_empty"
+  QVERIS_API_KEY: "your_qveris_api_key_here_or_leave_empty"
+  QVERIS_BASE_URL: "https://qveris.ai/api/v1"
+  FINANCE_SOURCE_PRIORITY: "tushare,qveris,binance"
