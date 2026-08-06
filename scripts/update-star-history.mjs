@@ -16,12 +16,34 @@ const apiHeaders = {
   'X-GitHub-Api-Version': '2022-11-28',
 };
 
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 async function github(pathname) {
-  const response = await fetch(`https://api.github.com${pathname}`, { headers: apiHeaders });
-  if (!response.ok) {
-    throw new Error(`GitHub API request failed with HTTP ${response.status}`);
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(`https://api.github.com${pathname}`, { headers: apiHeaders });
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await sleep(1000 * (2 ** attempt));
+      continue;
+    }
+
+    if (response.ok) return response;
+    const error = new Error(`GitHub API request failed with HTTP ${response.status}`);
+    if (response.status !== 429 && response.status < 500) throw error;
+    lastError = error;
+    if (attempt < 3) {
+      const retryAfter = Number(response.headers.get('retry-after'));
+      await sleep(Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 1000 * (2 ** attempt));
+    }
   }
-  return response;
+  throw lastError ?? new Error('GitHub API request failed');
 }
 
 function nextPage(linkHeader) {
@@ -52,7 +74,8 @@ function renderSvg(starredAt, createdAt) {
   const margin = { top: 82, right: 42, bottom: 54, left: 68 };
   const chartWidth = width - margin.left - margin.right;
   const chartHeight = height - margin.top - margin.bottom;
-  const now = Date.now();
+  const generatedOn = new Date().toISOString().slice(0, 10);
+  const now = Date.parse(`${generatedOn}T23:59:59.999Z`);
   const start = Math.min(Date.parse(createdAt), starredAt[0] ?? now);
   const end = Math.max(now, start + 86400000);
   const rangeDays = Math.max(1, (end - start) / 86400000);
@@ -99,7 +122,7 @@ function renderSvg(starredAt, createdAt) {
   </style>
   <rect class="background" x="1" y="1" width="${width - 2}" height="${height - 2}" rx="18"/>
   <text class="title" x="${margin.left}" y="38">GitHub Stars over time</text>
-  <text class="subtitle" x="${margin.left}" y="61">${escapeXml(repository)} · updated ${new Date(now).toISOString().slice(0, 10)}</text>
+  <text class="subtitle" x="${margin.left}" y="61">${escapeXml(repository)} · updated ${generatedOn}</text>
   <text class="count" x="${width - margin.right}" y="48" text-anchor="end">★ ${starredAt.length}</text>
   ${yGrid}${xGrid}
   <path d="${areaPath}" fill="url(#area)"/>
