@@ -36,6 +36,9 @@
 > [!IMPORTANT]
 > **v4.9.0** adds request-scoped Qveris routing, automatic fallback, and source attribution without adding tools or changing existing tool parameters. Existing clients can upgrade without schema changes.
 
+> [!NOTE]
+> To share model prompt/KV-cache routing and conversation lineage across Trae, Cursor, Claude Code, and Codex, optionally run the standalone [`finance-cache-gateway`](./docs/cache-gateway.md). It uses a separate process, port, and configuration; existing MCP tools, stdio, and `/mcp` behavior remain unchanged when it is not enabled.
+
 ## ✨ Highlights
 
 | | Capability | Description |

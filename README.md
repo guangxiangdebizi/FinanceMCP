@@ -36,6 +36,9 @@
 > [!IMPORTANT]
 > **v4.9.0** 在不新增 Tool、也不修改现有 Tool 参数的前提下，引入请求级 Qveris 数据源路由、自动降级和结果来源标注。现有客户端可以无缝升级。
 
+> [!NOTE]
+> 需要在 Trae、Cursor、Claude Code 和 Codex 之间共享模型 Prompt/KV-cache 路由及对话 lineage 时，可选启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它使用单独的进程、端口和配置；不修改现有 MCP Tool、stdio 或 `/mcp` 接口，不启用时现有用法完全不变。
+
 ## ✨ 核心亮点
 
 | | 能力 | 说明 |
