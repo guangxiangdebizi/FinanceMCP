@@ -29,6 +29,7 @@
     <a href="#tools">Tools</a> ·
     <a href="#security">Security</a> ·
     <a href="#stars">Star history</a> ·
+    <a href="#finnote">FinNote integration</a> ·
     <a href="README.md">中文</a>
   </p>
 </div>
@@ -276,6 +277,25 @@ npm run start:http    # http://127.0.0.1:3000/mcp
 
 If FinanceMCP is useful to you, consider leaving a ⭐. The repository's own GitHub Actions refreshes this chart every Monday (or on demand) with its temporary `GITHUB_TOKEN`, without third-party stargazer scraping or long-lived credentials.
 
+<a id="finnote"></a>
+
+## 🔗 Project integration: FinNote intelligent financial document system
+
+FinanceMCP integrates with [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) to form **FinNote**, an intelligent financial document system for financial research, AI-assisted analysis, and long-term knowledge preservation. The project received a Second Prize in the Shanghai Collegiate Computer Application Ability Competition.
+
+- **FinanceMCP: financial data and tool service layer.** Its 19 standardized MCP tools give AI agents access to stocks, funds, bonds, macroeconomic data, financial news, technical indicators, and multi-market financial data.
+- **MarkiNote: AI-agent document and knowledge-management layer.** It organizes natural-language tasks, presents financial data and model-generated analysis in an editable Markdown workspace, and preserves the results as manageable, traceable, and reusable document assets.
+
+The two projects collaborate through an HTTP / MCP service workflow:
+
+```text
+Natural-language request → AI Agent task understanding → FinanceMCP tool invocation → Financial data retrieval → AI-assisted analysis → Markdown document generation and preservation → Continuous editing and knowledge management
+```
+
+FinanceMCP can therefore run independently for MCP clients such as Claude and Cursor or provide FinNote's real-time financial data foundation, while MarkiNote brings data retrieval, model analysis, and long-term document management into one research workspace.
+
+🌐 **Live demo: [https://finvestai.top/](https://finvestai.top/)**
+
 ## 🤝 Ecosystem and contributions
 
 <p align="center">
@@ -284,8 +304,6 @@ If FinanceMCP is useful to you, consider leaving a ⭐. The repository's own Git
   </a>
 </p>
 
-- FinanceMCP can serve as the financial-data backend for [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote).
-- Live endpoint: [finvestai.top](https://finvestai.top/)
 - MCP ecosystem listings: [Glama](https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server) · [Smithery](https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP) · [MCP Toplist](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
 - Video guide: [Complete FinanceMCP tutorial](https://www.bilibili.com/video/BV1qeNnzEEQi/)
 - Bugs and feature requests: [GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)
