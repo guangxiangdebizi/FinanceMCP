@@ -39,6 +39,23 @@
 > [!NOTE]
 > To share model prompt/KV-cache routing and conversation lineage across Trae, Cursor, Claude Code, and Codex, optionally run the standalone [`finance-cache-gateway`](./docs/cache-gateway.md). It uses a separate process, port, and configuration; existing MCP tools, stdio, and `/mcp` behavior remain unchanged when it is not enabled.
 
+## 🔗 Project Integration: FinNote Intelligent Financial Document System
+
+FinanceMCP has been integrated with [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) to form **FinNote**, an end-to-end system for financial research, AI-assisted analysis, and intelligent document management. The project participated in the Shanghai Collegiate Computer Application Ability Competition and received a Second Prize.
+
+🌐 **Live Demo: [https://finvestai.top/](https://finvestai.top/)**  
+📝 **MarkiNote: [https://github.com/wink-wink-wink555/MarkiNote](https://github.com/wink-wink-wink555/MarkiNote)**
+
+Within the FinNote architecture, FinanceMCP acts as the core **financial data and MCP tool service layer**. Built with Node.js, Express, and the Model Context Protocol (MCP) SDK, it currently exposes 19 stable MCP tools that provide AI agents with access to stocks, funds, bonds, macroeconomic data, financial news, technical indicators, and multi-market financial data. It supports both local stdio and remote Streamable HTTP transports.
+
+MarkiNote serves as the upper-layer **AI Agent-powered document and knowledge management system**, handling natural-language interaction, AI analysis presentation, Markdown document generation, editing, and long-term knowledge preservation. In the FinNote use case, MarkiNote accesses FinanceMCP through the HTTP / MCP service workflow, allowing real-time financial data capabilities to participate directly in the agent's reasoning and document-generation process.
+
+The resulting workflow is:
+
+**Natural-language request → AI Agent task understanding → FinanceMCP tool invocation → Multi-source financial data retrieval → AI-assisted analysis → Markdown document generation → Document management and knowledge preservation**
+
+FinanceMCP can therefore be used not only as a standalone financial-data MCP server for MCP clients and AI agents such as Claude, Cursor, and Codex, but also as the financial data infrastructure behind higher-level AI applications such as FinNote, providing unified, structured, callable, and attributable financial data for intelligent research, financial analysis, and document-oriented agents.
+
 ## ✨ Highlights
 
 | | Capability | Description |
