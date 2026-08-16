@@ -29,6 +29,7 @@
     <a href="#tools">Tools</a> ·
     <a href="#security">安全</a> ·
     <a href="#stars">Star 趋势</a> ·
+    <a href="#finnote">FinNote 联动</a> ·
     <a href="README_EN.md">English</a>
   </p>
 </div>
@@ -293,6 +294,25 @@ npm run start:http    # http://127.0.0.1:3000/mcp
 
 如果 FinanceMCP 对你有帮助，欢迎点一个 ⭐。趋势图由仓库自己的 GitHub Actions 每周一自动更新，也支持手动刷新；使用仓库临时 `GITHUB_TOKEN`，不依赖第三方 Star 抓取服务或长期凭证。
 
+<a id="finnote"></a>
+
+## 🔗 项目联动：FinNote 智能金融文档系统
+
+FinanceMCP 已与 [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 联动，共同构成 **FinNote 智能金融文档系统**，面向金融研究、AI 辅助分析和长期知识沉淀。该项目曾参加上海市大学生计算机应用能力大赛并获得二等奖。
+
+- **FinanceMCP：金融数据与工具服务层。** 通过 19 个标准化 MCP Tools，为 AI Agent 提供股票、基金、债券、宏观经济、财经新闻、技术指标和多市场金融数据。
+- **MarkiNote：AI Agent 文档与知识管理应用层。** 接收并组织自然语言任务，在可编辑的 Markdown 工作区中呈现金融数据和模型分析，并将分析结果沉淀为可管理、可追踪、可复用的文档资产。
+
+两者通过 HTTP / MCP 服务链路协作：
+
+```text
+自然语言请求 → AI Agent 理解任务 → 调用 FinanceMCP → 获取金融数据 → AI 辅助分析 → 生成并保存 Markdown 文档 → 持续编辑与知识管理
+```
+
+因此，FinanceMCP 不仅能独立服务 Claude、Cursor 等 MCP 客户端，也能作为 FinNote 的实时金融数据底座；MarkiNote 则把数据调用、模型分析和长期文档管理整合进同一个研究工作区。
+
+🌐 **在线体验：[https://finvestai.top/](https://finvestai.top/)**
+
 ## 🤝 生态与贡献
 
 <p align="center">
@@ -301,8 +321,6 @@ npm run start:http    # http://127.0.0.1:3000/mcp
   </a>
 </p>
 
-- FinanceMCP 可作为 [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 的金融数据后端。
-- 在线体验：[finvestai.top](https://finvestai.top/)
 - MCP 生态收录：[Glama](https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server) · [Smithery](https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP) · [MCP Toplist](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
 - 视频教程：[FinanceMCP 完整使用指南](https://www.bilibili.com/video/BV1qeNnzEEQi/)
 - Bug 与功能建议：[GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)
