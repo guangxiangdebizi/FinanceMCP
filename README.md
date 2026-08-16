@@ -39,6 +39,23 @@
 > [!NOTE]
 > 需要在 Trae、Cursor、Claude Code 和 Codex 之间共享模型 Prompt/KV-cache 路由及对话 lineage 时，可选启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它使用单独的进程、端口和配置；不修改现有 MCP Tool、stdio 或 `/mcp` 接口，不启用时现有用法完全不变。
 
+## 🔗 项目联动：FinNote 智能金融文档系统
+
+FinanceMCP 已与 [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 进行项目联动与融合，形成面向金融研究、AI 分析与智能文档管理场景的一体化系统 **FinNote**。该项目已参加上海市大学生计算机应用能力大赛并获得二等奖。
+
+🌐 **在线体验：[https://finvestai.top/](https://finvestai.top/)**  
+📝 **MarkiNote：[https://github.com/wink-wink-wink555/MarkiNote](https://github.com/wink-wink-wink555/MarkiNote)**
+
+在 FinNote 的整体架构中，FinanceMCP 作为核心的 **金融数据与 MCP 工具服务层**，基于 Node.js、Express 与 Model Context Protocol（MCP）SDK 构建。目前通过 19 个稳定的 MCP 工具，为 AI Agent 提供股票、基金、债券、宏观经济、财经新闻、技术指标以及多市场行情等金融数据能力，并支持 stdio 与 Streamable HTTP 两种接入方式。
+
+MarkiNote 则作为上层 **AI Agent 智能文档与知识管理系统**，负责承载自然语言交互、AI 分析结果展示、Markdown 文档生成、编辑与长期知识沉淀。在 FinNote 场景中，MarkiNote 通过 HTTP / MCP 服务链路调用 FinanceMCP，使金融数据能力能够直接进入 AI Agent 的推理与文档工作流。
+
+整体流程形成：
+
+**自然语言提问 → AI Agent 任务理解 → FinanceMCP 工具调用 → 多源金融数据获取 → AI 智能分析 → Markdown 文档生成 → 文档管理与知识沉淀**
+
+因此，FinanceMCP 不仅可以作为独立的金融数据 MCP Server 接入 Claude、Cursor、Codex 等 MCP Client 或 AI Agent，也可以作为 FinNote 等上层 AI 应用的金融数据基础设施，为智能投研、金融分析和文档型 Agent 提供统一、结构化、可调用且可追溯的数据能力。
+
 ## ✨ 核心亮点
 
 | | 能力 | 说明 |
