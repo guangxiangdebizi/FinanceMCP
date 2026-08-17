@@ -3,11 +3,45 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { runWithRequestContext } from "./config.js";
-import { toolList, dispatchTool } from "./dispatch.js";
+import { getAvailableToolList, toolList, dispatchTool } from "./dispatch.js";
 
 
 interface Session { id: string; createdAt: Date; lastActivity: Date }
 const sessions = new Map<string, Session>();
+
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'x-api-key',
+  'x-tushare-token',
+  'x-qveris-api-key',
+  'x-cg-api-key',
+  'x-cg-demo-api-key',
+  'x-cg-pro-api-key',
+  'x-smithery-config',
+  'x-config',
+  'x-session-config',
+]);
+
+function redactHeaders(headers: Request['headers']): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      SENSITIVE_HEADER_NAMES.has(name.toLowerCase()) && value ? '[REDACTED]' : value,
+    ])
+  );
+}
+
+function parseConfigHeader(req: Request): Record<string, unknown> | undefined {
+  const raw = req.headers['x-smithery-config'] || req.headers['x-config'] || req.headers['x-session-config'];
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    console.log('[TOKEN] Failed to parse request config header');
+    return undefined;
+  }
+}
 
 function extractTokenFromHeaders(req: Request): string | undefined {
   const h = req.headers;
@@ -29,15 +63,10 @@ function extractTokenFromHeaders(req: Request): string | undefined {
   // 3. 🔍 尝试从 Smithery 特殊头读取（可能的头名称）
   const smitheryConfig = h['x-smithery-config'] || h['x-config'] || h['x-session-config'];
   if (smitheryConfig) {
-    console.log(`[TOKEN] Found Smithery config header:`, smitheryConfig);
-    try {
-      const config = JSON.parse(smitheryConfig as string);
-      if (config.TUSHARE_TOKEN) {
-        console.log(`[TOKEN] Extracted from Smithery config`);
-        return config.TUSHARE_TOKEN;
-      }
-    } catch (e) {
-      console.log(`[TOKEN] Failed to parse Smithery config:`, e);
+    const config = parseConfigHeader(req);
+    if (typeof config?.TUSHARE_TOKEN === 'string' && config.TUSHARE_TOKEN.trim()) {
+      console.log(`[TOKEN] Extracted Tushare token from request config`);
+      return config.TUSHARE_TOKEN.trim();
     }
   }
   
@@ -52,7 +81,21 @@ function extractTokenFromHeaders(req: Request): string | undefined {
   return undefined;
 }
 
-// 移除 CoinGecko 头的解析（已改为 Binance 公共行情，无需 Key）
+function extractQverisApiKeyFromHeaders(req: Request): string | undefined {
+  const header = req.headers['x-qveris-api-key'];
+  if (typeof header === 'string' && header.trim()) {
+    console.log('[TOKEN] Found Qveris key in X-Qveris-Api-Key header');
+    return header.trim();
+  }
+
+  const config = parseConfigHeader(req);
+  if (typeof config?.QVERIS_API_KEY === 'string' && config.QVERIS_API_KEY.trim()) {
+    console.log('[TOKEN] Extracted Qveris key from request config');
+    return config.QVERIS_API_KEY.trim();
+  }
+
+  return undefined;
+}
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -66,8 +109,7 @@ app.use((req: Request, res: Response, next) => {
   
   console.log(`[${timestamp}] ${method} ${url} - IP: ${ip}`);
   
-  // 🔍 详细记录所有请求头，用于调试 Smithery 配置传递
-  console.log(`[DEBUG] Request Headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`[DEBUG] Request Headers:`, JSON.stringify(redactHeaders(req.headers), null, 2));
   
   // 记录请求完成时的状态码
   const originalSend = res.send;
@@ -84,7 +126,7 @@ app.use(cors({
   methods: ['GET','POST','OPTIONS'],
   allowedHeaders: [
     'Content-Type','Accept','Authorization','Mcp-Session-Id','Last-Event-ID',
-    'X-Tenant-Id','X-Api-Key','X-Tushare-Token',
+    'X-Tenant-Id','X-Api-Key','X-Tushare-Token','X-Qveris-Api-Key',
     'X-Smithery-Config','X-Config','X-Session-Config'  // Smithery 可能的配置头
   ],
   exposedHeaders: ['Content-Type','Mcp-Session-Id']
@@ -142,12 +184,17 @@ app.post('/mcp', async (req: Request, res: Response) => {
     sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
     res.setHeader('Mcp-Session-Id', newId);
     console.log(`✅ [MCP-initialize] New session created: ${newId}`);
-    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.8.2' } }, id: body.id });
+    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.9.0' } }, id: body.id });
   }
 
   if (method === 'tools/list') {
-    console.log(`📋 [MCP-tools/list] Returning ${toolList.length} tools`);
-    return res.json({ jsonrpc: '2.0', result: { tools: toolList }, id: body.id });
+    const token = extractTokenFromHeaders(req);
+    const qverisApiKey = extractQverisApiKeyFromHeaders(req);
+    const availableTools = await runWithRequestContext({ tushareToken: token, qverisApiKey }, async () => {
+      return getAvailableToolList();
+    });
+    console.log(`📋 [MCP-tools/list] Returning ${availableTools.length} tools`);
+    return res.json({ jsonrpc: '2.0', result: { tools: availableTools }, id: body.id });
   }
 
   // 明确表示不支持 resources 和 prompts（返回空列表而不是错误）
@@ -169,11 +216,12 @@ app.post('/mcp', async (req: Request, res: Response) => {
   if (method === 'tools/call') {
     const { name, arguments: args } = body.params || {};
     const token = extractTokenFromHeaders(req);
+    const qverisApiKey = extractQverisApiKeyFromHeaders(req);
     const startTime = Date.now();
-    console.log(`🚀 [MCP-tools/call] Tool: ${name} | Has Token: ${!!token}`);
+    console.log(`🚀 [MCP-tools/call] Tool: ${name} | Has Tushare Token: ${!!token} | Has Qveris Key: ${!!qverisApiKey}`);
     
     try {
-      const result = await runWithRequestContext({ tushareToken: token }, async () => {
+      const result = await runWithRequestContext({ tushareToken: token, qverisApiKey }, async () => {
         return await dispatchTool(name, args || {});
       });
       const duration = Date.now() - startTime;

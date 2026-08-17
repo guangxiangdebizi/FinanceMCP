@@ -17,6 +17,8 @@ import { csiIndexConstituents } from './tools/csiIndexConstituents.js';
 import { dragonTigerInst } from './tools/dragonTigerInst.js';
 import { hotNews } from './tools/hotNews.js';
 import { futuresData } from './tools/futuresData.js';
+import { qverisFinance } from './tools/qverisFinance.js';
+import { isToolSourceAvailable, ToolSource } from './toolAvailability.js';
 
 export const toolList = [
   { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
@@ -38,9 +40,57 @@ export const toolList = [
   { name: dragonTigerInst.name, description: dragonTigerInst.description, inputSchema: dragonTigerInst.parameters },
   { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.parameters },
   { name: futuresData.name, description: futuresData.description, inputSchema: futuresData.parameters },
+  { name: qverisFinance.name, description: qverisFinance.description, inputSchema: qverisFinance.parameters },
 ];
 
+const TOOL_SOURCES: Record<string, readonly ToolSource[]> = {
+  current_timestamp: ['local'],
+  finance_news: ['public'],
+  stock_data: ['tushare', 'public'],
+  stock_data_minutes: ['tushare', 'public'],
+  index_data: ['tushare'],
+  macro_econ: ['tushare'],
+  company_performance: ['tushare'],
+  fund_data: ['tushare'],
+  fund_manager_by_name: ['tushare'],
+  convertible_bond: ['tushare'],
+  block_trade: ['tushare'],
+  money_flow: ['tushare'],
+  margin_trade: ['tushare'],
+  company_performance_hk: ['tushare'],
+  company_performance_us: ['tushare'],
+  csi_index_constituents: ['tushare'],
+  dragon_tiger_inst: ['tushare'],
+  hot_news_7x24: ['tushare'],
+  futures_data: ['tushare'],
+  qveris_finance: ['qveris'],
+};
+
+function toolSources(name: string): readonly ToolSource[] {
+  // New tools default to a credential-backed source until explicitly mapped.
+  return TOOL_SOURCES[name] ?? ['tushare'];
+}
+
+export function isToolAvailable(name: string): boolean {
+  return toolList.some(tool => tool.name === name)
+    && isToolSourceAvailable(toolSources(name));
+}
+
+export function getAvailableToolList() {
+  return toolList.filter(tool => isToolSourceAvailable(toolSources(tool.name)));
+}
+
+export function assertToolAvailable(name: string): void {
+  if (!toolList.some(tool => tool.name === name)) {
+    throw new Error(`Unknown tool: ${name}`);
+  }
+  if (!isToolAvailable(name)) {
+    throw new Error(`Tool ${name} is not available for the configured API credentials`);
+  }
+}
+
 export async function dispatchTool(name: string, args: Record<string, any>): Promise<any> {
+  assertToolAvailable(name);
   switch (name) {
     case 'current_timestamp':
       return await timestampTool.run({ format: args?.format ? String(args.format) : undefined });
@@ -167,6 +217,21 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
         trade_date: String(args?.trade_date),
         symbol: args?.symbol ? String(args.symbol) : undefined,
         broker: args?.broker ? String(args.broker) : undefined,
+      });
+    case 'qveris_finance':
+      return await qverisFinance.run({
+        action: String(args?.action) as 'discover' | 'inspect' | 'call',
+        query: args?.query ? String(args.query) : undefined,
+        tool_ids: Array.isArray(args?.tool_ids) ? args.tool_ids.map(String) : undefined,
+        tool_id: args?.tool_id ? String(args.tool_id) : undefined,
+        search_id: args?.search_id ? String(args.search_id) : undefined,
+        parameters: args?.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)
+          ? args.parameters as Record<string, unknown>
+          : undefined,
+        session_id: args?.session_id ? String(args.session_id) : undefined,
+        limit: typeof args?.limit === 'number' ? args.limit : undefined,
+        max_response_size: typeof args?.max_response_size === 'number' ? args.max_response_size : undefined,
+        model: args?.model ? String(args.model) : undefined,
       });
     default:
       throw new Error(`Unknown tool: ${name}`);

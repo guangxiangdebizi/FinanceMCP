@@ -7,7 +7,7 @@
   
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
 
-**Professional financial data server based on MCP protocol, integrating Tushare API to provide real-time financial data and technical indicator analysis for Claude and other AI assistants.**
+**Professional MCP financial data server integrating Tushare, Binance, and an optional Qveris dynamic finance source for Claude and other AI assistants.**
 
 </div>
 
@@ -128,6 +128,57 @@ You can also use our shared service without API keys (may have rate limits):
 | 💰 **margin_trade** | Margin trading data | 4 APIs: eligible stocks/summary/details/securities lending |
 | 🐯 **dragon_tiger_inst** | Dragon-Tiger institutional details | By trade date (optional code); buy/sell/net and reason table |
 | 🔥 **hot_news_7x24** | 7×24 Hot News | Based on Tushare latest batch (up to 1500 items), 80% content-similarity dedup, entries separated by `---` |
+| 🔎 **qveris_finance** | Optional Qveris finance capabilities | One aggregate Discover → Inspect → Call entry for market, financial, macro, news, crypto, and alternative data |
+
+### Optional Qveris Data Source
+
+Qveris currently exposes six finance domains: systematic trading, investment research, risk and compliance, macro and fixed income, crypto, and alternative signals. FinanceMCP keeps a small public tool surface and uses `qveris_finance` dynamically instead of registering nearly one thousand provider endpoints as MCP tools:
+
+1. `action=discover`: search for a capability and receive the current `search_id`, `tool_id`, parameter summary, quality, and cost signals. Free.
+2. `action=inspect`: fetch the latest complete schema and examples for IDs returned by Discover. Free.
+3. `action=call`: execute with the same search flow's `search_id`, exact `tool_id`, and schema-valid `parameters`. This may consume Qveris credits.
+
+stdio configuration:
+
+```json
+{
+  "mcpServers": {
+    "finance-mcp": {
+      "command": "npx",
+      "args": ["-y", "finance-mcp"],
+      "env": {
+        "TUSHARE_TOKEN": "your_tushare_token_here",
+        "QVERIS_API_KEY": "your_qveris_api_key_here"
+      }
+    }
+  }
+}
+```
+
+Tool flow:
+
+```json
+{ "action": "discover", "query": "US company income statement API", "limit": 5 }
+```
+
+```json
+{
+  "action": "inspect",
+  "tool_ids": ["exact tool_id returned by discover"],
+  "search_id": "search_id returned by discover"
+}
+```
+
+```json
+{
+  "action": "call",
+  "tool_id": "exact inspected tool_id",
+  "search_id": "search_id from the same discover call",
+  "parameters": { "fill from the inspected schema": "value" }
+}
+```
+
+See [Qveris finance interface coverage](./docs/qveris-interface-coverage.md) and the machine-readable [`docs/qveris-finance-capabilities.json`](./docs/qveris-finance-capabilities.json) snapshot. Refresh it with `npm run catalog:qveris`. Tool IDs and schemas can change, so always Discover/Inspect before Call.
 
 ## 🎯 Technical Highlights
 
@@ -254,6 +305,8 @@ After configuration, simply ask questions directly in Claude!
 
 ## 🔧 Local Deployment (Streamable HTTP)
 
+> To share model prompt/KV-cache routing and conversation lineage across Trae, Cursor, Claude Code, and Codex, run the optional standalone [`finance-cache-gateway`](./docs/cache-gateway.md). It does not change the existing FinanceMCP tool API.
+
 <details>
 <summary><strong>🛠️ Complete Local Deployment Guide</strong></summary>
 
@@ -320,7 +373,8 @@ npm install
 
 # 3. Configure API key
 echo "TUSHARE_TOKEN=your_token_here" > .env
-# Or edit src/config.ts directly
+# Optional: enable Qveris dynamic finance data
+echo "QVERIS_API_KEY=your_qveris_key_here" >> .env
 
 # 4. Build the project
 npm run build
@@ -455,6 +509,7 @@ npm run start:http
       "timeout": 600,
       "headers": {
         "X-Tushare-Token": "your_tushare_token",
+        "X-Qveris-Api-Key": "your_qveris_api_key",
         // Or any one of the above:
         // "Authorization": "Bearer your_tushare_token",
         // "X-Api-Key": "your_tushare_token",
@@ -497,6 +552,11 @@ npm run start:http
 - Fallback to `Authorization: Bearer <token>`.
 - Fallback to `X-Api-Key`.
 - If none provided, server may fallback to `TUSHARE_TOKEN` env var (optional).
+
+Qveris uses a separate credential to avoid ambiguity with the Tushare Bearer token:
+- stdio: `QVERIS_API_KEY`
+- HTTP: `X-Qveris-Api-Key`, falling back to `QVERIS_API_KEY`
+- Optional `QVERIS_BASE_URL`; default `https://qveris.ai/api/v1`, China region `https://qveris.cn/api/v1`
 
 (Crypto market now defaults to Binance public market data; no crypto API key is required.)
 

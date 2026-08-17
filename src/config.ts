@@ -6,21 +6,44 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // 2. 在Smithery部署时，从配置文件中加载
 dotenv.config();
 
-// 每请求上下文：用于透传用户在 Header 中提交的 Token（Tushare / CoinGecko）
-type RequestContext = { tushareToken?: string; coingeckoApiKey?: string; coingeckoProApiKey?: string; coingeckoDemoApiKey?: string };
+// 每请求上下文：用于透传用户在 Header 中提交的上游凭证。
+type RequestContext = {
+  tushareToken?: string;
+  coingeckoApiKey?: string;
+  coingeckoProApiKey?: string;
+  coingeckoDemoApiKey?: string;
+  qverisApiKey?: string;
+};
 const requestContext = new AsyncLocalStorage<RequestContext>();
+
+export type ApiCredentialSource = 'tushare' | 'qveris';
 
 export function runWithRequestContext<T>(ctx: Partial<RequestContext>, fn: () => Promise<T>): Promise<T> {
   return requestContext.run({
     tushareToken: ctx.tushareToken,
     coingeckoApiKey: ctx.coingeckoApiKey,
     coingeckoProApiKey: ctx.coingeckoProApiKey,
-    coingeckoDemoApiKey: ctx.coingeckoDemoApiKey
+    coingeckoDemoApiKey: ctx.coingeckoDemoApiKey,
+    qverisApiKey: ctx.qverisApiKey,
   }, fn);
 }
 
 export function getRequestToken(): string | undefined {
   return requestContext.getStore()?.tushareToken;
+}
+
+/** Resolve the credential-backed sources for the current request. */
+export function getConfiguredApiSources(): ApiCredentialSource[] {
+  const context = requestContext.getStore();
+  const requestSources: ApiCredentialSource[] = [];
+  if (context?.tushareToken?.trim()) requestSources.push('tushare');
+  if (context?.qverisApiKey?.trim()) requestSources.push('qveris');
+  if (requestSources.length > 0) return requestSources;
+
+  const configuredSources: ApiCredentialSource[] = [];
+  if (process.env.TUSHARE_TOKEN?.trim()) configuredSources.push('tushare');
+  if (process.env.QVERIS_API_KEY?.trim()) configuredSources.push('qveris');
+  return configuredSources;
 }
 
 export function getCoinGeckoApiKey(): string | undefined {
@@ -33,6 +56,10 @@ export function getCoinGeckoProApiKey(): string | undefined {
 
 export function getCoinGeckoDemoApiKey(): string | undefined {
   return requestContext.getStore()?.coingeckoDemoApiKey ?? process.env.COINGECKO_DEMO_API_KEY ?? undefined;
+}
+
+export function getQverisApiKey(): string | undefined {
+  return requestContext.getStore()?.qverisApiKey ?? process.env.QVERIS_API_KEY ?? undefined;
 }
 
 function resolveApiToken(): string | undefined {
@@ -86,10 +113,31 @@ export const COINGECKO_CONFIG = {
   TIMEOUT: 30000,
 };
 
+export const QVERIS_CONFIG = {
+  get API_KEY(): string {
+    return getQverisApiKey() ?? '';
+  },
+  get BASE_URL(): string {
+    const configured = process.env.QVERIS_BASE_URL?.trim();
+    if (configured) return configured.replace(/\/+$/, '');
+
+    const region = process.env.QVERIS_REGION?.trim().toLowerCase();
+    const apiKey = getQverisApiKey()?.trim() ?? '';
+    if (region === 'cn' || apiKey.startsWith('sk-cn-')) {
+      return 'https://qveris.cn/api/v1';
+    }
+    return 'https://qveris.ai/api/v1';
+  },
+  DISCOVER_TIMEOUT: 30000,
+  EXECUTE_TIMEOUT: 120000,
+};
+
 // 开发态输出便于确认来源（不打印实际 Token 值）
 if (process.env.NODE_ENV !== 'production') {
   const fromTs = getRequestToken() ? 'request-header' : (process.env.TUSHARE_TOKEN ? 'env' : 'none');
   const fromCg = getCoinGeckoProApiKey() ? 'request-pro-header/env' : (getCoinGeckoApiKey() ? 'request-std-header/env' : 'none');
+  const fromQveris = requestContext.getStore()?.qverisApiKey ? 'request-header' : (process.env.QVERIS_API_KEY ? 'env' : 'none');
   console.log('Tushare token source:', fromTs);
   console.log('CoinGecko key source:', fromCg);
+  console.log('Qveris key source:', fromQveris);
 }

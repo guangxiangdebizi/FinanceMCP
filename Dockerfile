@@ -29,7 +29,7 @@ RUN chown -R appuser:appgroup /app
 USER appuser
 
 # 暴露端口（Smithery 平台要求）
-EXPOSE 3000
+EXPOSE 3000 3210
 
 # 设置环境变量
 ENV NODE_ENV=production

@@ -1,17 +1,22 @@
 {
   "name": "finance-mcp",
-  "version": "4.8.2",
+  "version": "4.9.0",
   "description": "Professional financial data MCP server with Tushare-based multi-market and aggregate analytics",
   "type": "module",
   "bin": {
     "finance-mcp": "build/index.js",
-    "finance-mcp-http": "build/httpServer.js"
+    "finance-mcp-http": "build/httpServer.js",
+    "finance-cache-gateway": "build/cacheGateway.js",
+    "finance-cache": "build/cacheCli.js"
   },
   "files": [
-    "build"
+    "build",
+    "docs/cache-gateway.md",
+    "docs/tool-availability.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755'); try{require('fs').chmodSync('build/httpServer.js','755')}catch(e){}\"",
+    "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc && node -e \"for(const f of ['build/index.js','build/httpServer.js','build/cacheGateway.js','build/cacheCli.js']){try{require('fs').chmodSync(f,'755')}catch(e){}}\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
@@ -20,7 +25,13 @@
     "setup": "node build-setup.js",
     "start:http": "node build/httpServer.js",
     "start:stdio": "node build/index.js",
-    "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100"
+    "start:cache": "node build/cacheGateway.js",
+    "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100",
+    "catalog:qveris": "node devtools/qveris/update-catalog.mjs",
+    "test": "npm run test:availability && npm run test:cache",
+    "test:qveris": "npm run build && node devtools/qveris/smoke.mjs",
+    "test:cache": "npm run build && node --test test/cache-gateway.test.mjs",
+    "test:availability": "npm run build && node --test test/tool-availability.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",

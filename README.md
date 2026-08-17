@@ -7,7 +7,7 @@
 
 [![smithery badge](https://smithery.ai/badge/@guangxiangdebizi/FinanceMCP)](https://smithery.ai/server/@guangxiangdebizi/FinanceMCP)
 
-**基于MCP协议的专业金融数据服务器，集成Tushare API，为Claude等AI助手提供实时金融数据和技术指标分析。**
+**基于MCP协议的专业金融数据服务器，集成 Tushare、Binance，并可选接入 Qveris 动态金融能力，为 Claude 等 AI 助手提供金融数据和技术指标分析。**
 </div>
 
 ## 📑 目录
@@ -128,6 +128,59 @@
 | 💰 **margin_trade** | 融资融券数据 | 4个API：标的股票/汇总/明细/转融券 |
 | 🐯 **dragon_tiger_inst** | 龙虎榜机构明细 | 指定交易日(可选代码)，买卖额/比例/净额/理由表格 |
 | 🔥 **hot_news_7x24** | 7×24 热点 | 基于 Tushare 最新批次（单次至多1500条），内容相似度80%去重，条目间以`---`分隔 |
+| 🔎 **qveris_finance** | 可选 Qveris 金融能力 | 一个聚合入口完成 Discover → Inspect → Call，覆盖行情、财务、宏观固收、新闻舆情、加密和另类数据 |
+
+### 可选 Qveris 数据源
+
+Qveris 当前在线目录包含量化策略、投研分析、风控合规、宏观固收、加密资产和另类信号 6 个金融域。FinanceMCP 不把上游近千条 provider 接口逐个注册为 MCP 工具，而是通过 `qveris_finance` 动态使用当前目录：
+
+1. `action=discover`：按能力需求搜索，返回当前 `search_id`、`tool_id`、参数摘要、成功率和费用信号，免费。
+2. `action=inspect`：用 Discover 返回的 `tool_id` 获取最新完整 schema 和样例，免费。
+3. `action=call`：传入同一搜索链路的 `search_id`、精确 `tool_id` 和符合 schema 的 `parameters`，可能消耗 Qveris credits。
+
+stdio 模式配置：
+
+```json
+{
+  "mcpServers": {
+    "finance-mcp": {
+      "command": "npx",
+      "args": ["-y", "finance-mcp"],
+      "env": {
+        "TUSHARE_TOKEN": "your_tushare_token_here",
+        "QVERIS_API_KEY": "your_qveris_api_key_here"
+      }
+    }
+  }
+}
+```
+
+工具调用示例：
+
+```json
+{ "action": "discover", "query": "A股日线行情 API", "limit": 5 }
+```
+
+从返回结果选择能力后，先 Inspect，再按最新 schema 执行：
+
+```json
+{
+  "action": "inspect",
+  "tool_ids": ["discover 返回的完整 tool_id"],
+  "search_id": "discover 返回的 search_id"
+}
+```
+
+```json
+{
+  "action": "call",
+  "tool_id": "inspect 确认过的完整 tool_id",
+  "search_id": "同一 discover 返回的 search_id",
+  "parameters": { "按 inspect 返回的 schema 填写": "值" }
+}
+```
+
+完整在线接口盘点见 [Qveris 金融数据接口盘点](./docs/qveris-interface-coverage.md)，机器可读的 provider/tool 快照见 [`docs/qveris-finance-capabilities.json`](./docs/qveris-finance-capabilities.json)。使用 `npm run catalog:qveris` 可重新抓取当前目录。`tool_id` 和 schema 会变化，执行前必须重新 Discover/Inspect，不能只依赖快照。
 
 ## 🎯 技术亮点
 
@@ -279,6 +332,8 @@
 
 ## 🔧 本地部署（Streamable HTTP）
 
+> 需要在 Trae、Cursor、Claude Code、Codex 之间共享模型 Prompt/KV 缓存路由和对话 lineage 时，可另外启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它不会改变现有 FinanceMCP 工具接口。
+
 <details>
 <summary><strong>🛠️ 完整本地部署指南</strong></summary>
 
@@ -345,7 +400,8 @@ npm install
 
 # 3. 配置API密钥
 echo "TUSHARE_TOKEN=your_token_here" > .env
-# 或直接编辑 src/config.ts
+# 可选：启用 Qveris 动态金融数据源
+echo "QVERIS_API_KEY=your_qveris_key_here" >> .env
 
 # 4. 构建项目
 npm run build
@@ -489,7 +545,8 @@ npm run start:http
       "url": "http://localhost:3000/mcp",
       "timeout": 600,
       "headers": {
-        "X-Tushare-Token": "your_tushare_token_here"
+        "X-Tushare-Token": "your_tushare_token_here",
+        "X-Qveris-Api-Key": "your_qveris_api_key_here"
       }
     }
   }
@@ -510,6 +567,11 @@ npm run start:http
   - 或使用 `X-Api-Key`
   - 最后回退到环境变量 `TUSHARE_TOKEN`
 
+Qveris 使用独立凭证，避免与 Tushare 的 Bearer Token 混淆：
+- **stdio 模式**：`QVERIS_API_KEY`
+- **HTTP 模式**：`X-Qveris-Api-Key`，未传时回退到 `QVERIS_API_KEY`
+- 可选 `QVERIS_BASE_URL`；默认 `https://qveris.ai/api/v1`，中国区可设为 `https://qveris.cn/api/v1`
+
 （加密市场默认使用 Binance 公共行情接口，无需任何加密货币 API Key）
 
 > 📖 **详细文档**：更多部署模式说明请参考 [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md)
@@ -520,6 +582,13 @@ npm run start:http
 </details>
 
 ## 🆕 最新更新
+
+### 🔐 版本 4.9.0 - 按凭证裁剪 MCP 工具目录
+
+- `tools/list` 现在根据当前 MCP 请求实际携带的 API 凭证返回工具：仅 Qveris Key 时只返回 `qveris_finance`，仅 Tushare Token 时只返回 Tushare 覆盖工具。
+- `tools/call` 使用同一来源权限校验，不能绕过工具列表调用未授权工具。
+- 显式请求凭证优先于服务端环境变量；没有凭证时仅展示公共数据源和本地工具。
+- 构建流程先清理旧的 `build/` 产物，避免 npm 包包含过期 JavaScript。
 
 ### 💹 版本 4.7.2 - money_flow 个股接口切换 & 文案同步
 
