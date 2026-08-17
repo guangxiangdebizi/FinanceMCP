@@ -37,6 +37,26 @@ export function getRequestToken(): string | undefined {
   return requestContext.getStore()?.tushareToken;
 }
 
+export type CredentialSource = Extract<DataSourceId, 'tushare' | 'qveris'>;
+
+/**
+ * Resolve credential-backed sources for the current request. Explicit request
+ * credentials take precedence over process-level fallbacks, which keeps a
+ * shared server credential from expanding another tenant's visible tools.
+ */
+export function getConfiguredCredentialSources(): CredentialSource[] {
+  const context = requestContext.getStore();
+  const requestSources: CredentialSource[] = [];
+  if (context?.tushareToken?.trim()) requestSources.push('tushare');
+  if (context?.qverisApiKey?.trim()) requestSources.push('qveris');
+  if (requestSources.length > 0) return requestSources;
+
+  const configuredSources: CredentialSource[] = [];
+  if (process.env.TUSHARE_TOKEN?.trim()) configuredSources.push('tushare');
+  if (process.env.QVERIS_API_KEY?.trim()) configuredSources.push('qveris');
+  return configuredSources;
+}
+
 export function getCoinGeckoApiKey(): string | undefined {
   return requestContext.getStore()?.coingeckoApiKey ?? process.env.COINGECKO_API_KEY ?? undefined;
 }

@@ -6,15 +6,15 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { toolList, dispatchTool } from "./dispatch.js";
+import { getAvailableToolList, dispatchTool } from "./dispatch.js";
 
 const server = new Server(
-  { name: "FinanceMCP", version: "4.9.0" },
+  { name: "FinanceMCP", version: "4.10.0" },
   { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: toolList };
+  return { tools: getAvailableToolList() };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

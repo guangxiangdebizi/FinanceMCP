@@ -18,6 +18,7 @@ import { dragonTigerInst } from './tools/dragonTigerInst.js';
 import { hotNews } from './tools/hotNews.js';
 import { futuresData } from './tools/futuresData.js';
 import { routeToolCall } from './utils/dataSourceRouter.js';
+import { isToolSourceAvailable, ToolSource } from './toolAvailability.js';
 
 export const toolList = [
   { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
@@ -40,6 +41,53 @@ export const toolList = [
   { name: hotNews.name, description: hotNews.description, inputSchema: hotNews.parameters },
   { name: futuresData.name, description: futuresData.description, inputSchema: futuresData.parameters },
 ];
+
+// Keep this mapping explicit: it is the contract used by tools/list and by the
+// direct-call guard. Qveris coverage mirrors getQverisToolPlan in qverisAdapter.
+const TOOL_SOURCES: Record<string, readonly ToolSource[]> = {
+  current_timestamp: ['local'],
+  finance_news: ['qveris', 'web'],
+  stock_data: ['tushare', 'qveris', 'binance'],
+  stock_data_minutes: ['tushare', 'qveris', 'binance'],
+  index_data: ['tushare', 'qveris'],
+  macro_econ: ['tushare', 'qveris'],
+  company_performance: ['tushare', 'qveris'],
+  fund_data: ['tushare'],
+  fund_manager_by_name: ['tushare'],
+  convertible_bond: ['tushare'],
+  block_trade: ['tushare'],
+  money_flow: ['tushare'],
+  margin_trade: ['tushare'],
+  company_performance_hk: ['tushare', 'qveris'],
+  company_performance_us: ['tushare', 'qveris'],
+  csi_index_constituents: ['tushare', 'qveris'],
+  dragon_tiger_inst: ['tushare'],
+  hot_news_7x24: ['tushare', 'qveris'],
+  futures_data: ['tushare'],
+};
+
+function toolSources(name: string): readonly ToolSource[] {
+  // New tools default to a credential-backed source until explicitly mapped.
+  return TOOL_SOURCES[name] ?? ['tushare'];
+}
+
+export function isToolAvailable(name: string): boolean {
+  return toolList.some(tool => tool.name === name)
+    && isToolSourceAvailable(toolSources(name));
+}
+
+export function getAvailableToolList() {
+  return toolList.filter(tool => isToolSourceAvailable(toolSources(tool.name)));
+}
+
+export function assertToolAvailable(name: string): void {
+  if (!toolList.some(tool => tool.name === name)) {
+    throw new Error(`Unknown tool: ${name}`);
+  }
+  if (!isToolAvailable(name)) {
+    throw new Error(`Tool ${name} is not available for the configured API credentials`);
+  }
+}
 
 async function dispatchNativeTool(name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
@@ -175,8 +223,6 @@ async function dispatchNativeTool(name: string, args: Record<string, any>): Prom
 }
 
 export async function dispatchTool(name: string, args: Record<string, any>): Promise<any> {
-  if (!toolList.some(tool => tool.name === name)) {
-    throw new Error(`Unknown tool: ${name}`);
-  }
+  assertToolAvailable(name);
   return routeToolCall(name, args, () => dispatchNativeTool(name, args));
 }

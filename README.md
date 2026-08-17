@@ -34,7 +34,7 @@
 </div>
 
 > [!IMPORTANT]
-> **v4.9.0** 在不新增 Tool、也不修改现有 Tool 参数的前提下，引入请求级 Qveris 数据源路由、自动降级和结果来源标注。现有客户端可以无缝升级。
+> **v4.10.0** 在保留现有 19 个 Tool 名称与参数的前提下，新增按请求凭证裁剪 `tools/list` 的能力，并保留 v4.9.0 的 Qveris 路由、自动降级和来源标注。
 
 > [!NOTE]
 > 需要在 Trae、Cursor、Claude Code 和 Codex 之间共享模型 Prompt/KV-cache 路由及对话 lineage 时，可选启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它使用单独的进程、端口和配置；不修改现有 MCP Tool、stdio 或 `/mcp` 接口，不启用时现有用法完全不变。
@@ -118,6 +118,10 @@ tushare,qveris,binance
 
 > [!NOTE]
 > Qveris 是可选扩展。未提供 `X-Qveris-Api-Key` / `QVERIS_API_KEY` 时不会调用 Qveris，也不会消耗 credits。接口契约参见 [Qveris REST API](https://qveris.ai/docs/rest-api)。
+
+### 按凭证动态显示 Tools
+
+`tools/list` 会根据当前 MCP 请求实际携带的凭证裁剪工具目录：只传 Qveris Key 时只展示 Qveris adapter 覆盖的现有 Tools，只传 Tushare Token 时只展示 Tushare 覆盖的 Tools；同时传入两者时展示两者的并集。没有凭证时仅展示公共数据源与本地工具。`tools/call` 也执行相同校验，避免 AI 调用到当前请求无法使用的数据源。
 
 <a id="providers"></a>
 

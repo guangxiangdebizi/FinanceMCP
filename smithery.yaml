@@ -2,7 +2,7 @@
 # 参考文档：https://smithery.ai/docs/build/project-config/smithery.yaml
 
 name: "@guangxiangdebizi/FinanceMCP"        # 服务器唯一标识
-version: "4.4.0"                             # 版本号
+version: "4.10.0"                             # 版本号
 description: "财经数据查询 & 财经新闻 & 公司财务表现分析 MCP"
 author:
   name: "Xingyu_Chen"
