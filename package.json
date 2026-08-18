@@ -1,6 +1,6 @@
 {
   "name": "finance-mcp",
-  "version": "4.9.0",
+  "version": "4.10.0",
   "description": "Multi-source financial data MCP server with Tushare, optional Qveris routing, and Binance crypto data",
   "type": "module",
   "bin": {
@@ -11,10 +11,12 @@
   },
   "files": [
     "build",
-    "docs/cache-gateway.md"
+    "docs/cache-gateway.md",
+    "docs/tool-availability.md"
   ],
   "scripts": {
-    "build": "tsc && node -e \"for(const f of ['build/index.js','build/httpServer.js','build/cacheGateway.js','build/cacheCli.js']){try{require('fs').chmodSync(f,'755')}catch(e){}}\"",
+    "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc && node -e \"for(const f of ['build/index.js','build/httpServer.js','build/cacheGateway.js','build/cacheCli.js']){try{require('fs').chmodSync(f,'755')}catch(e){}}\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",

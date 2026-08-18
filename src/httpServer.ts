@@ -3,7 +3,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
-import { toolList, dispatchTool } from "./dispatch.js";
+import { getAvailableToolList, dispatchTool } from "./dispatch.js";
 
 
 interface Session { id: string; createdAt: Date; lastActivity: Date }
@@ -207,12 +207,20 @@ app.post('/mcp', async (req: Request, res: Response) => {
     sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
     res.setHeader('Mcp-Session-Id', newId);
     console.log(`✅ [MCP-initialize] New session created: ${newId}`);
-    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.9.0' } }, id: body.id });
+    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.10.0' } }, id: body.id });
   }
 
   if (method === 'tools/list') {
-    console.log(`📋 [MCP-tools/list] Returning ${toolList.length} tools`);
-    return res.json({ jsonrpc: '2.0', result: { tools: toolList }, id: body.id });
+    const token = extractTokenFromHeaders(req);
+    const qverisApiKey = extractQverisApiKeyFromHeaders(req);
+    const sourcePriority = extractSourcePriorityFromHeaders(req);
+    const availableTools = await runWithRequestContext({
+      tushareToken: token,
+      qverisApiKey,
+      sourcePriority,
+    }, async () => getAvailableToolList());
+    console.log(`📋 [MCP-tools/list] Returning ${availableTools.length} tools`);
+    return res.json({ jsonrpc: '2.0', result: { tools: availableTools }, id: body.id });
   }
 
   // 明确表示不支持 resources 和 prompts（返回空列表而不是错误）
@@ -289,7 +297,7 @@ app.listen(PORT, () => {
   console.log(`📡 MCP Endpoint:  http://localhost:${PORT}/mcp`);
   console.log(`💚 Health Check:  http://localhost:${PORT}/health`);
   console.log(`📊 Active Sessions: ${sessions.size}`);
-  console.log(`🔧 Available Tools: ${toolList.length}`);
+  console.log(`🔧 Available Tools: ${getAvailableToolList().length}`);
   console.log('='.repeat(60));
   console.log('📝 Server is ready to accept connections');
   console.log('='.repeat(60) + '\n');
