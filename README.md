@@ -34,7 +34,7 @@
 </div>
 
 > [!IMPORTANT]
-> **v4.10.0** 在保留现有 19 个 Tool 名称与参数的前提下，新增按请求凭证裁剪 `tools/list` 的能力，并修复行情金额单位、LPR、期货权限提示、资金流语义及多项 Tushare 字段契约问题；同时保留 v4.9.0 的 Qveris 路由、自动降级和来源标注。
+> **v4.10.1** 修复行情金额单位、LPR、期货权限提示、资金流语义及多项 Tushare 字段契约问题；同时包含 v4.10.0 已引入的按请求凭证裁剪 `tools/list` 能力，并保留现有 19 个 Tool 名称与参数以及 v4.9.0 的 Qveris 路由、自动降级和来源标注。
 
 > [!NOTE]
 > 需要在 Trae、Cursor、Claude Code 和 Codex 之间共享模型 Prompt/KV-cache 路由及对话 lineage 时，可选启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它使用单独的进程、端口和配置；不修改现有 MCP Tool、stdio 或 `/mcp` 接口，不启用时现有用法完全不变。
