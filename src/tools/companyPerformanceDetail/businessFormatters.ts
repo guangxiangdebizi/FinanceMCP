@@ -9,6 +9,11 @@ function formatNumber(num: any): string {
   return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
+function formatYuanAsWan(num: any): string {
+  const value = Number(num);
+  return Number.isFinite(value) ? formatNumber(value / 10000) : 'N/A';
+}
+
 // 格式化融合版主营业务构成数据（包含产品、地区、行业）
 export function formatMainBusinessCombined(data: any[]): string {
   if (!data || data.length === 0) {
@@ -66,9 +71,9 @@ export function formatMainBusinessCombined(data: any[]): string {
       // 添加数据行
       for (const item of items) {
         const bzItem = item.bz_item || 'N/A';
-        const bzSales = item.bz_sales ? formatNumber(item.bz_sales) : 'N/A';
-        const bzProfit = item.bz_profit ? formatNumber(item.bz_profit) : 'N/A';
-        const bzCost = item.bz_cost ? formatNumber(item.bz_cost) : 'N/A';
+        const bzSales = item.bz_sales ? formatYuanAsWan(item.bz_sales) : 'N/A';
+        const bzProfit = item.bz_profit ? formatYuanAsWan(item.bz_profit) : 'N/A';
+        const bzCost = item.bz_cost ? formatYuanAsWan(item.bz_cost) : 'N/A';
         const currType = item.curr_type || 'CNY';
         
         output += `| ${bzItem} | ${bzSales} | ${bzProfit} | ${bzCost} | ${currType} |\n`;
@@ -125,9 +130,9 @@ export function formatMainBusiness(data: any[]): string {
     // 添加数据行
     for (const item of items) {
       const bzItem = item.bz_item || 'N/A';
-      const bzSales = item.bz_sales ? formatNumber(item.bz_sales) : 'N/A';
-      const bzProfit = item.bz_profit ? formatNumber(item.bz_profit) : 'N/A';
-      const bzCost = item.bz_cost ? formatNumber(item.bz_cost) : 'N/A';
+      const bzSales = item.bz_sales ? formatYuanAsWan(item.bz_sales) : 'N/A';
+      const bzProfit = item.bz_profit ? formatYuanAsWan(item.bz_profit) : 'N/A';
+      const bzCost = item.bz_cost ? formatYuanAsWan(item.bz_cost) : 'N/A';
       const currType = item.curr_type || 'CNY';
       
       output += `| ${bzItem} | ${bzSales} | ${bzProfit} | ${bzCost} | ${currType} |\n`;
@@ -137,4 +142,4 @@ export function formatMainBusiness(data: any[]): string {
   }
   
   return output;
-} 
+}

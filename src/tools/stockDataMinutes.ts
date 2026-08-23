@@ -1,5 +1,6 @@
 import { TUSHARE_CONFIG } from '../config.js';
 import { resolveStockCodes } from '../utils/stockCodeResolver.js';
+import { formatTushareAmountWan } from '../utils/tushareUnits.js';
 
 /**
  * 分钟K线数据工具（A股/加密）
@@ -52,6 +53,10 @@ export const stockDataMinutes = {
       if (endTime <= startTime) {
         throw new Error('结束时间必须大于起始时间');
       }
+      const toTushareDateTime = (value: string) => {
+        return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)} ` +
+          `${value.slice(8, 10)}:${value.slice(10, 12)}:${value.slice(12, 14)}`;
+      };
 
       // 归一化频率
       const rawFreq = String(args.freq || '').trim().toLowerCase();
@@ -86,8 +91,8 @@ export const stockDataMinutes = {
           token: TUSHARE_API_KEY,
           params: {
             ts_code: args.code,
-            start_time: startTime,
-            end_time: endTime,
+            start_date: toTushareDateTime(startTime),
+            end_date: toTushareDateTime(endTime),
             freq: freq
           }
           // 不指定 fields，默认返回全部
@@ -159,7 +164,7 @@ export const stockDataMinutes = {
             const l = safeNum(r[lowKey]);
             const c = safeNum(r[closeKey]);
             const v = r[volKey] == null ? 'N/A' : String(r[volKey]);
-            const amt = r[amountKey] == null ? 'N/A' : String(r[amountKey]);
+            const amt = formatTushareAmountWan(r[amountKey], 'stk_mins');
             out += `| ${t} | ${fmt(o)} | ${fmt(h)} | ${fmt(l)} | ${fmt(c)} | ${v} | ${amt} |\n`;
           }
 

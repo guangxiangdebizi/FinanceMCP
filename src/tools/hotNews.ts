@@ -49,6 +49,18 @@ function deduplicateByContent(items: NewsItem[], threshold = 0.8): NewsItem[] {
   return representatives;
 }
 
+function formatShanghaiDateTime(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const value = (type: string) => parts.find(part => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')} ` +
+    `${value('hour')}:${value('minute')}:${value('second')}`;
+}
+
 async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise<NewsItem[]> {
   if (!TUSHARE_CONFIG.API_TOKEN) {
     logs?.push('[WARN] 未配置 TUSHARE_TOKEN，无法从 Tushare 获取数据');
@@ -57,11 +69,16 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TUSHARE_CONFIG.TIMEOUT);
   try {
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
     const body = {
       api_name: 'news',
       token: TUSHARE_CONFIG.API_TOKEN,
-      // 不传任何筛选参数，直接获取默认的最新数据
-      params: {},
+      params: {
+        start_date: formatShanghaiDateTime(start),
+        end_date: formatShanghaiDateTime(end),
+        src: 'sina',
+      },
       fields: 'datetime,content,title,channels'
     } as const;
     const resp = await fetch(TUSHARE_CONFIG.API_URL, {
@@ -70,17 +87,16 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
       body: JSON.stringify(body),
       signal: controller.signal
     });
-    clearTimeout(timeoutId);
     if (!resp.ok) {
       const msg = `Tushare请求失败: HTTP ${resp.status}`;
       logs?.push(`[ERROR] ${msg}`);
-      return [];
+      throw new Error(msg);
     }
     const data = await resp.json();
     if (data.code !== 0) {
       const msg = `Tushare返回错误: ${data.msg || data.message || '未知错误'}`;
       logs?.push(`[ERROR] ${msg}`);
-      return [];
+      throw new Error(msg);
     }
     const fields: string[] = data.data?.fields ?? [];
     const items: any[][] = data.data?.items ?? [];
@@ -105,11 +121,12 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
     logs?.push(`[INFO] 从 Tushare 获取原始条数: ${results.length}`);
     return results;
   } catch (err) {
-    clearTimeout(timeoutId);
     const msg = `获取Tushare新闻失败: ${err instanceof Error ? err.message : String(err)}`;
     console.error(msg);
     logs?.push(`[ERROR] ${msg}`);
-    return [];
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

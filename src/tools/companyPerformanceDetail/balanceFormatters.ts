@@ -4,7 +4,7 @@ function formatNumber(num: any): string {
   if (num === null || num === undefined || num === '') return 'N/A';
   const number = parseFloat(num);
   if (isNaN(number)) return 'N/A';
-  return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  return (number / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
 // 辅助函数：获取报告类型描述

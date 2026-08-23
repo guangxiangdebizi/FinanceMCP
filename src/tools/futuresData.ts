@@ -41,7 +41,11 @@ export const futuresData = {
       );
 
       if (!data.length) {
-        throw new Error(`未找到 ${args.trade_date} 的期货持仓数据，请确认为有效交易日`);
+        throw new Error(
+          `未找到 ${args.trade_date} 的期货持仓数据。可能原因：查询条件无匹配、` +
+          `非交易日或数据尚未更新，或当前 Tushare Token 无 fut_holding 访问权限` +
+          `（该接口需 2000 积分；权限不足时 Tushare 可能静默返回空数据）`
+        );
       }
 
       const text = formatFuturesHolding(data, args.trade_date, args.symbol);

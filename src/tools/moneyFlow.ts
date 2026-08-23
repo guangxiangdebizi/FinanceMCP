@@ -213,7 +213,8 @@ async function fetchStockMoneyFlow(
   const result = await callTushareAPI(params, apiUrl);
 
   // 将 moneyflow 的字段映射/归一化为下游格式化函数期望的字段名：
-  //   net_amount           = net_mf_amount（主力净流入，万元 → 元，保持与 DC 版本同量纲）
+  //   net_amount           = 超大单净额 + 大单净额（主力口径，万元 → 元）
+  //   total_net_amount     = net_mf_amount（全部单种净流入，万元 → 元）
   //   buy_elg_amount       = 超大单净额 = buy_elg_amount - sell_elg_amount
   //   buy_lg_amount        = 大单净额   = buy_lg_amount  - sell_lg_amount
   //   buy_md_amount        = 中单净额   = buy_md_amount  - sell_md_amount
@@ -229,13 +230,15 @@ async function fetchStockMoneyFlow(
     const lgNet  = (toNum(row.buy_lg_amount)  - toNum(row.sell_lg_amount))  * WAN;
     const mdNet  = (toNum(row.buy_md_amount)  - toNum(row.sell_md_amount))  * WAN;
     const smNet  = (toNum(row.buy_sm_amount)  - toNum(row.sell_sm_amount))  * WAN;
-    const netAmt = toNum(row.net_mf_amount) * WAN;
+    const netAmt = elgNet + lgNet;
+    const totalNetAmt = toNum(row.net_mf_amount) * WAN;
     return {
       ts_code: row.ts_code,
       trade_date: row.trade_date,
       close: '',
       pct_change: '',
       net_amount: netAmt,
+      total_net_amount: totalNetAmt,
       net_amount_rate: '',
       buy_elg_amount: elgNet,
       buy_elg_amount_rate: '',
@@ -252,7 +255,7 @@ async function fetchStockMoneyFlow(
     data: mapped,
     fields: [
       'ts_code','trade_date','close','pct_change',
-      'net_amount','net_amount_rate',
+      'net_amount','total_net_amount','net_amount_rate',
       'buy_elg_amount','buy_elg_amount_rate',
       'buy_lg_amount','buy_lg_amount_rate',
       'buy_md_amount','buy_md_amount_rate',
@@ -313,7 +316,7 @@ async function fetchNorthboundFlow(
     const { data } = await callTushare(
       'hk_hold',
       params,
-      'ts_code,trade_date,exchange_id,by_vol,by_ratio,sell_vol,sell_ratio,hold_vol,hold_ratio'
+      'code,trade_date,ts_code,name,vol,ratio,exchange'
     );
     return { data, apiUsed: 'hk_hold' };
   } else {
@@ -335,14 +338,16 @@ function formatNorthboundData(data: Record<string, any>[], apiUsed: string, tsCo
     return (b.trade_date || '').localeCompare(a.trade_date || '');
   });
 
-  let out = `# 🌐 北向资金数据\n\n`;
+  let out = apiUsed === 'hk_hold'
+    ? `# 🌐 沪深港股通持股数据\n\n`
+    : `# 🌐 北向资金数据\n\n`;
   if (apiUsed === 'hk_hold') {
-    out += `**查询方式**: 港股通持股明细 (hk_hold)  股票: ${tsCode}\n\n`;
-    out += `| 日期 | 交易所 | 买入量(股) | 买入占比% | 卖出量(股) | 卖出占比% | 持股量(股) | 持股占比% |\n`;
-    out += `|------|--------|-----------|---------|-----------|---------|-----------|--------|\n`;
+    out += `**查询方式**: 沪深港股通持股明细 (hk_hold)  股票: ${tsCode}\n\n`;
+    out += `| 日期 | 原始代码 | TS代码 | 名称 | 持股数量(股) | 持股占比% | 类型 |\n`;
+    out += `|------|----------|--------|------|-------------|----------|------|\n`;
     sorted.forEach(r => {
       const n = (v: any) => v != null ? String(v) : 'N/A';
-      out += `| ${n(r.trade_date)} | ${n(r.exchange_id)} | ${n(r.by_vol)} | ${n(r.by_ratio)} | ${n(r.sell_vol)} | ${n(r.sell_ratio)} | ${n(r.hold_vol)} | ${n(r.hold_ratio)} |\n`;
+      out += `| ${n(r.trade_date)} | ${n(r.code)} | ${n(r.ts_code)} | ${n(r.name)} | ${n(r.vol)} | ${n(r.ratio)} | ${n(r.exchange)} |\n`;
     });
   } else {
     out += `**查询方式**: 沪深港通十大成交股 (hsgt_top10)  日期: ${sorted[0]?.trade_date || ''}\n\n`;
@@ -630,12 +635,13 @@ function formatMarketFlowTable(data: any[]): string {
 // 格式化个股资金流向表格
 function formatStockFlowTable(data: any[]): string {
   let output = `## 📋 个股资金流向明细\n\n`;
-  output += `> 说明：使用 Tushare 标准接口 moneyflow（主动买卖单统计）。该接口不提供「收盘价 / 涨跌% / 净占比%」字段，故相关列显示为 N/A，属正常现象。\n\n`;
-  output += `| 交易日期 | 收盘价 | 涨跌% | 主力净流入(万元) | 净占比% | 超大单净流入(万元) | 大单净流入(万元) | 中单净流入(万元) | 小单净流入(万元) |\n`;
-  output += `|---------|--------|------|------------|--------|------------|------------|------------|------------|\n`;
+  output += `> 说明：主力净流入按「超大单净额 + 大单净额」计算；「全部单种净流入」直接使用 Tushare net_mf_amount，二者不混同。该接口不提供「收盘价 / 涨跌% / 净占比%」字段，故相关列显示为 N/A。\n\n`;
+  output += `| 交易日期 | 收盘价 | 涨跌% | 主力净流入(万元) | 全部单种净流入(万元) | 净占比% | 超大单净流入(万元) | 大单净流入(万元) | 中单净流入(万元) | 小单净流入(万元) |\n`;
+  output += `|---------|--------|------|------------|------------------|--------|------------|------------|------------|------------|\n`;
   
   data.forEach(item => {
     const netAmount = parseFloat(item.net_amount) || 0;
+    const totalNetAmount = parseFloat(item.total_net_amount) || 0;
     const netAmountRate = parseFloat(item.net_amount_rate) || 0;
     const elgAmount = parseFloat(item.buy_elg_amount) || 0;
     const lgAmount = parseFloat(item.buy_lg_amount) || 0;
@@ -648,6 +654,7 @@ function formatStockFlowTable(data: any[]): string {
     output += `| ${formatNumber(item.close)} `;
     output += `| ${formatPercent(item.pct_change)} `;
     output += `| ${netFlowIcon} ${formatMoney(netAmount)} `;
+    output += `| ${formatMoney(totalNetAmount)} `;
     output += `| ${formatPercent(netAmountRate)} `;
     output += `| ${formatMoney(elgAmount)} `;
     output += `| ${formatMoney(lgAmount)} `;

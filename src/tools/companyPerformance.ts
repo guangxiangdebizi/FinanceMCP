@@ -97,7 +97,7 @@ export const companyPerformance = {
         const sorted = [...data].sort((a, b) => (b.ipo_date || '').localeCompare(a.ipo_date || ''));
         let text = `# 📋 新股上市数据 (${ipoParams.start_date} 至 ${ipoParams.end_date})\n\n`;
         text += `共 ${sorted.length} 只新股\n\n`;
-        text += `| 代码 | 名称 | 上市日期 | 发行日期 | 发行价 | 市盈率 | 发行量(万股) | 募资(亿) | 中签率% |\n`;
+        text += `| 代码 | 名称 | 上网发行日期 | 上市日期 | 发行价 | 市盈率 | 发行量(万股) | 募资(亿) | 中签率% |\n`;
         text += `|------|------|---------|---------|--------|--------|------------|---------|--------|\n`;
         sorted.forEach(r => {
           const n = (v: any) => v != null && v !== '' ? String(v) : 'N/A';

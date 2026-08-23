@@ -6,7 +6,7 @@ function formatNumber(num: any): string {
   if (num === null || num === undefined || num === '') return 'N/A';
   const number = parseFloat(num);
   if (isNaN(number)) return 'N/A';
-  return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  return (number / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
 // 辅助函数：获取公司类型描述
@@ -260,4 +260,4 @@ export function formatCashflowAll(data: any[]): string {
   output += `**💡 说明：** 单位：万元，已智能过滤全为空的字段，只显示有实际数据的项目\n\n`;
   
   return output;
-} 
+}

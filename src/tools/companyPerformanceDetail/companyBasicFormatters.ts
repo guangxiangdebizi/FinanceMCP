@@ -43,7 +43,7 @@ export function formatCompanyBasic(data: CompanyBasicData[]): string {
 
   data.forEach((record: CompanyBasicData) => {
     const exchangeName = getExchangeName(record.exchange);
-    const regCapital = record.reg_capital ? (record.reg_capital / 10000).toFixed(2) : 'N/A';
+    const regCapital = record.reg_capital ? Number(record.reg_capital).toFixed(2) : 'N/A';
     const location = `${record.province || 'N/A'}${record.city ? '/' + record.city : ''}`;
     
     result += `| ${record.ts_code || 'N/A'} | ${record.com_name || 'N/A'} | ${exchangeName} | ${record.chairman || 'N/A'} | ${record.manager || 'N/A'} | ${record.secretary || 'N/A'} | ${regCapital} | ${formatDate(record.setup_date) || 'N/A'} | ${location} |\n`;
@@ -131,9 +131,9 @@ export function formatCompanyBasic(data: CompanyBasicData[]): string {
       .map(record => record.reg_capital);
       
     if (validCapital.length > 0) {
-      const avgCapital = (validCapital.reduce((sum, cap) => sum + cap, 0) / validCapital.length / 10000).toFixed(2);
-      const maxCapital = (Math.max(...validCapital) / 10000).toFixed(2);
-      const minCapital = (Math.min(...validCapital) / 10000).toFixed(2);
+      const avgCapital = (validCapital.reduce((sum, cap) => sum + cap, 0) / validCapital.length).toFixed(2);
+      const maxCapital = Math.max(...validCapital).toFixed(2);
+      const minCapital = Math.min(...validCapital).toFixed(2);
       
       result += `\n**💰 注册资本分析：**\n`;
       result += `- 平均注册资本: ${avgCapital}万元\n`;
@@ -217,4 +217,4 @@ function formatDate(dateStr: string): string {
   const day = dateStr.substring(6, 8);
   
   return `${year}-${month}-${day}`;
-} 
+}

@@ -1,5 +1,6 @@
 import { TUSHARE_CONFIG } from '../config.js';
 import { resolveStockCodes } from '../utils/stockCodeResolver.js';
+import { formatTushareAmountWan } from '../utils/tushareUnits.js';
 import {
   InvalidToolInputError,
   STOCK_MARKET_TYPES,
@@ -9,6 +10,7 @@ import {
   normalizeOptionalEnumInput,
   normalizeOptionalIndicatorList,
 } from '../utils/inputValidation.js';
+
 import { 
   calculateMACD, 
   calculateKDJ, 
@@ -400,7 +402,7 @@ export const stockData = {
 
         case 'us':
           params.api_name = "us_daily";
-          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
+          params.fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_change,vol,amount";
           break;
 
         case 'hk':
@@ -425,7 +427,7 @@ export const stockData = {
 
         case 'repo':
           params.api_name = "repo_daily";
-          params.fields = "ts_code,trade_date,name,rate,vol,amount";
+          params.fields = "ts_code,trade_date,repo_maturity,weight,amount,num";
           break;
 
         case 'convertible_bond':
@@ -687,11 +689,9 @@ export const stockData = {
           'crypto': '加密货币'
         };
 
-        // 金额（amount）统一以“万元”为单位展示：amount(千) -> amount/10(万)
+        // Tushare 各行情接口的 amount 原始单位不统一，按实际接口统一换算为“万”。
         const formatAmountWan = (val: any): string => {
-          const num = Number(val);
-          if (val == null || val === '' || isNaN(num)) return 'N/A';
-          return (num / 10).toFixed(2);
+          return formatTushareAmountWan(val, params.api_name);
         };
         
         // 格式化输出（根据不同市场类型构建表格格式）
@@ -759,12 +759,12 @@ export const stockData = {
             const maIndicators = Object.keys(indicators).filter(key => key.startsWith('ma') && key !== 'macd');
             maIndicators.forEach(ma => indicatorHeaders.push(ma.toUpperCase()));
           }
-          const baseHeaders = ['交易日期','开盘','最高','最低','收盘','结算','涨跌1','涨跌2','成交量','持仓量'];
+          const baseHeaders = ['交易日期','开盘','最高','最低','收盘','结算','涨跌1','涨跌2','成交量(手)','成交金额(万元)','持仓量(手)'];
           const headers = [...baseHeaders, ...indicatorHeaders];
           formattedData = `| ${headers.join(' | ')} |\n`;
           formattedData += `|${headers.map(() => '--------').join('|')}|\n`;
           stockData.forEach((data: Record<string, any>, index: number) => {
-            const baseRow = [data.trade_date, data.open || 'N/A', data.high || 'N/A', data.low || 'N/A', data.close || 'N/A', data.settle || 'N/A', data.change1 || 'N/A', data.change2 || 'N/A', data.vol || 'N/A', data.oi || 'N/A'];
+            const baseRow = [data.trade_date, data.open || 'N/A', data.high || 'N/A', data.low || 'N/A', data.close || 'N/A', data.settle || 'N/A', data.change1 || 'N/A', data.change2 || 'N/A', data.vol || 'N/A', formatAmountWan(data.amount), data.oi || 'N/A'];
             const indicatorRow: string[] = [];
             if (hasIndicators) {
               if (indicators.macd) {
@@ -795,11 +795,11 @@ export const stockData = {
           });
         } else if (marketType === 'repo') {
           // 债券逆回购数据表格展示
-          formattedData = `| 交易日期 | 品种名称 | 利率(%) | 成交金额(万元) |\n`;
-          formattedData += `|---------|---------|---------|---------------|\n`;
+          formattedData = `| 交易日期 | 期限品种 | 加权利率(%) | 成交金额(万元) | 成交笔数 |\n`;
+          formattedData += `|---------|---------|-------------|---------------|---------|\n`;
           stockData.forEach((data: Record<string, any>) => {
             const amtWan = formatAmountWan(data.amount);
-            formattedData += `| ${data.trade_date} | ${data.name || 'N/A'} | ${data.rate || 'N/A'} | ${amtWan} |\n`;
+            formattedData += `| ${data.trade_date} | ${data.repo_maturity || 'N/A'} | ${data.weight || 'N/A'} | ${amtWan} | ${data.num ?? 'N/A'} |\n`;
           });
         } else if (marketType === 'convertible_bond') {
           // 可转债数据表格展示（追加技术指标列）
@@ -935,10 +935,19 @@ export const stockData = {
               'close': '收盘',
               'high': '最高', 
               'low': '最低',
-              'vol': '成交量',
+              'vol': marketType === 'cn' && ['weekly', 'monthly'].includes(args.timeframe || '')
+                ? '成交量(股)'
+                : ['us', 'hk'].includes(marketType)
+                  ? '成交量(股)'
+                  : '成交量(手)',
               'amount': '成交额'
             };
-            fieldNameMap['amount'] = '成交额(万元)';
+            const amountHeader = marketType === 'hk'
+              ? '成交额(万港元)'
+              : marketType === 'us'
+                ? '成交额(万美元)'
+                : '成交额(万元)';
+            fieldNameMap['amount'] = amountHeader;
             
             // 如果有技术指标，添加技术指标列
             const indicatorHeaders: string[] = [];
@@ -967,7 +976,7 @@ export const stockData = {
             
             // 组合所有表头
             const allHeaders = [
-              ...displayFields.map(field => field === 'amount' ? '成交额(万元)' : (fieldNameMap[field] || field)),
+              ...displayFields.map(field => fieldNameMap[field] || field),
               ...indicatorHeaders
             ];
             formattedData = `| ${allHeaders.join(' | ')} |\n`;

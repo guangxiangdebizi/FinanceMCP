@@ -9,6 +9,11 @@ function formatNumber(num: any): string {
   return number.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
+function formatYuanAsWan(num: any): string {
+  const value = Number(num);
+  return Number.isFinite(value) ? formatNumber(value / 10000) : 'N/A';
+}
+
 // 辅助函数：获取预告类型描述
 function getForecastType(type: string): string {
   const typeMap: Record<string, string> = {
@@ -56,12 +61,12 @@ export function formatExpress(data: any[]): string {
     output += ` ${item.end_date} 期间快报\n`;
     output += `公告日期: ${item.ann_date}\n\n`;
     
-    if (item.revenue) output += `营业收入: ${formatNumber(item.revenue)} 万元\n`;
-    if (item.operate_profit) output += `营业利润: ${formatNumber(item.operate_profit)} 万元\n`;
-    if (item.total_profit) output += `利润总额: ${formatNumber(item.total_profit)} 万元\n`;
-    if (item.n_income) output += `净利润: ${formatNumber(item.n_income)} 万元\n`;
-    if (item.total_assets) output += `总资产: ${formatNumber(item.total_assets)} 万元\n`;
-    if (item.total_hldr_eqy_exc_min_int) output += `股东权益: ${formatNumber(item.total_hldr_eqy_exc_min_int)} 万元\n`;
+    if (item.revenue) output += `营业收入: ${formatYuanAsWan(item.revenue)} 万元\n`;
+    if (item.operate_profit) output += `营业利润: ${formatYuanAsWan(item.operate_profit)} 万元\n`;
+    if (item.total_profit) output += `利润总额: ${formatYuanAsWan(item.total_profit)} 万元\n`;
+    if (item.n_income) output += `净利润: ${formatYuanAsWan(item.n_income)} 万元\n`;
+    if (item.total_assets) output += `总资产: ${formatYuanAsWan(item.total_assets)} 万元\n`;
+    if (item.total_hldr_eqy_exc_min_int) output += `股东权益: ${formatYuanAsWan(item.total_hldr_eqy_exc_min_int)} 万元\n`;
     if (item.diluted_eps) output += `每股收益: ${item.diluted_eps} 元\n`;
     if (item.diluted_roe) output += `净资产收益率: ${item.diluted_roe}%\n`;
     
@@ -73,4 +78,4 @@ export function formatExpress(data: any[]): string {
   }
   
   return output;
-} 
+}

@@ -23,6 +23,7 @@ export function formatIndicators(data: any[]): string {
   
   // 定义不需要显示的系统字段
   const excludeFields = ['ts_code', 'ann_date', 'update_flag'];
+  const nonPercentRatios = new Set(['current_ratio', 'quick_ratio', 'cash_ratio']);
   
   // 获取所有可能的字段
   const allFields = Object.keys(data[0] || {});
@@ -237,9 +238,9 @@ export function formatIndicators(data: any[]): string {
           return item[field] || 'N/A';
         }
         // 对于百分比字段，使用百分比格式
-        if (field.includes('margin') || field.includes('ratio') || field.includes('yoy') || 
+        if (!nonPercentRatios.has(field) && (field.includes('margin') || field.includes('ratio') || field.includes('yoy') ||
             field.includes('roe') || field.includes('roa') || field.includes('_to_') ||
-            field.includes('debt_to') || field.includes('assets_to')) {
+            field.includes('debt_to') || field.includes('assets_to'))) {
           return formatPercent(item[field]);
         }
         return formatNumber(item[field]);
@@ -267,4 +268,4 @@ export function formatIndicators(data: any[]): string {
   output += `**💡 说明：** 已智能过滤全为空的字段，只显示有实际数据的财务指标项目\n\n`;
   
   return output;
-} 
+}

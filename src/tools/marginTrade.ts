@@ -24,7 +24,7 @@ export const marginTrade = {
       },
       exchange: {
         type: "string",
-        description: "交易所代码，可选值：SSE(上海证券交易所)、SZSE(深圳证券交易所)、BSE(北京证券交易所)，仅margin_secs接口使用"
+        description: "交易所代码，可选值：SSE(上海证券交易所)、SZSE(深圳证券交易所)、BSE(北京证券交易所)，用于margin_secs或margin汇总筛选"
       }
     },
     required: ["data_type", "start_date"]
@@ -58,9 +58,6 @@ export const marginTrade = {
           
         case 'margin':
           // 融资融券交易汇总
-          if (!args.ts_code) {
-            throw new Error('融资融券交易汇总查询需要提供股票代码(ts_code)');
-          }
           data = await fetchMarginSummary(args, TUSHARE_API_KEY, TUSHARE_API_URL);
           formattedOutput = formatMarginSummary(data, args);
           break;
@@ -135,11 +132,11 @@ async function fetchMarginSummary(
     api_name: "margin",
     token: apiKey,
     params: {
-      ts_code: args.ts_code,
       start_date: args.start_date,
-      ...(args.end_date && { end_date: args.end_date })
+      ...(args.end_date && { end_date: args.end_date }),
+      ...(args.exchange && { exchange_id: args.exchange })
     },
-    fields: "trade_date,ts_code,rzye,rzmre,rzche,rqye,rqmcl,rqchl,rzrqye"
+    fields: "trade_date,exchange_id,rzye,rzmre,rzche,rqye,rqmcl,rzrqye,rqyl"
   };
 
   return await callTushareAPI(params, apiUrl, 'margin');
@@ -290,7 +287,8 @@ function formatMarginSecs(data: any[], args: any): string {
 
 // 格式化融资融券交易汇总数据
 function formatMarginSummary(data: any[], args: any): string {
-  let output = `# 💰 ${args.ts_code} 融资融券交易汇总\n\n`;
+  const scope = args.exchange ? `${getExchangeName(args.exchange)} ` : '';
+  let output = `# 💰 ${scope}融资融券交易汇总\n\n`;
   output += `📅 查询期间: ${args.start_date} ~ ${args.end_date}\n`;
   output += `📊 数据条数: ${data.length}条\n\n`;
 
@@ -306,17 +304,18 @@ function formatMarginSummary(data: any[], args: any): string {
   output += `## 📈 最新数据概览 (${latestData.trade_date})\n\n`;
   output += `| 项目 | 金额/数量 | 说明 |\n`;
   output += `|------|----------|------|\n`;
+  output += `| 🏛️ 交易所 | ${getExchangeName(latestData.exchange_id)} | 汇总口径 |\n`;
   output += `| 💼 融资余额 | ${formatNumber(latestData.rzye)}元 | 当日融资买入后的余额 |\n`;
   output += `| 📊 融券余额 | ${formatNumber(latestData.rqye)}元 | 当日融券卖出后的余额 |\n`;
+  output += `| 📦 融券余量 | ${formatNumber(latestData.rqyl)}股 | 当日融券余量 |\n`;
   output += `| 💰 融资融券余额 | ${formatNumber(latestData.rzrqye)}元 | 融资余额 + 融券余额 |\n\n`;
 
   // 期间统计
-  let totalRzmre = 0, totalRzche = 0, totalRqmcl = 0, totalRqchl = 0;
+  let totalRzmre = 0, totalRzche = 0, totalRqmcl = 0;
   sortedData.forEach(item => {
     totalRzmre += parseFloat(item.rzmre || 0);
     totalRzche += parseFloat(item.rzche || 0);
     totalRqmcl += parseFloat(item.rqmcl || 0);
-    totalRqchl += parseFloat(item.rqchl || 0);
   });
 
   output += `## 📊 期间统计汇总\n\n`;
@@ -325,13 +324,13 @@ function formatMarginSummary(data: any[], args: any): string {
   output += `| 💵 融资买入额 | ${formatNumber(totalRzmre)}元 | ${formatNumber(totalRzmre / data.length)}元 |\n`;
   output += `| 💸 融资偿还额 | ${formatNumber(totalRzche)}元 | ${formatNumber(totalRzche / data.length)}元 |\n`;
   output += `| 📈 融券卖出量 | ${formatNumber(totalRqmcl)} | ${formatNumber(totalRqmcl / data.length)} |\n`;
-  output += `| 📉 融券偿还量 | ${formatNumber(totalRqchl)} | ${formatNumber(totalRqchl / data.length)} |\n\n`;
+  output += `\n`;
 
   // 详细记录表格
   const displayData = sortedData.slice(0, 10);
   output += `## 📋 详细交易记录 (最近${displayData.length}个交易日)\n\n`;
-  output += `| 交易日期 | 融资余额(万元) | 融资买入(万元) | 融资偿还(万元) | 融券余额(万元) | 融券卖出量 | 融券偿还量 |\n`;
-  output += `|---------|--------------|--------------|--------------|--------------|----------|-----------|\n`;
+  output += `| 交易日期 | 交易所 | 融资余额(万元) | 融资买入(万元) | 融资偿还(万元) | 融券余额(万元) | 融券卖出量(股) | 融券余量(股) | 两融余额(万元) |\n`;
+  output += `|---------|--------|--------------|--------------|--------------|--------------|---------------|-------------|--------------|\n`;
 
   displayData.forEach(item => {
     const rzye = (parseFloat(item.rzye || 0) / 10000).toFixed(2);
@@ -339,9 +338,10 @@ function formatMarginSummary(data: any[], args: any): string {
     const rzche = (parseFloat(item.rzche || 0) / 10000).toFixed(2);
     const rqye = (parseFloat(item.rqye || 0) / 10000).toFixed(2);
     const rqmcl = formatNumber(item.rqmcl || 0);
-    const rqchl = formatNumber(item.rqchl || 0);
+    const rqyl = formatNumber(item.rqyl || 0);
+    const rzrqye = (parseFloat(item.rzrqye || 0) / 10000).toFixed(2);
     
-    output += `| ${item.trade_date} | ${rzye} | ${rzmre} | ${rzche} | ${rqye} | ${rqmcl} | ${rqchl} |\n`;
+    output += `| ${item.trade_date} | ${getExchangeName(item.exchange_id)} | ${rzye} | ${rzmre} | ${rzche} | ${rqye} | ${rqmcl} | ${rqyl} | ${rzrqye} |\n`;
   });
 
   return output;
@@ -481,4 +481,4 @@ function formatNumber(num: any): string {
   } else {
     return numValue.toLocaleString();
   }
-} 
+}

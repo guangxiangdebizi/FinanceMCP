@@ -98,9 +98,9 @@ export const macroEcon = {
           break;
           
         case 'lpr':
-          params.api_name = "lpr_data";
+          params.api_name = "shibor_lpr";
           params.fields = "date,1y,5y";
-          // lpr_data接口使用start_date和end_date作为参数
+          // shibor_lpr接口使用start_date和end_date作为参数
           params.params = {
             start_date: args.start_date || defaultStartDate,
             end_date: args.end_date || defaultEndDate

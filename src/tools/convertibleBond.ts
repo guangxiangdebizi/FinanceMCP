@@ -54,15 +54,15 @@ export const convertibleBond = {
         const { data } = await callTushare(
           'cb_call',
           { ts_code: args.ts_code },
-          'ts_code,ann_date,call_date,call_price,call_price_tax,call_vol,call_amount,payment_date,face_value,delist_date'
+          'ts_code,call_type,is_call,ann_date,call_date,call_price,call_price_tax,call_vol,call_amount,payment_date,call_reg_date'
         );
         if (!data.length) throw new Error(`未找到 ${args.ts_code} 的强赎数据`);
         let text = `# 🔔 可转债强赎数据 — ${args.ts_code}\n\n`;
-        text += `| 公告日 | 强赎日 | 强赎价(含税) | 强赎价(税后) | 强赎量(张) | 强赎金额 | 付款日 | 摘牌日 |\n`;
-        text += `|--------|--------|------------|------------|-----------|---------|--------|--------|\n`;
+        text += `| 公告日 | 赎回类型 | 赎回状态 | 赎回日 | 含税价(元/张) | 扣税价(元/张) | 赎回量(张) | 赎回金额(万元) | 付款日 | 登记日 |\n`;
+        text += `|--------|----------|----------|--------|---------------|---------------|-----------|----------------|--------|--------|\n`;
         data.forEach(r => {
           const n = (v: any) => v != null && v !== '' ? String(v) : 'N/A';
-          text += `| ${n(r.ann_date)} | ${n(r.call_date)} | ${n(r.call_price)} | ${n(r.call_price_tax)} | ${n(r.call_vol)} | ${n(r.call_amount)} | ${n(r.payment_date)} | ${n(r.delist_date)} |\n`;
+          text += `| ${n(r.ann_date)} | ${n(r.call_type)} | ${n(r.is_call)} | ${n(r.call_date)} | ${n(r.call_price)} | ${n(r.call_price_tax)} | ${n(r.call_vol)} | ${n(r.call_amount)} | ${n(r.payment_date)} | ${n(r.call_reg_date)} |\n`;
         });
         text += `\n---\n*数据来源: Tushare cb_call*`;
         return { content: [{ type: 'text', text }] };
@@ -74,15 +74,15 @@ export const convertibleBond = {
         const { data } = await callTushare(
           'cb_share',
           { ts_code: args.ts_code },
-          'ts_code,end_date,ann_date,convert_price,convert_val,convert_vol,convert_ratio,acc_convert_val,acc_convert_vol,acc_convert_ratio,remain_size,total_shares'
+          'ts_code,bond_short_name,publish_date,end_date,issue_size,convert_price_initial,convert_price,convert_val,convert_vol,convert_ratio,acc_convert_val,acc_convert_vol,acc_convert_ratio,remain_size,total_shares'
         );
         if (!data.length) throw new Error(`未找到 ${args.ts_code} 的转股数据`);
         let text = `# 🔄 可转债转股数据 — ${args.ts_code}\n\n`;
-        text += `| 报告期 | 公告日 | 转股价 | 本期转股额(万) | 本期转股量(张) | 本期转股比例% | 累计转股额(万) | 剩余规模(亿) |\n`;
-        text += `|--------|--------|--------|-------------|-------------|------------|-------------|------------|\n`;
+        text += `| 公告日 | 截止日 | 转股价 | 本次转股金额(万元) | 本次转股量(股) | 本次转股比例% | 累计转股金额(万元) | 累计转股量(股) | 剩余规模(亿元) |\n`;
+        text += `|--------|--------|--------|--------------------|----------------|---------------|--------------------|----------------|----------------|\n`;
         data.forEach(r => {
           const n = (v: any) => v != null && v !== '' ? String(v) : 'N/A';
-          text += `| ${n(r.end_date)} | ${n(r.ann_date)} | ${n(r.convert_price)} | ${n(r.convert_val)} | ${n(r.convert_vol)} | ${n(r.convert_ratio)} | ${n(r.acc_convert_val)} | ${n(r.remain_size)} |\n`;
+          text += `| ${n(r.publish_date)} | ${n(r.end_date)} | ${n(r.convert_price)} | ${formatScaledNumber(r.convert_val, 10000)} | ${n(r.convert_vol)} | ${n(r.convert_ratio)} | ${formatScaledNumber(r.acc_convert_val, 10000)} | ${n(r.acc_convert_vol)} | ${formatScaledNumber(r.remain_size, 100000000)} |\n`;
         });
         text += `\n---\n*数据来源: Tushare cb_share*`;
         return { content: [{ type: 'text', text }] };
@@ -203,7 +203,7 @@ async function fetchConvertibleBondData(
   const apiConfigs: Record<string, any> = {
     basic: {
       api_name: "cb_basic",
-      default_fields: "ts_code,bond_short_name,stk_code,stk_short_name,maturity,par_value,issue_price,issue_size,remain_size,value_date,maturity_date,list_date,delist_date,exchange,conv_start_date,conv_end_date,first_conv_price,conv_price,rate_clause,put_clause,force_redeem_clause,resale_clause,cross_default_clause"
+      default_fields: "ts_code,bond_full_name,bond_short_name,cb_code,cb_type,stk_code,stk_short_name,maturity,par,issue_price,issue_size,remain_size,value_date,maturity_date,rate_type,coupon_rate,add_rate,pay_per_year,list_date,delist_date,exchange,conv_start_date,conv_end_date,conv_stop_date,first_conv_price,conv_price,rate_clause,put_clause,maturity_call_price,call_clause,reset_clause,conv_clause,guarantor,guarantee_type,issue_rating,newest_rating,rating_comp"
     },
     issue: {
       api_name: "cb_issue",
@@ -228,8 +228,6 @@ async function fetchConvertibleBondData(
   if (dataType === 'basic') {
     // cb_basic接口参数：ts_code, list_date, exchange
     if (tsCode) params.params.ts_code = tsCode;
-    // 对于basic查询，如果提供了start_date，映射到list_date（上市日期）
-    if (startDate) params.params.list_date = startDate;
     
   } else if (dataType === 'issue') {
     // cb_issue接口参数：ts_code, ann_date, start_date, end_date
@@ -350,10 +348,10 @@ function formatBasicInfo(data: any[]): string {
     if (item.stk_code && item.stk_short_name) {
       details += `🏢 正股信息: ${item.stk_short_name} (${item.stk_code})\n`;
     }
-    if (item.par_value) details += `💰 票面价值: ${formatNumber(item.par_value)}元\n`;
+    if (item.par) details += `💰 票面价值: ${formatNumber(item.par)}元\n`;
     if (item.issue_price) details += `💵 发行价格: ${formatNumber(item.issue_price)}元\n`;
-    if (item.issue_size) details += `📊 发行规模: ${formatNumber(item.issue_size)}亿元\n`;
-    if (item.remain_size) details += `📦 存续规模: ${formatNumber(item.remain_size)}亿元\n`;
+    if (item.issue_size) details += `📊 发行规模: ${formatScaledNumber(item.issue_size, 100000000)}亿元\n`;
+    if (item.remain_size) details += `📦 存续规模: ${formatScaledNumber(item.remain_size, 100000000)}亿元\n`;
     if (item.maturity) details += `⏰ 存续期限: ${item.maturity}年\n`;
     if (item.value_date) details += `📅 起息日期: ${formatDate(item.value_date)}\n`;
     if (item.maturity_date) details += `🏁 到期日期: ${formatDate(item.maturity_date)}\n`;
@@ -366,7 +364,7 @@ function formatBasicInfo(data: any[]): string {
     if (item.conv_price) details += `💲 当前转股价: ${formatNumber(item.conv_price)}元/股\n`;
     if (item.rate_clause) details += `📋 利率条款: ${item.rate_clause}\n`;
     if (item.put_clause) details += `🔄 回售条款: ${item.put_clause}\n`;
-    if (item.force_redeem_clause) details += `🚨 强赎条款: ${item.force_redeem_clause}\n`;
+    if (item.call_clause) details += `🚨 赎回条款: ${item.call_clause}\n`;
 
     return output + details + '\n';
   }).join('---\n\n');
@@ -514,4 +512,10 @@ function formatPercent(num: any): string {
 function formatDate(dateStr: string): string {
   if (!dateStr || dateStr.length !== 8) return dateStr;
   return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+}
+
+function formatScaledNumber(num: any, divisor: number): string {
+  if (num === null || num === undefined || num === '') return 'N/A';
+  const value = Number(num);
+  return Number.isFinite(value) ? formatNumber(value / divisor) : 'N/A';
 }
