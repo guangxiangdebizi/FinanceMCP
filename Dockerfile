@@ -34,6 +34,7 @@ EXPOSE 3000
 # 设置环境变量
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV MCP_HTTP_HOST=0.0.0.0
 
 # 默认启动命令（Streamable HTTP）
 CMD ["node", "build/httpServer.js"]

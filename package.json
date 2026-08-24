@@ -30,7 +30,7 @@
     "test:cache": "npm run build && node --test test/cache-gateway.test.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "0.6.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.22.2"

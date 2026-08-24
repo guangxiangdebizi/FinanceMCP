@@ -219,6 +219,8 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 | `QVERIS_BASE_URL` | `https://qveris.ai/api/v1` | Qveris REST API 地址 |
 | `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | stdio 或服务端默认优先级 |
 | `PORT` | `3000` | HTTP 服务端口 |
+| `MCP_HTTP_HOST` | `127.0.0.1` | HTTP 监听地址；容器部署使用 `0.0.0.0` |
+| `MCP_ALLOWED_HOSTS` | 回环地址白名单 | 逗号分隔的 Host 主机名白名单（不含端口）；非回环部署建议显式配置 |
 
 </details>
 
