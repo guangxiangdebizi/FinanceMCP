@@ -34,7 +34,7 @@
 </div>
 
 > [!IMPORTANT]
-> **v4.10.1** fixes market amount units, LPR requests, futures permission guidance, money-flow semantics, and multiple Tushare field contracts. It also includes the credential-scoped `tools/list` discovery introduced in v4.10.0 while preserving the existing 19 tool names and parameters plus the v4.9.0 Qveris routing, fallback, and source attribution behavior.
+> **v4.10.2** upgrades the MCP SDK to 1.30.0, resolves the dependency security finding, and adds regression coverage for MCP `2025-11-25` negotiation plus strict JSON-RPC-only stdout on stdio. The HTTP server also gains Host validation, proxy hardening, `DELETE /mcp` session cleanup, and package-derived version metadata. The existing 19 tool names, parameters, and multi-source routing behavior remain unchanged.
 
 > [!NOTE]
 > To share model prompt/KV-cache routing and conversation lineage across Trae, Cursor, Claude Code, and Codex, optionally run the standalone [`finance-cache-gateway`](./docs/cache-gateway.md). It uses a separate process, port, and configuration; existing MCP tools, stdio, and `/mcp` behavior remain unchanged when it is not enabled.
