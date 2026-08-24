@@ -226,13 +226,14 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 
 #### 自建远程实例（可选）
 
-上面的在线 Endpoint 仍然是默认选择。如果你想要一个属于自己的 `/mcp` 地址，仓库根目录的
+上面的在线 Endpoint 仍然是默认选择。如果你需要一个独立的 `/mcp` 地址，仓库根目录的
 `Dockerfile` 可以直接部署：启动命令是 `node build/httpServer.js`，监听 `0.0.0.0`，
 从环境变量读取 `PORT`，并提供 `GET /health`。
 
 [docs/deploy-dockhold.md](docs/deploy-dockhold.md) 以 [Dockhold](https://dockhold.eu)
-为例，说明托管 HTTPS 端点、`TUSHARE_TOKEN` 与 `QVERIS_API_KEY` 的存放位置，以及
-`MCP_ALLOWED_HOSTS` 为什么必须填写部署后的主机名。
+为例（只是其中一种托管方式，并非关联或推荐平台），说明 HTTPS 端点、`TUSHARE_TOKEN`
+与 `QVERIS_API_KEY` 的存放位置，以及为什么在公网可访问时强烈建议设置
+`MCP_ALLOWED_HOSTS`。
 
 <a id="tools"></a>
 

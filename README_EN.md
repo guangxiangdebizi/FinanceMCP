@@ -230,14 +230,16 @@ Both keys are optional; either may be supplied alone. `Authorization: Bearer ...
 
 #### Run your own remote instance (optional)
 
-The hosted endpoint above stays the default. If you want a private `/mcp` URL of
-your own, the root `Dockerfile` deploys as-is: it starts `node build/httpServer.js`,
-binds `0.0.0.0`, reads `PORT` from the environment, and answers `GET /health`.
+The hosted endpoint above stays the default. If you want a dedicated `/mcp` URL
+of your own, the root `Dockerfile` deploys as-is: it starts
+`node build/httpServer.js`, binds `0.0.0.0`, reads `PORT` from the environment,
+and answers `GET /health`.
 
 [docs/deploy-dockhold.md](docs/deploy-dockhold.md) is a worked example on
-[Dockhold](https://dockhold.eu), covering the managed HTTPS endpoint, where
-`TUSHARE_TOKEN` and `QVERIS_API_KEY` go, and why `MCP_ALLOWED_HOSTS` has to list
-the deployed hostname.
+[Dockhold](https://dockhold.eu), one managed host among others and not an
+affiliated or preferred one, covering the HTTPS endpoint, where `TUSHARE_TOKEN`
+and `QVERIS_API_KEY` go, and why `MCP_ALLOWED_HOSTS` is strongly recommended
+once the server is publicly reachable.
 
 <a id="tools"></a>
 
