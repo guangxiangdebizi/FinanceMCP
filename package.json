@@ -12,6 +12,7 @@
   "files": [
     "build",
     "docs/cache-gateway.md",
+    "docs/deploy-dockhold.md",
     "docs/tool-availability.md"
   ],
   "scripts": {

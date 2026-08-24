@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
 import { getAvailableToolList, dispatchTool } from "./dispatch.js";
+import { SERVER_VERSION } from "./version.js";
 
 
 interface Session { id: string; createdAt: Date; lastActivity: Date }
@@ -122,6 +123,8 @@ function extractSourcePriorityFromHeaders(req: Request) {
 }
 
 const app = express();
+app.set('trust proxy', 'loopback');
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.MCP_HTTP_HOST?.trim() || process.env.HOST?.trim() || '127.0.0.1';
 const LOCALHOST_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -167,7 +170,7 @@ app.use((req: Request, res: Response, next) => {
 
 app.use(cors({
   origin: '*',
-  methods: ['GET','POST','OPTIONS'],
+  methods: ['GET','POST','DELETE','OPTIONS'],
   allowedHeaders: [
     'Content-Type','Accept','Authorization','Mcp-Session-Id','Last-Event-ID',
     'X-Tenant-Id','X-Api-Key','X-Tushare-Token','X-Qveris-Api-Key','X-Finance-Source-Priority',
@@ -228,7 +231,7 @@ app.post('/mcp', async (req: Request, res: Response) => {
     sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
     res.setHeader('Mcp-Session-Id', newId);
     console.log(`✅ [MCP-initialize] New session created: ${newId}`);
-    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: '4.10.0' } }, id: body.id });
+    return res.json({ jsonrpc: '2.0', result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'FinanceMCP', version: SERVER_VERSION } }, id: body.id });
   }
 
   if (method === 'tools/list') {
@@ -289,6 +292,12 @@ app.post('/mcp', async (req: Request, res: Response) => {
 
   console.error(`❌ [MCP] Unknown method: ${method}`);
   return res.status(400).json({ jsonrpc: '2.0', error: { code: -32601, message: `Method not found: ${method}` }, id: body.id });
+});
+
+app.delete('/mcp', (req: Request, res: Response) => {
+  const sid = req.headers['mcp-session-id'] as string | undefined;
+  if (sid) sessions.delete(sid);
+  return res.status(204).end();
 });
 
 // 兼容性终止路由：部分客户端在结束会话时会调用此端点
