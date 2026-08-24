@@ -4,10 +4,16 @@ FinanceMCP already serves a public Streamable HTTP endpoint at
 [`https://finvestai.top/mcp`](https://finvestai.top/mcp). That endpoint is the
 default and nothing here changes it.
 
-This guide covers the other case: you want your own remote `/mcp` URL, on your
-own account and your own credentials, without running a VPS or a Docker host.
-It uses [Dockhold](https://dockhold.eu) as a worked example. The repo-side facts
-below apply to any container platform that terminates HTTPS and assigns a port.
+This guide covers the other case: you want a dedicated remote `/mcp` URL, on
+your own account and your own credentials, without running a VPS or a Docker
+host. It uses [Dockhold](https://dockhold.eu) as a worked example.
+
+> [!NOTE]
+> Dockhold is one worked example of a managed host, not an affiliated or
+> preferred FinanceMCP platform. The hosted endpoint above and a generic
+> container deployment remain the primary paths. Everything under "What the repo
+> already provides" is platform-neutral and applies to any host that runs the
+> root `Dockerfile`, terminates HTTPS, and assigns a port.
 
 ## What the repo already provides
 
@@ -26,16 +32,12 @@ platform is running.
 
 ## Deploy
 
-[![Deploy to Dockhold](https://img.shields.io/badge/Deploy%20to-Dockhold-2563eb?style=for-the-badge)](https://app.dockhold.eu/new?repo=https://github.com/guangxiangdebizi/FinanceMCP&name=finance-mcp)
-
-The button opens Dockhold's deploy form with this repository prefilled. You
-review every field before anything is created.
-
-1. Click the button. To control when your instance picks up upstream changes,
-   fork the repo first and point
-   [app.dockhold.eu/new](https://app.dockhold.eu/new) at your fork instead.
-2. The root `Dockerfile` is used automatically, so a free account needs nothing
-   extra.
+1. Open the
+   [Dockhold deploy form for this repository](https://app.dockhold.eu/new?repo=https://github.com/guangxiangdebizi/FinanceMCP).
+   The link prefills the repository field. Nothing is created until you submit
+   the form. To control when your instance picks up upstream changes, fork the
+   repo first and point the form at your fork instead.
+2. Dockhold builds from the root `Dockerfile`.
 3. Set the variables in the next section. Credentials go in the Vault, not in
    plain dashboard variables.
 4. Deploy. The app comes up at `https://<your-app>.dockhold.app` and your MCP
@@ -58,12 +60,13 @@ redeploy automatically.
 
 ## Host header validation
 
-The HTTP server checks the `Host` header against `MCP_ALLOWED_HOSTS` for DNS
-rebinding protection. Two consequences for a hosted deployment:
+The HTTP server can check the `Host` header against `MCP_ALLOWED_HOSTS` for DNS
+rebinding protection. Setting it is strongly recommended for any non-loopback
+deployment that is reachable from the internet. It is not required to run.
 
-- Binding to `0.0.0.0` with `MCP_ALLOWED_HOSTS` unset leaves validation off and
-  logs a `[SECURITY]` warning at startup. It serves traffic, but without the
-  protection.
+- With `MCP_ALLOWED_HOSTS` unset and the server bound to `0.0.0.0`, validation
+  is off. The server starts normally and serves every request, and it logs a
+  `[SECURITY]` warning at startup.
 - With it set, the match is on hostname and ignores the port, so the bare
   hostname is enough. Any request arriving with a different `Host`, `/health`
   included, gets a `403`. If you attach a custom domain, add it to the list,
@@ -98,11 +101,22 @@ which encrypts them and injects them as environment variables at runtime. Every
 caller then shares your quota, so use this only on an endpoint whose access you
 control.
 
+> [!IMPORTANT]
+> Per-request credentials still cross your hosting provider's infrastructure.
+> They travel over HTTPS, but TLS is terminated at the platform edge, so the
+> host is inside the trust boundary for every provider token you send. This is
+> true of any managed platform, not only Dockhold. FinanceMCP does not persist
+> credentials and redacts them from its own logs, and that covers FinanceMCP's
+> logs only. It says nothing about edge, proxy, or platform logging you do not
+> control. Treat a managed host like any other party you hand a provider token
+> to, and prefer credentials you can scope and rotate.
+
 > [!WARNING]
-> Apps on Dockhold's free plan are public. A public app with `TUSHARE_TOKEN` set
-> server side lets anyone who knows the URL spend your Tushare quota. Either
-> leave it unset and pass the token per request, or put the app behind an access
-> token (a paid Dockhold feature) before setting it.
+> Whether an app is publicly reachable depends on your plan. On a plan where the
+> app is public, setting `TUSHARE_TOKEN` server side lets anyone who knows the
+> URL spend your Tushare quota. Either leave it unset and pass the token per
+> request, or put the app behind an access token before setting it. Check
+> Dockhold's current plan behaviour at <https://dockhold.eu/pricing>.
 
 If you do lock the app down, note that Dockhold's edge uses
 `Authorization: Bearer <dockhold-token>` for its own access check, and
@@ -128,30 +142,58 @@ collide.
 }
 ```
 
-Check the deployment before wiring a client into it:
+## Verify the deployment
+
+Run a full Streamable HTTP handshake rather than a bare `tools/list`, so you
+exercise the same sequence a real client uses.
 
 ```bash
-curl https://<your-app>.dockhold.app/health
+BASE=https://<your-app>.dockhold.app
 
-curl -X POST https://<your-app>.dockhold.app/mcp \
+# 1. Liveness.
+curl -fsS "$BASE/health"
+
+# 2. Initialize, and keep the session id the server returns.
+SID=$(curl -sS -D - -o /dev/null -X POST "$BASE/mcp" \
   -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' \
+  | tr -d '\r' | grep -i '^mcp-session-id:' | cut -d' ' -f2)
+echo "session: $SID"
+
+# 3. Complete the handshake. Expect 204.
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -H "Mcp-Session-Id: $SID" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+# 4. List tools on that session.
+curl -sS -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -H "Mcp-Session-Id: $SID" \
   -H 'X-Tushare-Token: YOUR_TUSHARE_TOKEN' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
+
+Step 2 should print a UUID. Step 3 should print `204`. Step 4 should return the
+tools your credentials unlock, which is more than the keyless set.
 
 ## Sizing and operations
 
-- The server keeps no state on disk, so an ephemeral filesystem is fine and no
-  volume is needed.
-- It idles at roughly 25 MB RSS, so Dockhold's free 256 MB app size covers
-  personal use. Increase it if you expect concurrent traffic.
-- The built image is roughly 200 MB, under the 300 MB image ceiling that applies
-  to free accounts.
-- Dockhold restarts the process if it exits, and there is no separate
-  health-check hook to configure, so use `GET /health` for your own uptime
-  monitoring.
-- Logs, CPU, and memory are in the app's dashboard. The server logs every
-  request and shows sensitive headers as `[REDACTED]`.
+- The server keeps no state on disk, so an ephemeral filesystem is enough and no
+  volume is needed. That is a property of FinanceMCP, not of any host.
+- Measured from this repo's `Dockerfile` on 2026-08-24: the image builds to
+  roughly 200 MB and the server idles at roughly 25 MB RSS in a container
+  limited to 256 MB and 0.25 vCPU.
+- Use `GET /health` for your own uptime monitoring.
+- The server logs every request and shows sensitive headers as `[REDACTED]`.
 
-Dockhold documentation: <https://dockhold.eu/docs>. Its MCP-specific recipe:
-<https://dockhold.eu/docs/recipes/deploy-an-mcp-server>.
+Platform specifics change, so this repository does not restate them as fixed
+values. App sizes, image size ceilings, which plans expose an app publicly,
+restart behaviour, and whether a configurable health-check hook exists were
+checked on 2026-08-24. Confirm the current ones before relying on them:
+
+- Plans and limits: <https://dockhold.eu/pricing>
+- Runtime behaviour and injected variables: <https://dockhold.eu/docs/concepts/runtime>
+- Documentation: <https://dockhold.eu/docs>
+- MCP-specific recipe: <https://dockhold.eu/docs/recipes/deploy-an-mcp-server>
