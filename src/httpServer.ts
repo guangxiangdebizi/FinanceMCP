@@ -2,6 +2,7 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
 import { getAvailableToolList, dispatchTool } from "./dispatch.js";
 
@@ -122,6 +123,26 @@ function extractSourcePriorityFromHeaders(req: Request) {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.MCP_HTTP_HOST?.trim() || process.env.HOST?.trim() || '127.0.0.1';
+const LOCALHOST_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const configuredAllowedHosts = Array.from(new Set(
+  (process.env.MCP_ALLOWED_HOSTS || '')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean)
+));
+const isLoopbackBinding = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(HOST.toLowerCase());
+
+if (configuredAllowedHosts.length > 0 || isLoopbackBinding) {
+  app.use(hostHeaderValidation(
+    configuredAllowedHosts.length > 0 ? configuredAllowedHosts : LOCALHOST_ALLOWED_HOSTS
+  ));
+} else {
+  console.warn(
+    `[SECURITY] HTTP server is binding to ${HOST} without Host validation. ` +
+    'Set MCP_ALLOWED_HOSTS to a comma-separated hostname allowlist.'
+  );
+}
 
 // 日志中间件：记录所有请求
 app.use((req: Request, res: Response, next) => {
@@ -289,13 +310,13 @@ app.get('/terminate', (_req: Request, res: Response) => {
   return res.status(200).json({ ok: true });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log('\n' + '='.repeat(60));
   console.log('🚀 FinanceMCP Streamable HTTP Server Started');
   console.log('='.repeat(60));
-  console.log(`📍 Server URL:    http://localhost:${PORT}`);
-  console.log(`📡 MCP Endpoint:  http://localhost:${PORT}/mcp`);
-  console.log(`💚 Health Check:  http://localhost:${PORT}/health`);
+  console.log(`📍 Server URL:    http://${HOST}:${PORT}`);
+  console.log(`📡 MCP Endpoint:  http://${HOST}:${PORT}/mcp`);
+  console.log(`💚 Health Check:  http://${HOST}:${PORT}/health`);
   console.log(`📊 Active Sessions: ${sessions.size}`);
   console.log(`🔧 Available Tools: ${getAvailableToolList().length}`);
   console.log('='.repeat(60));

@@ -223,6 +223,8 @@ Both keys are optional; either may be supplied alone. `Authorization: Bearer ...
 | `QVERIS_BASE_URL` | `https://qveris.ai/api/v1` | Qveris REST API base URL |
 | `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | Default stdio/server priority |
 | `PORT` | `3000` | HTTP server port |
+| `MCP_HTTP_HOST` | `127.0.0.1` | HTTP bind address; containers use `0.0.0.0` |
+| `MCP_ALLOWED_HOSTS` | loopback hostnames | Comma-separated hostname allowlist (without ports); recommended for non-loopback deployments |
 
 </details>
 

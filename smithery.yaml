@@ -52,6 +52,7 @@ startCommand:
       env: {
         NODE_ENV: "production",
         PORT: "3000",
+        MCP_HTTP_HOST: "0.0.0.0",
         TUSHARE_TOKEN: config.TUSHARE_TOKEN || "",
         QVERIS_API_KEY: config.QVERIS_API_KEY || "",
         QVERIS_BASE_URL: config.QVERIS_BASE_URL || "",
