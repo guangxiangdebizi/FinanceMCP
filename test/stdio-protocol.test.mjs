@@ -55,3 +55,31 @@ test('STDIO negotiates MCP 2025-11-25 without polluting stdout', async () => {
   assert.equal(response.result.protocolVersion, '2025-11-25');
   assert.equal(response.result.serverInfo.version, packageVersion);
 });
+
+test('STDIO discovers MCP 2026-07-28 capabilities before a handshake', async () => {
+  const { stdout } = await runStdioRequest({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'server/discover',
+    params: {
+      _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientInfo': {
+          name: 'stdio-protocol-test',
+          version: '1.0',
+        },
+        'io.modelcontextprotocol/clientCapabilities': {},
+      },
+    },
+  });
+
+  const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(lines.length, 1);
+  const response = JSON.parse(lines[0]);
+  assert.ok(response.result.supportedVersions.includes('2026-07-28'));
+  assert.deepEqual(response.result.capabilities, { tools: {} });
+  assert.equal(
+    response.result._meta['io.modelcontextprotocol/serverInfo'].version,
+    packageVersion,
+  );
+});
