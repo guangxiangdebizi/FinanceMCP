@@ -14,7 +14,7 @@
     <a href="https://github.com/guangxiangdebizi/FinanceMCP/releases"><img src="https://img.shields.io/github/v/release/guangxiangdebizi/FinanceMCP?style=flat-square&logo=github" alt="GitHub release" /></a>
     <a href="https://github.com/guangxiangdebizi/FinanceMCP/stargazers"><img src="https://img.shields.io/github/stars/guangxiangdebizi/FinanceMCP?style=flat-square&logo=github&color=f5c542" alt="GitHub stars" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/guangxiangdebizi/FinanceMCP?style=flat-square" alt="MIT license" /></a>
-    <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 18+" />
+    <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node.js 20+" />
   </p>
 
   <p>
