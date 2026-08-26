@@ -3,6 +3,7 @@ import {
   getSourcePriority,
   QVERIS_CONFIG,
   TUSHARE_CONFIG,
+  TWINGLY_CONFIG,
 } from '../config.js';
 import {
   getQverisToolPlan,
@@ -10,6 +11,7 @@ import {
   runQverisForExistingTool,
 } from './qverisAdapter.js';
 import { QverisClientError } from './qverisClient.js';
+import { runTwinglyForExistingTool, TwinglyClientError } from './twinglyClient.js';
 
 type RoutedSource = DataSourceId | 'web' | 'local';
 type AttemptOutcome = 'success' | 'unsupported' | 'failed';
@@ -25,6 +27,7 @@ type ToolResult = { content?: ToolContent[]; [key: string]: unknown };
 
 const SOURCE_LABELS: Record<RoutedSource, string> = {
   tushare: 'Tushare',
+  twingly: 'Twingly',
   qveris: 'Qveris',
   binance: 'Binance',
   web: '公开新闻源',
@@ -43,9 +46,14 @@ function nativeSourceForTool(name: string, args: Record<string, unknown>): Route
   return 'tushare';
 }
 
-function orderedSources(nativeSource: RoutedSource, supportsQveris: boolean): RoutedSource[] {
+function orderedSources(
+  nativeSource: RoutedSource,
+  supportsQveris: boolean,
+  supportsTwingly: boolean,
+): RoutedSource[] {
   const supported = new Set<RoutedSource>([nativeSource]);
   if (supportsQveris) supported.add('qveris');
+  if (supportsTwingly) supported.add('twingly');
 
   const requested = getSourcePriority().filter(source => supported.has(source));
   return [...new Set<RoutedSource>([...requested, nativeSource])];
@@ -54,6 +62,7 @@ function orderedSources(nativeSource: RoutedSource, supportsQveris: boolean): Ro
 function hasCredential(source: RoutedSource): boolean {
   if (source === 'tushare') return Boolean(TUSHARE_CONFIG.API_TOKEN);
   if (source === 'qveris') return Boolean(QVERIS_CONFIG.API_KEY);
+  if (source === 'twingly') return Boolean(TWINGLY_CONFIG.API_KEY);
   return true;
 }
 
@@ -115,6 +124,26 @@ function qverisFailureReason(error: unknown): { outcome: AttemptOutcome; reason:
   return { outcome: 'failed', reason: '调用失败' };
 }
 
+function twinglyFailureReason(error: unknown): { outcome: AttemptOutcome; reason: string } {
+  if (!(error instanceof TwinglyClientError)) {
+    return { outcome: 'failed', reason: '调用失败' };
+  }
+  const reasons: Record<TwinglyClientError['kind'], string> = {
+    not_configured: '未配置凭证',
+    auth: '凭证不可用',
+    rate_limit: '限流',
+    timeout: '超时',
+    unavailable: '服务不可用',
+    invalid_response: '响应无效',
+    request: '请求不可用',
+    empty: '无匹配数据',
+  };
+  const outcome: AttemptOutcome = error.kind === 'empty' || error.kind === 'request'
+    ? 'unsupported'
+    : 'failed';
+  return { outcome, reason: reasons[error.kind] };
+}
+
 export async function routeToolCall(
   name: string,
   args: Record<string, unknown>,
@@ -122,7 +151,12 @@ export async function routeToolCall(
 ): Promise<ToolResult> {
   const nativeSource = nativeSourceForTool(name, args);
   const supportsQveris = Boolean(getQverisToolPlan(name, args));
-  const sources = orderedSources(nativeSource, supportsQveris || Boolean(QVERIS_CONFIG.API_KEY));
+  const supportsTwingly = name === 'finance_news' || name === 'hot_news_7x24';
+  const sources = orderedSources(
+    nativeSource,
+    supportsQveris || Boolean(QVERIS_CONFIG.API_KEY),
+    supportsTwingly,
+  );
   const attempts: SourceAttempt[] = [];
 
   for (const source of sources) {
@@ -135,6 +169,17 @@ export async function routeToolCall(
         return annotateResult(result, source, attempts);
       } catch (error) {
         attempts.push({ source, ...qverisFailureReason(error) });
+        continue;
+      }
+    }
+
+    if (source === 'twingly') {
+      try {
+        const result = await runTwinglyForExistingTool(name, args);
+        attempts.push({ source, outcome: 'success' });
+        return annotateResult(result, source, attempts);
+      } catch (error) {
+        attempts.push({ source, ...twinglyFailureReason(error) });
         continue;
       }
     }

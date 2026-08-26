@@ -49,6 +49,13 @@ test('Qveris-only requests advertise the adapter-covered tools', async () => {
   ]);
 });
 
+test('Twingly-only requests advertise the existing news tools', async () => {
+  const tools = await runWithRequestContext({ twinglyApiKey: 'twingly-test-key' }, async () => {
+    return getAvailableToolList();
+  });
+  assert.deepEqual(names(tools), ['finance_news', 'hot_news_7x24']);
+});
+
 test('Tushare-only requests exclude Qveris-only and public-only tools', async () => {
   const tools = await runWithRequestContext({ tushareToken: 'tushare-test-token' }, async () => {
     return getAvailableToolList();
@@ -92,6 +99,7 @@ test('HTTP tools/list applies the request credential scope', async () => {
       PORT: String(port),
       TUSHARE_TOKEN: '',
       QVERIS_API_KEY: '',
+      TWINGLY_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -109,8 +117,11 @@ test('HTTP tools/list applies the request credential scope', async () => {
     };
 
     const qveris = await list({ 'X-Qveris-Api-Key': 'qveris-http-test-key' });
+    const twingly = await list({ 'X-Twingly-Api-Key': 'twingly-http-test-key' });
     const tushare = await list({ 'X-Tushare-Token': 'tushare-http-test-token' });
     assert.equal(qveris.result.tools.length, 10);
+    assert.equal(twingly.result.tools.length, 2);
+    assert.deepEqual(names(twingly.result.tools), ['finance_news', 'hot_news_7x24']);
     assert.equal(tushare.result.tools.length, 17);
     assert.equal(tushare.result.tools.some(tool => tool.name === 'finance_news'), false);
   } finally {

@@ -16,6 +16,7 @@ const SENSITIVE_HEADER_NAMES = new Set([
   'x-api-key',
   'x-tushare-token',
   'x-qveris-api-key',
+  'x-twingly-api-key',
   'x-cg-api-key',
   'x-cg-demo-api-key',
   'x-cg-pro-api-key',
@@ -110,6 +111,21 @@ function extractQverisApiKeyFromHeaders(req: Request): string | undefined {
   return undefined;
 }
 
+function extractTwinglyApiKeyFromHeaders(req: Request): string | undefined {
+  const header = req.headers['x-twingly-api-key'];
+  if (typeof header === 'string' && header.trim()) {
+    console.log('[TOKEN] Found Twingly key in X-Twingly-Api-Key header');
+    return header.trim();
+  }
+
+  const config = parseConfigHeader(req);
+  if (typeof config?.TWINGLY_API_KEY === 'string' && config.TWINGLY_API_KEY.trim()) {
+    console.log('[TOKEN] Extracted Twingly key from request config');
+    return config.TWINGLY_API_KEY.trim();
+  }
+  return undefined;
+}
+
 function extractSourcePriorityFromHeaders(req: Request) {
   const header = req.headers['x-finance-source-priority'];
   const config = parseConfigHeader(req);
@@ -173,7 +189,7 @@ app.use(cors({
   methods: ['GET','POST','DELETE','OPTIONS'],
   allowedHeaders: [
     'Content-Type','Accept','Authorization','Mcp-Session-Id','Last-Event-ID',
-    'X-Tenant-Id','X-Api-Key','X-Tushare-Token','X-Qveris-Api-Key','X-Finance-Source-Priority',
+    'X-Tenant-Id','X-Api-Key','X-Tushare-Token','X-Qveris-Api-Key','X-Twingly-Api-Key','X-Finance-Source-Priority',
     'X-Smithery-Config','X-Config','X-Session-Config'  // Smithery 可能的配置头
   ],
   exposedHeaders: ['Content-Type','Mcp-Session-Id']
@@ -237,10 +253,12 @@ app.post('/mcp', async (req: Request, res: Response) => {
   if (method === 'tools/list') {
     const token = extractTokenFromHeaders(req);
     const qverisApiKey = extractQverisApiKeyFromHeaders(req);
+    const twinglyApiKey = extractTwinglyApiKeyFromHeaders(req);
     const sourcePriority = extractSourcePriorityFromHeaders(req);
     const availableTools = await runWithRequestContext({
       tushareToken: token,
       qverisApiKey,
+      twinglyApiKey,
       sourcePriority,
     }, async () => getAvailableToolList());
     console.log(`📋 [MCP-tools/list] Returning ${availableTools.length} tools`);
@@ -267,14 +285,21 @@ app.post('/mcp', async (req: Request, res: Response) => {
     const { name, arguments: args } = body.params || {};
     const token = extractTokenFromHeaders(req);
     const qverisApiKey = extractQverisApiKeyFromHeaders(req);
+    const twinglyApiKey = extractTwinglyApiKeyFromHeaders(req);
     const sourcePriority = extractSourcePriorityFromHeaders(req);
     const startTime = Date.now();
-    console.log(`🚀 [MCP-tools/call] Tool: ${name} | Has Tushare Token: ${!!token} | Has Qveris Key: ${!!qverisApiKey}`);
+    console.log(
+      `🚀 [MCP-tools/call] Tool: ${name}`
+      + ` | Has Tushare Token: ${!!token}`
+      + ` | Has Qveris Key: ${!!qverisApiKey}`
+      + ` | Has Twingly Key: ${!!twinglyApiKey}`
+    );
     
     try {
       const result = await runWithRequestContext({
         tushareToken: token,
         qverisApiKey,
+        twinglyApiKey,
         sourcePriority,
       }, async () => {
         return await dispatchTool(name, args || {});

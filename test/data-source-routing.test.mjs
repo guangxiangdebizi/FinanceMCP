@@ -48,9 +48,9 @@ test('keeps the MCP tool surface unchanged', () => {
 });
 
 test('normalizes source priority and appends default fallbacks', () => {
-  assert.deepEqual(DEFAULT_SOURCE_PRIORITY, ['tushare', 'qveris', 'binance']);
-  assert.deepEqual(parseSourcePriority('qveris > tushare'), ['qveris', 'tushare', 'binance']);
-  assert.deepEqual(parseSourcePriority('BINANCE,unknown,binance'), ['binance', 'tushare', 'qveris']);
+  assert.deepEqual(DEFAULT_SOURCE_PRIORITY, ['tushare', 'twingly', 'qveris', 'binance']);
+  assert.deepEqual(parseSourcePriority('qveris > tushare'), ['qveris', 'tushare', 'twingly', 'binance']);
+  assert.deepEqual(parseSourcePriority('BINANCE,unknown,binance'), ['binance', 'tushare', 'twingly', 'qveris']);
 });
 
 test('uses Tushare first by default when both credentials exist', async () => {
@@ -223,6 +223,7 @@ test('routes through Qveris and falls back to Tushare', async () => {
         PORT: String(financePort),
         TUSHARE_TOKEN: '',
         QVERIS_API_KEY: '',
+        TWINGLY_API_KEY: '',
         QVERIS_BASE_URL: `http://127.0.0.1:${port}`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

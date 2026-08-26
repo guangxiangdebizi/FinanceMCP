@@ -6,10 +6,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // 2. 在Smithery部署时，从配置文件中加载
 dotenv.config();
 
-export const DATA_SOURCE_IDS = ['tushare', 'qveris', 'binance'] as const;
+export const DATA_SOURCE_IDS = ['tushare', 'twingly', 'qveris', 'binance'] as const;
 export type DataSourceId = typeof DATA_SOURCE_IDS[number];
 
-export const DEFAULT_SOURCE_PRIORITY: DataSourceId[] = ['tushare', 'qveris', 'binance'];
+export const DEFAULT_SOURCE_PRIORITY: DataSourceId[] = ['tushare', 'twingly', 'qveris', 'binance'];
 
 // 每请求上下文：用于透传用户在 Header 中提交的凭证和数据源优先级。
 type RequestContext = {
@@ -18,9 +18,30 @@ type RequestContext = {
   coingeckoProApiKey?: string;
   coingeckoDemoApiKey?: string;
   qverisApiKey?: string;
+  twinglyApiKey?: string;
   sourcePriority?: DataSourceId[];
 };
 const requestContext = new AsyncLocalStorage<RequestContext>();
+
+function hasRequestCredentialScope(context?: RequestContext): boolean {
+  return Boolean(
+    context?.tushareToken?.trim()
+    || context?.qverisApiKey?.trim()
+    || context?.twinglyApiKey?.trim()
+    || context?.coingeckoApiKey?.trim()
+    || context?.coingeckoProApiKey?.trim()
+    || context?.coingeckoDemoApiKey?.trim()
+  );
+}
+
+function scopedCredential(
+  requestValue: string | undefined,
+  environmentValue: string | undefined,
+): string | undefined {
+  const context = requestContext.getStore();
+  if (hasRequestCredentialScope(context)) return requestValue?.trim() || undefined;
+  return requestValue?.trim() || environmentValue?.trim() || undefined;
+}
 
 export function runWithRequestContext<T>(ctx: Partial<RequestContext>, fn: () => Promise<T>): Promise<T> {
   return requestContext.run({
@@ -29,15 +50,16 @@ export function runWithRequestContext<T>(ctx: Partial<RequestContext>, fn: () =>
     coingeckoProApiKey: ctx.coingeckoProApiKey,
     coingeckoDemoApiKey: ctx.coingeckoDemoApiKey,
     qverisApiKey: ctx.qverisApiKey,
+    twinglyApiKey: ctx.twinglyApiKey,
     sourcePriority: ctx.sourcePriority,
   }, fn);
 }
 
 export function getRequestToken(): string | undefined {
-  return requestContext.getStore()?.tushareToken;
+  return scopedCredential(requestContext.getStore()?.tushareToken, process.env.TUSHARE_TOKEN);
 }
 
-export type CredentialSource = Extract<DataSourceId, 'tushare' | 'qveris'>;
+export type CredentialSource = Extract<DataSourceId, 'tushare' | 'qveris' | 'twingly'>;
 
 /**
  * Resolve credential-backed sources for the current request. Explicit request
@@ -49,28 +71,34 @@ export function getConfiguredCredentialSources(): CredentialSource[] {
   const requestSources: CredentialSource[] = [];
   if (context?.tushareToken?.trim()) requestSources.push('tushare');
   if (context?.qverisApiKey?.trim()) requestSources.push('qveris');
+  if (context?.twinglyApiKey?.trim()) requestSources.push('twingly');
   if (requestSources.length > 0) return requestSources;
 
   const configuredSources: CredentialSource[] = [];
   if (process.env.TUSHARE_TOKEN?.trim()) configuredSources.push('tushare');
   if (process.env.QVERIS_API_KEY?.trim()) configuredSources.push('qveris');
+  if (process.env.TWINGLY_API_KEY?.trim()) configuredSources.push('twingly');
   return configuredSources;
 }
 
 export function getCoinGeckoApiKey(): string | undefined {
-  return requestContext.getStore()?.coingeckoApiKey ?? process.env.COINGECKO_API_KEY ?? undefined;
+  return scopedCredential(requestContext.getStore()?.coingeckoApiKey, process.env.COINGECKO_API_KEY);
 }
 
 export function getCoinGeckoProApiKey(): string | undefined {
-  return requestContext.getStore()?.coingeckoProApiKey ?? process.env.COINGECKO_PRO_API_KEY ?? undefined;
+  return scopedCredential(requestContext.getStore()?.coingeckoProApiKey, process.env.COINGECKO_PRO_API_KEY);
 }
 
 export function getCoinGeckoDemoApiKey(): string | undefined {
-  return requestContext.getStore()?.coingeckoDemoApiKey ?? process.env.COINGECKO_DEMO_API_KEY ?? undefined;
+  return scopedCredential(requestContext.getStore()?.coingeckoDemoApiKey, process.env.COINGECKO_DEMO_API_KEY);
 }
 
 export function getQverisApiKey(): string | undefined {
-  return requestContext.getStore()?.qverisApiKey ?? process.env.QVERIS_API_KEY ?? undefined;
+  return scopedCredential(requestContext.getStore()?.qverisApiKey, process.env.QVERIS_API_KEY);
+}
+
+export function getTwinglyApiKey(): string | undefined {
+  return scopedCredential(requestContext.getStore()?.twinglyApiKey, process.env.TWINGLY_API_KEY);
 }
 
 export function parseSourcePriority(value?: string | string[]): DataSourceId[] {
@@ -90,8 +118,7 @@ export function getSourcePriority(): DataSourceId[] {
 }
 
 function resolveApiToken(): string | undefined {
-  // 优先使用请求上下文中的 Token，其次回退到环境变量
-  return getRequestToken() ?? process.env.TUSHARE_TOKEN ?? undefined;
+  return getRequestToken();
 }
 
 // 统一配置对象：API_TOKEN 改为 getter，动态读取每请求 Token
@@ -162,9 +189,33 @@ export const QVERIS_CONFIG = {
   MAX_RESPONSE_BYTES: 1024 * 1024,
 };
 
+function resolveTwinglyBaseUrl(): string {
+  const configured = process.env.TWINGLY_BASE_URL?.trim()
+    || 'https://data.twingly.net/news/b/search/v1/search';
+  const url = new URL(configured);
+  const localHttp = url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !localHttp) {
+    throw new Error('TWINGLY_BASE_URL 必须使用 HTTPS（本地回归测试地址除外）');
+  }
+  return url.toString();
+}
+
+export const TWINGLY_CONFIG = {
+  get API_KEY(): string {
+    return getTwinglyApiKey()?.trim() ?? '';
+  },
+  get SEARCH_URL(): string {
+    return resolveTwinglyBaseUrl();
+  },
+  TIMEOUT: 30000,
+  MAX_RESPONSE_BYTES: 4 * 1024 * 1024,
+};
+
 // 开发态输出便于确认来源（不打印实际 Token 值）
 if (process.env.NODE_ENV !== 'production') {
-  const fromTs = getRequestToken() ? 'request-header' : (process.env.TUSHARE_TOKEN ? 'env' : 'none');
+  const fromTs = requestContext.getStore()?.tushareToken
+    ? 'request-header'
+    : (process.env.TUSHARE_TOKEN ? 'env' : 'none');
   const fromCg = getCoinGeckoProApiKey() ? 'request-pro-header/env' : (getCoinGeckoApiKey() ? 'request-std-header/env' : 'none');
   console.log('Tushare token source:', fromTs);
   console.log('CoinGecko key source:', fromCg);

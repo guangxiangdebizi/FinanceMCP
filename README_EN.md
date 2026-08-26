@@ -77,12 +77,13 @@ FinanceMCP can therefore be used not only as a standalone financial-data MCP ser
 flowchart LR
     C[AI / MCP Client] -->|Existing 19 tools| R{FinanceMCP Router}
     R -->|Default first| T[Tushare]
+    R -->|Global news| G[Twingly]
     R -->|Optional extension| Q[Qveris]
     R -->|Crypto| B[Binance]
     R -->|News / Time| L[Public sources and local compute]
     Q -. Unsupported / timeout / rate limit .-> T
     T -. Not applicable .-> B
-    T & Q & B & L --> O[Attributed MCP result]
+    T & G & Q & B & L --> O[Attributed MCP result]
 ```
 
 ### HTTP headers
@@ -90,19 +91,20 @@ flowchart LR
 ```http
 X-Tushare-Token: YOUR_TUSHARE_TOKEN
 X-Qveris-Api-Key: YOUR_QVERIS_API_KEY
-X-Finance-Source-Priority: qveris,tushare,binance
+X-Twingly-Api-Key: YOUR_TWINGLY_API_KEY
+X-Finance-Source-Priority: twingly,qveris,tushare,binance
 ```
 
 Default priority:
 
 ```text
-tushare,qveris,binance
+tushare,twingly,qveris,binance
 ```
 
 Routing behavior:
 
 1. With one credential, FinanceMCP prefers the matching provider.
-2. With both Tushare and Qveris credentials and no custom order, Tushare remains first.
+2. With multiple credentials and no custom order, Tushare remains first; news tools then try Twingly before Qveris and public sources.
 3. `X-Finance-Source-Priority` changes the order per request; unknown values are ignored, duplicates removed, and omitted providers appended in default order.
 4. Unsupported or failed preferred sources fall back automatically. A valid empty result does not trigger duplicate upstream calls.
 5. Qveris runs **Discover → Inspect → Probe → Call**, with at most one potentially billable Call per MCP request.
@@ -119,10 +121,13 @@ Existing tool output...
 > [!NOTE]
 > Qveris is optional. FinanceMCP does not call Qveris or consume credits unless `X-Qveris-Api-Key` / `QVERIS_API_KEY` is present. See the [Qveris REST API](https://qveris.ai/docs/rest-api).
 
+> [!NOTE]
+> Twingly is an optional global-news source and is never called without `X-Twingly-Api-Key` / `TWINGLY_API_KEY`. FinanceMCP returns only titles, attribution, timestamps, URLs, language/region, and deduplication metadata; it does not return or persist article bodies.
+
 ### Credential-scoped tool discovery
 
 `tools/list` filters the MCP catalog by credentials on the current request. A
-Qveris-only request exposes only tools covered by the Qveris adapter; a
+Twingly-only request exposes the two existing news tools, a Qveris-only request exposes only tools covered by the Qveris adapter, and a
 Tushare-only request exposes Tushare-backed tools; both credentials expose the
 union. With no credential, only public and local tools are listed. `tools/call`
 enforces the same scope.
@@ -135,6 +140,7 @@ enforces the same scope.
 |---|---|---|---|
 | **Tushare Pro** | Token required | [Create an account](https://tushare.pro/document/1?doc_id=38) · [Get a Token](https://tushare.pro/document/1?doc_id=39) | stdio: `TUSHARE_TOKEN`; HTTP: `X-Tushare-Token` |
 | **Qveris** | API key required | [Dashboard / API Keys](https://qveris.ai/account?page=api-keys) · [Documentation](https://qveris.ai/docs) | stdio: `QVERIS_API_KEY`; HTTP: `X-Qveris-Api-Key` |
+| **Twingly News Search** | API key required | [Dashboard / API Key](https://app.twingly.com/) · [News API](https://www.twingly.com/news-api/) | stdio: `TWINGLY_API_KEY`; HTTP: `X-Twingly-Api-Key` |
 | **Binance Public API** | **Not required** | [Spot REST API documentation](https://developers.binance.com/docs/binance-spot-api-docs/rest-api) | No configuration; crypto market data uses public endpoints automatically |
 | **Baidu News** | **Not required** | No developer API application required | No configuration; used by `finance_news` |
 | **Local system clock** | **Not required** | None | No configuration; used only by `current_timestamp` |
@@ -153,6 +159,12 @@ enforces the same scope.
 1. Sign in to [Qveris](https://qveris.ai/) and open [Dashboard / API Keys](https://qveris.ai/account?page=api-keys).
 2. Create and copy an API key. Qveris currently includes 1,000 credits for new accounts; Discover and Inspect are free, while an actual Call may be billed by capability.
 3. Set `QVERIS_API_KEY` locally, or pass it in the dedicated `X-Qveris-Api-Key` header for remote MCP requests.
+
+### Twingly API key
+
+1. Sign in to the [Twingly Dashboard](https://app.twingly.com/), then copy the API key shown in the top-right corner and check the remaining quota.
+2. Set `TWINGLY_API_KEY` locally, or pass it in the dedicated `X-Twingly-Api-Key` header for remote MCP requests.
+3. Twingly stays behind `finance_news` and `hot_news_7x24`; failures, rate limits, and empty matches automatically fall through to the next configured provider.
 
 ### Keyless providers
 
@@ -183,7 +195,8 @@ Local MCP configuration for Claude Desktop, Cursor, and similar clients:
       "env": {
         "TUSHARE_TOKEN": "YOUR_TUSHARE_TOKEN",
         "QVERIS_API_KEY": "YOUR_QVERIS_API_KEY",
-        "FINANCE_SOURCE_PRIORITY": "tushare,qveris,binance"
+        "TWINGLY_API_KEY": "YOUR_TWINGLY_API_KEY",
+        "FINANCE_SOURCE_PRIORITY": "tushare,twingly,qveris,binance"
       }
     }
   }
@@ -204,14 +217,15 @@ Hosted endpoint: [`https://finvestai.top/mcp`](https://finvestai.top/mcp)
       "headers": {
         "X-Tushare-Token": "YOUR_TUSHARE_TOKEN",
         "X-Qveris-Api-Key": "YOUR_QVERIS_API_KEY",
-        "X-Finance-Source-Priority": "qveris,tushare,binance"
+        "X-Twingly-Api-Key": "YOUR_TWINGLY_API_KEY",
+        "X-Finance-Source-Priority": "twingly,qveris,tushare,binance"
       }
     }
   }
 }
 ```
 
-Both keys are optional; either may be supplied alone. `Authorization: Bearer ...` and `X-Api-Key` remain compatible Tushare token forms. Qveris uses the dedicated `X-Qveris-Api-Key` header.
+All three credentials are optional and may be supplied independently. `Authorization: Bearer ...` and `X-Api-Key` remain compatible Tushare token forms; Qveris and Twingly use dedicated headers.
 
 <details>
 <summary><strong>Environment variables</strong></summary>
@@ -221,7 +235,9 @@ Both keys are optional; either may be supplied alone. `Authorization: Bearer ...
 | `TUSHARE_TOKEN` | empty | Tushare credential |
 | `QVERIS_API_KEY` | empty | Qveris credential |
 | `QVERIS_BASE_URL` | `https://qveris.ai/api/v1` | Qveris REST API base URL |
-| `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | Default stdio/server priority |
+| `TWINGLY_API_KEY` | empty | Twingly News Search credential |
+| `TWINGLY_BASE_URL` | `https://data.twingly.net/news/b/search/v1/search` | Twingly News Search API URL |
+| `FINANCE_SOURCE_PRIORITY` | `tushare,twingly,qveris,binance` | Default stdio/server priority |
 | `PORT` | `3000` | HTTP server port |
 | `MCP_HTTP_HOST` | `127.0.0.1` | HTTP bind address; containers use `0.0.0.0` |
 | `MCP_ALLOWED_HOSTS` | loopback hostnames | Comma-separated hostname allowlist (without ports); recommended for non-loopback deployments |
@@ -248,7 +264,7 @@ once the server is publicly reachable.
 | Tool | Purpose | Data provider / API |
 |---|---|---|
 | `current_timestamp` | Current UTC+8 timestamp | Local system clock |
-| `finance_news` | Financial-news keyword search | Baidu News · Qveris* |
+| `finance_news` | Financial-news keyword search | Twingly* · Baidu News · Qveris* |
 | `stock_data` | Multi-market history and technical indicators | Tushare Pro · Qveris* · Binance Public API (crypto) |
 | `stock_data_minutes` | China A-share and crypto intraday bars | Tushare Pro · Qveris* · Binance Public API (crypto) |
 | `index_data` | Index history, metadata, and valuation | Tushare Pro · Qveris* |
@@ -264,7 +280,7 @@ once the server is publicly reachable.
 | `margin_trade` | Margin financing, securities lending, and refinancing | Tushare Pro |
 | `csi_index_constituents` | CSI performance, weights, and financial summaries | Tushare Pro · Qveris* |
 | `dragon_tiger_inst` | Dragon-Tiger institutional trades | Tushare Pro |
-| `hot_news_7x24` | Deduplicated 7×24 financial headlines | Tushare Pro · Qveris* |
+| `hot_news_7x24` | Deduplicated 7×24 financial headlines | Tushare Pro · Twingly* · Qveris* |
 | `futures_data` | Futures-member position rankings | Tushare Pro |
 
 > **Qveris\*** is a dynamic capability-routing layer. It selects an integrated upstream provider for each request (for example, Finnhub or Tiingo) and returns the chosen provider, capability ID, and source attribution with the Tool result. Tools without Qveris in this table report the capability as unsupported before falling back to their listed native provider.

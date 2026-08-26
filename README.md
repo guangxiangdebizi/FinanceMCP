@@ -77,12 +77,13 @@ MarkiNote 则作为上层 **AI Agent 智能文档与知识管理系统**，负�
 flowchart LR
     C[AI / MCP Client] -->|现有 19 个 Tools| R{FinanceMCP Router}
     R -->|默认优先| T[Tushare]
+    R -->|全球新闻| G[Twingly]
     R -->|可选扩展| Q[Qveris]
     R -->|Crypto| B[Binance]
     R -->|News / Time| L[公开源与本地计算]
     Q -. 未覆盖 / 超时 / 限流 .-> T
     T -. 不适用 .-> B
-    T & Q & B & L --> O[来源标注后的统一 MCP 结果]
+    T & G & Q & B & L --> O[来源标注后的统一 MCP 结果]
 ```
 
 ### HTTP 请求头
@@ -90,19 +91,20 @@ flowchart LR
 ```http
 X-Tushare-Token: YOUR_TUSHARE_TOKEN
 X-Qveris-Api-Key: YOUR_QVERIS_API_KEY
-X-Finance-Source-Priority: qveris,tushare,binance
+X-Twingly-Api-Key: YOUR_TWINGLY_API_KEY
+X-Finance-Source-Priority: twingly,qveris,tushare,binance
 ```
 
 默认优先级：
 
 ```text
-tushare,qveris,binance
+tushare,twingly,qveris,binance
 ```
 
 路由行为：
 
 1. 只传一种凭证时，优先使用该凭证对应的数据源。
-2. 同时传入 Tushare 与 Qveris 凭证时，默认 Tushare 优先。
+2. 同时传入多种凭证时，默认 Tushare 优先；新闻工具随后尝试 Twingly，再尝试 Qveris 与公共源。
 3. `X-Finance-Source-Priority` 可按请求调整顺序；未知项忽略、重复项去重、遗漏项按默认顺序补齐。
 4. 首选数据源接口未覆盖或调用失败时自动降级；正常空结果不会触发重复请求。
 5. Qveris 内部执行 **Discover → Inspect → Probe → Call**，每次 MCP 请求最多执行一次可能计费的 Call。
@@ -119,9 +121,12 @@ tushare,qveris,binance
 > [!NOTE]
 > Qveris 是可选扩展。未提供 `X-Qveris-Api-Key` / `QVERIS_API_KEY` 时不会调用 Qveris，也不会消耗 credits。接口契约参见 [Qveris REST API](https://qveris.ai/docs/rest-api)。
 
+> [!NOTE]
+> Twingly 是可选的全球新闻源。未提供 `X-Twingly-Api-Key` / `TWINGLY_API_KEY` 时不会调用。FinanceMCP 只返回标题、来源、时间、URL、语言/地区和去重元数据，不返回或持久化文章全文。
+
 ### 按凭证动态显示 Tools
 
-`tools/list` 会根据当前 MCP 请求实际携带的凭证裁剪工具目录：只传 Qveris Key 时只展示 Qveris adapter 覆盖的现有 Tools，只传 Tushare Token 时只展示 Tushare 覆盖的 Tools；同时传入两者时展示两者的并集。没有凭证时仅展示公共数据源与本地工具。`tools/call` 也执行相同校验，避免 AI 调用到当前请求无法使用的数据源。
+`tools/list` 会根据当前 MCP 请求实际携带的凭证裁剪工具目录：只传 Twingly Key 时展示两个现有新闻 Tools，只传 Qveris Key 时只展示 Qveris adapter 覆盖的现有 Tools，只传 Tushare Token 时只展示 Tushare 覆盖的 Tools；同时传入多种凭证时展示并集。没有凭证时仅展示公共数据源与本地工具。`tools/call` 也执行相同校验，避免 AI 调用到当前请求无法使用的数据源。
 
 <a id="providers"></a>
 
@@ -131,6 +136,7 @@ tushare,qveris,binance
 |---|---|---|---|
 | **Tushare Pro** | 需要 Token | [注册账号](https://tushare.pro/document/1?doc_id=38) · [获取 Token](https://tushare.pro/document/1?doc_id=39) | stdio：`TUSHARE_TOKEN`；HTTP：`X-Tushare-Token` |
 | **Qveris** | 需要 API Key | [Dashboard / API Keys](https://qveris.ai/account?page=api-keys) · [官方文档](https://qveris.ai/docs) | stdio：`QVERIS_API_KEY`；HTTP：`X-Qveris-Api-Key` |
+| **Twingly News Search** | 需要 API Key | [Dashboard / API Key](https://app.twingly.com/) · [News API](https://www.twingly.com/news-api/) | stdio：`TWINGLY_API_KEY`；HTTP：`X-Twingly-Api-Key` |
 | **Binance Public API** | **不需要** | [Spot REST API 文档](https://developers.binance.com/docs/binance-spot-api-docs/rest-api) | 无需配置；加密资产行情自动使用公开接口 |
 | **百度新闻** | **不需要** | 无需申请 API | 无需配置；`finance_news` 使用公开新闻检索 |
 | **本地系统时钟** | **不需要** | 无 | 无需配置；仅供 `current_timestamp` 使用 |
@@ -149,6 +155,12 @@ tushare,qveris,binance
 1. 登录 [Qveris](https://qveris.ai/)，打开 [Dashboard / API Keys](https://qveris.ai/account?page=api-keys)。
 2. 创建并复制 API Key。Qveris 当前为新账号提供 1000 credits；Discover、Inspect 免费，实际 Call 可能按能力计费。
 3. 将 Key 写入本地 `QVERIS_API_KEY`，或在远程 MCP 请求中通过独立的 `X-Qveris-Api-Key` 传递。
+
+### Twingly API Key
+
+1. 登录 [Twingly Dashboard](https://app.twingly.com/)，从右上角复制 API Key 并确认剩余额度。
+2. 将 Key 写入本地 `TWINGLY_API_KEY`，或在远程 MCP 请求中通过独立的 `X-Twingly-Api-Key` 传递。
+3. Twingly 仅作为 `finance_news` 与 `hot_news_7x24` 的可选上游；调用失败、限流或无匹配结果时按配置自动回退。
 
 ### 无 Key 数据源
 
@@ -179,7 +191,8 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
       "env": {
         "TUSHARE_TOKEN": "YOUR_TUSHARE_TOKEN",
         "QVERIS_API_KEY": "YOUR_QVERIS_API_KEY",
-        "FINANCE_SOURCE_PRIORITY": "tushare,qveris,binance"
+        "TWINGLY_API_KEY": "YOUR_TWINGLY_API_KEY",
+        "FINANCE_SOURCE_PRIORITY": "tushare,twingly,qveris,binance"
       }
     }
   }
@@ -200,14 +213,15 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
       "headers": {
         "X-Tushare-Token": "YOUR_TUSHARE_TOKEN",
         "X-Qveris-Api-Key": "YOUR_QVERIS_API_KEY",
-        "X-Finance-Source-Priority": "qveris,tushare,binance"
+        "X-Twingly-Api-Key": "YOUR_TWINGLY_API_KEY",
+        "X-Finance-Source-Priority": "twingly,qveris,tushare,binance"
       }
     }
   }
 }
 ```
 
-两个 Key 都是可选的，可以只传其中一个。`Authorization: Bearer ...` 与 `X-Api-Key` 继续兼容为 Tushare Token；Qveris 使用独立的 `X-Qveris-Api-Key`。
+三个凭证都是可选的，可以只传其中一个。`Authorization: Bearer ...` 与 `X-Api-Key` 继续兼容为 Tushare Token；Qveris 与 Twingly 使用各自的独立 Header。
 
 <details>
 <summary><strong>环境变量</strong></summary>
@@ -217,7 +231,9 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 | `TUSHARE_TOKEN` | 空 | Tushare 凭证 |
 | `QVERIS_API_KEY` | 空 | Qveris 凭证 |
 | `QVERIS_BASE_URL` | `https://qveris.ai/api/v1` | Qveris REST API 地址 |
-| `FINANCE_SOURCE_PRIORITY` | `tushare,qveris,binance` | stdio 或服务端默认优先级 |
+| `TWINGLY_API_KEY` | 空 | Twingly News Search 凭证 |
+| `TWINGLY_BASE_URL` | `https://data.twingly.net/news/b/search/v1/search` | Twingly News Search API 地址 |
+| `FINANCE_SOURCE_PRIORITY` | `tushare,twingly,qveris,binance` | stdio 或服务端默认优先级 |
 | `PORT` | `3000` | HTTP 服务端口 |
 | `MCP_HTTP_HOST` | `127.0.0.1` | HTTP 监听地址；容器部署使用 `0.0.0.0` |
 | `MCP_ALLOWED_HOSTS` | 回环地址白名单 | 逗号分隔的 Host 主机名白名单（不含端口）；非回环部署建议显式配置 |
@@ -242,7 +258,7 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 | Tool | 功能 | 数据源 / 接口商 |
 |---|---|---|
 | `current_timestamp` | UTC+8 当前时间戳 | 本地系统时钟 |
-| `finance_news` | 财经新闻关键词检索 | 百度新闻 · Qveris* |
+| `finance_news` | 财经新闻关键词检索 | Twingly* · 百度新闻 · Qveris* |
 | `stock_data` | 多市场历史行情与技术指标 | Tushare Pro · Qveris* · Binance Public API（加密资产） |
 | `stock_data_minutes` | A 股与加密资产分钟 K 线 | Tushare Pro · Qveris* · Binance Public API（加密资产） |
 | `index_data` | 指数行情、基本信息与估值 | Tushare Pro · Qveris* |
@@ -258,7 +274,7 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 | `margin_trade` | 融资融券与转融券数据 | Tushare Pro |
 | `csi_index_constituents` | CSI 指数表现、成分权重与财务摘要 | Tushare Pro · Qveris* |
 | `dragon_tiger_inst` | 龙虎榜机构交易明细 | Tushare Pro |
-| `hot_news_7x24` | 7×24 财经热点与内容去重 | Tushare Pro · Qveris* |
+| `hot_news_7x24` | 7×24 财经热点与内容去重 | Tushare Pro · Twingly* · Qveris* |
 | `futures_data` | 期货会员持仓排名 | Tushare Pro |
 
 > **Qveris\*** 是动态数据能力路由层，会按查询自动选择已接入的实际接口商（例如 Finnhub、Tiingo 等）；最终选中的接口商、能力 ID 与数据来源会随 Tool 结果一起返回。未标记 Qveris 的 Tool 会明确返回“接口未覆盖”，再降级到表内原生数据源。
