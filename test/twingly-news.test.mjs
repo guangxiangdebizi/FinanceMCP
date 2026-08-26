@@ -74,7 +74,7 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     }
 
     response.end(`{
-      "number_of_documents": 1,
+      "number_of_documents": 2,
       "number_of_documents_estimated_total": 12,
       "documents": [{
         "article_id": 18446744073709551614,
@@ -97,6 +97,17 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
           "url": "https://duplicate.test/article",
           "text": "ANOTHER FULL BODY"
         }]
+      }, {
+        "article_id": 18446744073709551610,
+        "site_id": 18446744073709551609,
+        "title": "Insecure article must be filtered",
+        "url": "http://insecure.example.test/article",
+        "text": "INSECURE FULL BODY",
+        "published_at": "2026-08-26T03:00:00Z",
+        "language_code": "en",
+        "location_code": "us",
+        "site_name": "Insecure News",
+        "identical_documents": []
       }]
     }`);
   });
@@ -121,7 +132,10 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     assert.match(successText, /Federal Reserve & markets/);
     assert.match(successText, /site_id: 18446744073709551613/);
     assert.match(successText, /同源重复报道: 1/);
-    assert.doesNotMatch(successText, /LICENSED FULL ARTICLE BODY|ANOTHER FULL BODY|Duplicate full body/);
+    assert.doesNotMatch(
+      successText,
+      /LICENSED FULL ARTICLE BODY|ANOTHER FULL BODY|Duplicate full body|Insecure article|INSECURE FULL BODY/,
+    );
     assert.equal(requests[0].headers.authorization, 'apikey request-scoped-twingly-key');
     assert.deepEqual(requests[0].body.all, ['Federal', 'Reserve']);
     assert.equal(requests[0].body.group_identical_documents, true);

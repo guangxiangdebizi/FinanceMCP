@@ -107,6 +107,11 @@ function normalizeDocument(document: TwinglyDocument): TwinglyNewsItem | undefin
   const title = stripMarkup(document.title);
   const url = String(document.url ?? '').trim();
   if (!title || !url) return undefined;
+  try {
+    if (new URL(url).protocol !== 'https:') return undefined;
+  } catch {
+    return undefined;
+  }
 
   return {
     articleId: String(document.article_id ?? ''),
