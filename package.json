@@ -1,6 +1,6 @@
 {
   "name": "finance-mcp",
-  "version": "4.10.2",
+  "version": "4.11.0",
   "description": "Multi-source financial data MCP server with Tushare, optional Qveris routing, and Binance crypto data",
   "type": "module",
   "engines": {

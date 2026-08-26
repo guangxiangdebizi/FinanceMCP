@@ -46,7 +46,7 @@ export const toolList = [
 // direct-call guard. Qveris coverage mirrors getQverisToolPlan in qverisAdapter.
 const TOOL_SOURCES: Record<string, readonly ToolSource[]> = {
   current_timestamp: ['local'],
-  finance_news: ['qveris', 'web'],
+  finance_news: ['twingly', 'qveris', 'web'],
   stock_data: ['tushare', 'qveris', 'binance'],
   stock_data_minutes: ['tushare', 'qveris', 'binance'],
   index_data: ['tushare', 'qveris'],
@@ -62,7 +62,7 @@ const TOOL_SOURCES: Record<string, readonly ToolSource[]> = {
   company_performance_us: ['tushare', 'qveris'],
   csi_index_constituents: ['tushare', 'qveris'],
   dragon_tiger_inst: ['tushare'],
-  hot_news_7x24: ['tushare', 'qveris'],
+  hot_news_7x24: ['tushare', 'twingly', 'qveris'],
   futures_data: ['tushare'],
 };
 
