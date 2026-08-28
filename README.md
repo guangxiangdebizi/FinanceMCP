@@ -122,7 +122,7 @@ tushare,twingly,qveris,binance
 > Qveris 是可选扩展。未提供 `X-Qveris-Api-Key` / `QVERIS_API_KEY` 时不会调用 Qveris，也不会消耗 credits。接口契约参见 [Qveris REST API](https://qveris.ai/docs/rest-api)。
 
 > [!NOTE]
-> Twingly 是可选的全球新闻源。未提供 `X-Twingly-Api-Key` / `TWINGLY_API_KEY` 时不会调用。FinanceMCP 只返回标题、来源、时间、URL、语言/地区和去重元数据，不返回或持久化文章全文。
+> Twingly 是可选的全球新闻源。未提供 `X-Twingly-Api-Key` / `TWINGLY_API_KEY` 时不会调用。FinanceMCP 只返回标题、来源、时间、文章与站点标识、URL、语言/地区、栏目和去重元数据，不返回或持久化文章全文。
 
 ### 按凭证动态显示 Tools
 
@@ -161,6 +161,8 @@ tushare,twingly,qveris,binance
 1. 登录 [Twingly Dashboard](https://app.twingly.com/)，从右上角复制 API Key 并确认剩余额度。
 2. 将 Key 写入本地 `TWINGLY_API_KEY`，或在远程 MCP 请求中通过独立的 `X-Twingly-Api-Key` 传递。
 3. Twingly 仅作为 `finance_news` 与 `hot_news_7x24` 的可选上游；调用失败、限流或无匹配结果时按配置自动回退。
+4. `finance_news` 默认把空格分隔的内容作为多个必含词；需要精确短语时使用双引号，例如 `"Federal Reserve" inflation`。Twingly 最多接受 250 个组合词项，超出时会明确报错而不会静默截断。
+5. Twingly 单次最多返回 250 条新闻；当 `hot_news_7x24.limit` 超过 250 时，结果会明确标注该上游限制。
 
 ### 无 Key 数据源
 
