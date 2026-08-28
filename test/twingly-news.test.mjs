@@ -100,9 +100,9 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
       }, {
         "article_id": 18446744073709551610,
         "site_id": 18446744073709551609,
-        "title": "Insecure article must be filtered",
+        "title": "Legacy HTTP article remains valid",
         "url": "http://insecure.example.test/article",
-        "text": "INSECURE FULL BODY",
+        "text": "LEGACY HTTP FULL BODY MUST NEVER BE RETURNED",
         "published_at": "2026-08-26T03:00:00Z",
         "language_code": "en",
         "location_code": "us",
@@ -130,16 +130,41 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     assert.equal(nativeCalls, 0);
     assert.match(successText, /^数据来源: Twingly/m);
     assert.match(successText, /Federal Reserve & markets/);
+    assert.match(successText, /article_id: 18446744073709551614/);
     assert.match(successText, /site_id: 18446744073709551613/);
+    assert.match(successText, /site_url: https:\/\/example\.test/);
+    assert.match(successText, /section: Markets/);
+    assert.match(successText, /section_url: https:\/\/example\.test\/markets/);
     assert.match(successText, /同源重复报道: 1/);
+    assert.match(successText, /Legacy HTTP article remains valid/);
+    assert.match(successText, /http:\/\/insecure\.example\.test\/article/);
     assert.doesNotMatch(
       successText,
-      /LICENSED FULL ARTICLE BODY|ANOTHER FULL BODY|Duplicate full body|Insecure article|INSECURE FULL BODY/,
+      /LICENSED FULL ARTICLE BODY|ANOTHER FULL BODY|Duplicate full body|LEGACY HTTP FULL BODY/,
     );
     assert.equal(requests[0].headers.authorization, 'apikey request-scoped-twingly-key');
     assert.deepEqual(requests[0].body.all, ['Federal', 'Reserve']);
     assert.equal(requests[0].body.group_identical_documents, true);
     assert.equal(requests[0].body.size, 20);
+
+    await runWithRequestContext({
+      twinglyApiKey: 'request-scoped-twingly-key',
+      sourcePriority: ['twingly', 'qveris', 'tushare', 'binance'],
+    }, () => routeToolCall('finance_news', { query: '"Federal Reserve" inflation' }, async () => {
+      nativeCalls += 1;
+      return { content: [{ type: 'text', text: '# public fallback' }] };
+    }));
+    assert.deepEqual(requests.at(-1).body.all, ['Federal Reserve', 'inflation']);
+
+    const thirtyTerms = Array.from({ length: 30 }, (_, index) => `term${index}`).join(' ');
+    await runWithRequestContext({
+      twinglyApiKey: 'request-scoped-twingly-key',
+      sourcePriority: ['twingly', 'qveris', 'tushare', 'binance'],
+    }, () => routeToolCall('finance_news', { query: thirtyTerms }, async () => {
+      nativeCalls += 1;
+      return { content: [{ type: 'text', text: '# public fallback' }] };
+    }));
+    assert.equal(requests.at(-1).body.all.length, 30);
 
     mode = 'empty';
     const emptyFallback = await runWithRequestContext({
@@ -163,7 +188,7 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     assert.match(textOf(authFallback), /Twingly（凭证不可用） → 公开新闻源（成功）/);
 
     mode = 'success';
-    await runWithRequestContext({
+    const hotResult = await runWithRequestContext({
       twinglyApiKey: 'request-scoped-twingly-key',
       sourcePriority: ['twingly', 'qveris', 'tushare', 'binance'],
     }, () => routeToolCall('hot_news_7x24', { limit: 500 }, async () => {
@@ -174,7 +199,8 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     assert.ok(Array.isArray(hotRequest.any));
     assert.ok(hotRequest.any.includes('financial market'));
     assert.ok(hotRequest.any.includes('财经'));
-    assert.equal(hotRequest.size, 50);
+    assert.equal(hotRequest.size, 250);
+    assert.match(textOf(hotResult), /Twingly result limit: 250 \(requested: 500; API maximum: 250\)/);
     assert.equal(hotRequest.sort, 'timestamp');
     assert.equal(hotRequest.order, 'desc');
     assert.equal(hotRequest.group_identical_documents, true);

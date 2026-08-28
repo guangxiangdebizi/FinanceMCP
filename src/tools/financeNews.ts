@@ -18,7 +18,7 @@ export const financeNews = {
     properties: {
       query: {
         type: "string",
-        description: "搜索关键词，支持单个关键词如'药明康德'、'腾讯'，或多个关键词用空格分开如'美联储 加息'、'比特币 监管'等。系统会智能搜索相关历史新闻"
+        description: "搜索关键词，支持单个关键词如'药明康德'、'腾讯'，或多个关键词用空格分开如'美联储 加息'、'比特币 监管'等；使用双引号可保留精确短语，如'\"Federal Reserve\" inflation'。系统会智能搜索相关历史新闻"
       }
     },
     required: ["query"]

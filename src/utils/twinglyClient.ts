@@ -61,6 +61,8 @@ export type TwinglyNewsItem = {
 type TwinglySearchResult = {
   items: TwinglyNewsItem[];
   estimatedTotal: number;
+  requestedSize: number;
+  appliedSize: number;
 };
 
 type ToolContent = { type: 'text'; text: string };
@@ -103,15 +105,21 @@ function responseErrorKind(status: number): TwinglyClientErrorKind {
   return 'request';
 }
 
+function normalizeWebUrl(value: unknown): string {
+  const url = String(value ?? '').trim();
+  if (!url) return '';
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === 'http:' || protocol === 'https:' ? url : '';
+  } catch {
+    return '';
+  }
+}
+
 function normalizeDocument(document: TwinglyDocument): TwinglyNewsItem | undefined {
   const title = stripMarkup(document.title);
-  const url = String(document.url ?? '').trim();
+  const url = normalizeWebUrl(document.url);
   if (!title || !url) return undefined;
-  try {
-    if (new URL(url).protocol !== 'https:') return undefined;
-  } catch {
-    return undefined;
-  }
 
   return {
     articleId: String(document.article_id ?? ''),
@@ -119,9 +127,9 @@ function normalizeDocument(document: TwinglyDocument): TwinglyNewsItem | undefin
     title,
     url,
     source: stripMarkup(document.site_name) || 'Twingly',
-    siteUrl: String(document.site_url ?? '').trim(),
+    siteUrl: normalizeWebUrl(document.site_url),
     sectionName: stripMarkup(document.section_name),
-    sectionUrl: String(document.section_url ?? '').trim(),
+    sectionUrl: normalizeWebUrl(document.section_url),
     publishTime: String(document.published_at ?? document.timestamp ?? '').trim(),
     languageCode: String(document.language_code ?? '').trim().toLowerCase(),
     locationCode: String(document.location_code ?? '').trim().toLowerCase(),
@@ -131,7 +139,11 @@ function normalizeDocument(document: TwinglyDocument): TwinglyNewsItem | undefin
   };
 }
 
-async function postSearch(query: Record<string, unknown>): Promise<TwinglySearchResult> {
+async function postSearch(
+  query: Record<string, unknown>,
+  requestedSize: number,
+  appliedSize: number,
+): Promise<TwinglySearchResult> {
   const apiKey = TWINGLY_CONFIG.API_KEY;
   if (!apiKey) {
     throw new TwinglyClientError('not_configured', '未配置 Twingly API key');
@@ -187,6 +199,8 @@ async function postSearch(query: Record<string, unknown>): Promise<TwinglySearch
     return {
       items,
       estimatedTotal: Number(parsed.number_of_documents_estimated_total ?? items.length),
+      requestedSize,
+      appliedSize,
     };
   } finally {
     clearTimeout(timeout);
@@ -194,16 +208,59 @@ async function postSearch(query: Record<string, unknown>): Promise<TwinglySearch
 }
 
 function queryTerms(query: string): string[] {
-  const normalized = query.trim().slice(0, 500);
-  const terms = normalized.split(/\s+/).filter(Boolean).slice(0, 20);
-  return terms.length ? terms : [normalized];
+  const normalized = query.trim();
+  const terms: string[] = [];
+  let current = '';
+  let quoted = false;
+
+  const pushCurrent = () => {
+    const term = current.trim();
+    if (term) terms.push(term);
+    current = '';
+  };
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+    if (character === '\\' && normalized[index + 1] === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+    if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (/\s/.test(character) && !quoted) {
+      pushCurrent();
+      continue;
+    }
+    current += character;
+  }
+  pushCurrent();
+
+  if (terms.length === 0) {
+    throw new TwinglyClientError('request', 'Twingly search query is empty');
+  }
+  if (terms.length > 250) {
+    throw new TwinglyClientError(
+      'request',
+      `Twingly News Search supports at most 250 combined terms; received ${terms.length}`,
+    );
+  }
+  return terms;
+}
+
+function normalizeRequestedSize(size: number, fallback: number): number {
+  return Number.isFinite(size) ? Math.max(1, Math.floor(size)) : fallback;
 }
 
 export async function searchTwinglyFinanceNews(query: string, size = 20): Promise<TwinglySearchResult> {
   const now = new Date();
+  const requestedSize = normalizeRequestedSize(size, 20);
+  const appliedSize = Math.min(250, requestedSize);
   return postSearch({
     all: queryTerms(query),
-    size: Math.min(50, Math.max(1, Math.floor(size))),
+    size: appliedSize,
     sort: 'timestamp',
     order: 'desc',
     timestamp: {
@@ -211,14 +268,16 @@ export async function searchTwinglyFinanceNews(query: string, size = 20): Promis
       until: isoSeconds(now),
     },
     group_identical_documents: true,
-  });
+  }, requestedSize, appliedSize);
 }
 
 export async function searchTwinglyHotNews(size = 100): Promise<TwinglySearchResult> {
   const now = new Date();
+  const requestedSize = normalizeRequestedSize(size, 100);
+  const appliedSize = Math.min(250, requestedSize);
   return postSearch({
     any: HOT_NEWS_TERMS,
-    size: Math.min(50, Math.max(1, Math.floor(size))),
+    size: appliedSize,
     sort: 'timestamp',
     order: 'desc',
     timestamp: {
@@ -226,14 +285,18 @@ export async function searchTwinglyHotNews(size = 100): Promise<TwinglySearchRes
       until: isoSeconds(now),
     },
     group_identical_documents: true,
-  });
+  }, requestedSize, appliedSize);
 }
 
 function metadataLine(item: TwinglyNewsItem): string {
   const metadata = [
+    item.articleId ? `article_id: ${item.articleId}` : '',
     item.languageCode ? `语言: ${item.languageCode}` : '',
     item.locationCode ? `地区: ${item.locationCode}` : '',
     item.siteId ? `site_id: ${item.siteId}` : '',
+    item.siteUrl ? `site_url: ${item.siteUrl}` : '',
+    item.sectionName ? `section: ${item.sectionName}` : '',
+    item.sectionUrl ? `section_url: ${item.sectionUrl}` : '',
     item.duplicateCount ? `同源重复报道: ${item.duplicateCount}` : '',
   ].filter(Boolean).join('  ');
   return metadata ? `\n${metadata}` : '';
@@ -242,6 +305,12 @@ function metadataLine(item: TwinglyNewsItem): string {
 function formatItem(item: TwinglyNewsItem): string {
   return `${item.title}\n来源: ${item.source}  时间: ${item.publishTime || '未知'}`
     + `${metadataLine(item)}\n链接: ${item.url}`;
+}
+
+function sizeLimitLine(result: TwinglySearchResult): string {
+  if (result.requestedSize <= result.appliedSize) return '';
+  return `\n\nTwingly result limit: ${result.appliedSize}`
+    + ` (requested: ${result.requestedSize}; API maximum: 250)`;
 }
 
 export async function runTwinglyForExistingTool(
@@ -276,6 +345,7 @@ export async function runTwinglyForExistingTool(
       content: [{
         type: 'text',
         text: `# 7x24 财经热点\n\n${result.items.map(formatItem).join('\n\n---\n\n')}`
+          + sizeLimitLine(result)
           + `\n\n---\nTwingly 估算匹配总数: ${result.estimatedTotal}`,
       }],
     };
