@@ -33,8 +33,11 @@
   </p>
 </div>
 
+> [!WARNING]
+> **Service status: the public hosted service is temporarily unavailable.** The former public domain has expired, so there is currently no official live demo or hosted `/mcp` endpoint. A replacement domain may be introduced later and will be announced in this repository. The npm package, local stdio usage, and self-hosted deployments are unaffected.
+
 > [!IMPORTANT]
-> **v4.10.2** upgrades the MCP SDK to 1.30.0, resolves the dependency security finding, and adds regression coverage for MCP `2025-11-25` negotiation plus strict JSON-RPC-only stdout on stdio. The HTTP server also gains Host validation, proxy hardening, `DELETE /mcp` session cleanup, and package-derived version metadata. The existing 19 tool names, parameters, and multi-source routing behavior remain unchanged.
+> **v4.11.2** hardens Twingly news routing with input and request-size validation, safer provider fallback, dynamic tool schemas, and additional sensitive-header redaction. The existing 19 tool names and primary integration patterns remain unchanged.
 
 > [!NOTE]
 > To share model prompt/KV-cache routing and conversation lineage across Trae, Cursor, Claude Code, and Codex, optionally run the standalone [`finance-cache-gateway`](./docs/cache-gateway.md). It uses a separate process, port, and configuration; existing MCP tools, stdio, and `/mcp` behavior remain unchanged when it is not enabled.
@@ -43,7 +46,7 @@
 
 FinanceMCP has been integrated with [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) to form **FinNote**, an end-to-end system for financial research, AI-assisted analysis, and intelligent document management. The project participated in the Shanghai Collegiate Computer Application Ability Competition and received a Second Prize.
 
-🌐 **Live Demo: [https://finvestai.top/](https://finvestai.top/)**  
+🌐 **Live Demo: temporarily unavailable; the domain may change later**
 📝 **MarkiNote: [https://github.com/wink-wink-wink555/MarkiNote](https://github.com/wink-wink-wink555/MarkiNote)**
 
 Within the FinNote architecture, FinanceMCP acts as the core **financial data and MCP tool service layer**. Built with Node.js, Express, and the Model Context Protocol (MCP) SDK, it currently exposes 19 stable MCP tools that provide AI agents with access to stocks, funds, bonds, macroeconomic data, financial news, technical indicators, and multi-market financial data. It supports both local stdio and remote Streamable HTTP transports.
@@ -164,7 +167,9 @@ enforces the same scope.
 
 1. Sign in to the [Twingly Dashboard](https://app.twingly.com/), then copy the API key shown in the top-right corner and check the remaining quota.
 2. Set `TWINGLY_API_KEY` locally, or pass it in the dedicated `X-Twingly-Api-Key` header for remote MCP requests.
-3. Twingly stays behind `finance_news` and `hot_news_7x24`; failures, rate limits, and empty matches automatically fall through to the next configured provider.
+3. Twingly stays behind `finance_news` and `hot_news_7x24`; authentication failures, rate limits, service failures, and empty matches fall through to the next configured provider. Caller input validation failures do not fall through to a provider with different search semantics.
+4. `finance_news` treats whitespace-separated input as required terms by default. Use double quotes for an exact phrase, for example `"Federal Reserve" inflation`. Twingly accepts at most 250 combined terms and a 16 KiB UTF-8 request body; either limit is validated before the upstream request is sent.
+5. Twingly returns at most 250 documents per request. When Twingly is the current preferred news source, `tools/list` advertises 250 as the `hot_news_7x24.limit` schema maximum; other providers may advertise their own limits.
 
 ### Keyless providers
 
@@ -205,14 +210,14 @@ Local MCP configuration for Claude Desktop, Cursor, and similar clients:
 
 ### Streamable HTTP
 
-Hosted endpoint: [`https://finvestai.top/mcp`](https://finvestai.top/mcp)
+The public hosted endpoint is currently unavailable. Until a replacement domain is announced, use the local stdio configuration above or deploy your own Streamable HTTP service:
 
 ```json
 {
   "mcpServers": {
     "finance-mcp": {
       "type": "streamableHttp",
-      "url": "https://finvestai.top/mcp",
+      "url": "https://your-finance-mcp.example/mcp",
       "timeout": 600,
       "headers": {
         "X-Tushare-Token": "YOUR_TUSHARE_TOKEN",
@@ -246,10 +251,11 @@ All three credentials are optional and may be supplied independently. `Authoriza
 
 #### Run your own remote instance (optional)
 
-The hosted endpoint above stays the default. If you want a dedicated `/mcp` URL
-of your own, the root `Dockerfile` deploys as-is: it starts
+There is currently no official hosted endpoint. If you want a dedicated `/mcp`
+URL of your own, the root `Dockerfile` deploys as-is: it starts
 `node build/httpServer.js`, binds `0.0.0.0`, reads `PORT` from the environment,
-and answers `GET /health`.
+and answers `GET /health`. Any future official domain will be announced in this
+repository.
 
 [docs/deploy-dockhold.md](docs/deploy-dockhold.md) is a worked example on
 [Dockhold](https://dockhold.eu), one managed host among others and not an
@@ -341,7 +347,7 @@ If FinanceMCP is useful to you, consider leaving a ⭐. The repository's own Git
 </p>
 
 - FinanceMCP can serve as the financial-data backend for [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote).
-- Live endpoint: [finvestai.top](https://finvestai.top/)
+- Live endpoint: public hosting is temporarily unavailable; the domain may change later
 - MCP ecosystem listings: [Glama](https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server) · [Smithery](https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP) · [MCP Toplist](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
 - Video guide: [Complete FinanceMCP tutorial](https://www.bilibili.com/video/BV1qeNnzEEQi/)
 - Bugs and feature requests: [GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)

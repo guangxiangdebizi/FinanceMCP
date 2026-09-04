@@ -10,6 +10,12 @@ function names(tools) {
   return tools.map(tool => tool.name);
 }
 
+function namedTool(tools, name) {
+  const tool = tools.find(candidate => candidate.name === name);
+  assert.ok(tool, `Expected tools/list to include ${name}`);
+  return tool;
+}
+
 async function reservePort() {
   const server = http.createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -54,6 +60,9 @@ test('Twingly-only requests advertise the existing news tools', async () => {
     return getAvailableToolList();
   });
   assert.deepEqual(names(tools), ['finance_news', 'hot_news_7x24']);
+  const hotNews = namedTool(tools, 'hot_news_7x24');
+  assert.equal(hotNews.inputSchema.properties.limit.maximum, 250);
+  assert.match(hotNews.description, /当前请求将优先使用 Twingly/);
 });
 
 test('Tushare-only requests exclude Qveris-only and public-only tools', async () => {
@@ -66,6 +75,16 @@ test('Tushare-only requests exclude Qveris-only and public-only tools', async ()
   assert.ok(available.includes('fund_data'));
   assert.equal(available.includes('finance_news'), false);
   assert.equal(available.includes('current_timestamp'), false);
+  assert.equal(namedTool(tools, 'hot_news_7x24').inputSchema.properties.limit.maximum, 1500);
+});
+
+test('hot-news schema follows the first configured source in request priority', async () => {
+  const tools = await runWithRequestContext({
+    tushareToken: 'tushare-test-token',
+    twinglyApiKey: 'twingly-test-key',
+    sourcePriority: ['twingly', 'tushare', 'qveris', 'binance'],
+  }, async () => getAvailableToolList());
+  assert.equal(namedTool(tools, 'hot_news_7x24').inputSchema.properties.limit.maximum, 250);
 });
 
 test('both credentials expose the union while keeping local-only tools scoped', async () => {
@@ -122,8 +141,16 @@ test('HTTP tools/list applies the request credential scope', async () => {
     assert.equal(qveris.result.tools.length, 10);
     assert.equal(twingly.result.tools.length, 2);
     assert.deepEqual(names(twingly.result.tools), ['finance_news', 'hot_news_7x24']);
+    assert.equal(
+      namedTool(twingly.result.tools, 'hot_news_7x24').inputSchema.properties.limit.maximum,
+      250,
+    );
     assert.equal(tushare.result.tools.length, 17);
     assert.equal(tushare.result.tools.some(tool => tool.name === 'finance_news'), false);
+    assert.equal(
+      namedTool(tushare.result.tools, 'hot_news_7x24').inputSchema.properties.limit.maximum,
+      1500,
+    );
   } finally {
     child.kill();
     await Promise.race([

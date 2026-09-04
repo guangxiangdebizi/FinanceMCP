@@ -19,6 +19,7 @@ import { hotNews } from './tools/hotNews.js';
 import { futuresData } from './tools/futuresData.js';
 import { routeToolCall } from './utils/dataSourceRouter.js';
 import { isToolSourceAvailable, ToolSource } from './toolAvailability.js';
+import { getConfiguredCredentialSources, getSourcePriority } from './config.js';
 
 export const toolList = [
   { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
@@ -71,13 +72,45 @@ function toolSources(name: string): readonly ToolSource[] {
   return TOOL_SOURCES[name] ?? ['tushare'];
 }
 
+function primaryCredentialSource(name: string): ToolSource | undefined {
+  const configured = new Set<string>(getConfiguredCredentialSources());
+  const supported = toolSources(name);
+  return getSourcePriority().find(source => configured.has(source) && supported.includes(source));
+}
+
+function contextualizeTool(tool: (typeof toolList)[number]) {
+  if (tool.name !== 'hot_news_7x24' || primaryCredentialSource(tool.name) !== 'twingly') {
+    return tool;
+  }
+
+  const properties = tool.inputSchema.properties as Record<string, unknown> | undefined;
+  const limit = properties?.limit as Record<string, unknown> | undefined;
+  return {
+    ...tool,
+    description: `${tool.description}。当前请求将优先使用 Twingly，因此 limit 最大为250`,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...properties,
+        limit: {
+          ...limit,
+          description: '返回条数，默认100；当前首选数据源为 Twingly，最大250',
+          maximum: 250,
+        },
+      },
+    },
+  };
+}
+
 export function isToolAvailable(name: string): boolean {
   return toolList.some(tool => tool.name === name)
     && isToolSourceAvailable(toolSources(name));
 }
 
 export function getAvailableToolList() {
-  return toolList.filter(tool => isToolSourceAvailable(toolSources(tool.name)));
+  return toolList
+    .filter(tool => isToolSourceAvailable(toolSources(tool.name)))
+    .map(contextualizeTool);
 }
 
 export function assertToolAvailable(name: string): void {

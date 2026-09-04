@@ -63,7 +63,10 @@ test('HTTP lifecycle preserves proxy hardening and supports session deletion', a
     await waitForServer(port);
 
     const health = await fetch(`http://127.0.0.1:${port}/health`, {
-      headers: { 'X-Forwarded-For': '203.0.113.10' },
+      headers: {
+        'X-Forwarded-For': '203.0.113.10',
+        'X-Wusla-Signature': 'sha256=sensitive-test-signature',
+      },
     });
     assert.equal(health.status, 200);
     assert.equal(health.headers.has('x-powered-by'), false);
@@ -115,6 +118,8 @@ test('HTTP lifecycle preserves proxy hardening and supports session deletion', a
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     assert.match(stdout, /IP: 203\.0\.113\.10/);
+    assert.match(stdout, /"x-wusla-signature": "\[REDACTED\]"/);
+    assert.doesNotMatch(stdout, /sensitive-test-signature/);
   } finally {
     await stopServer(child);
   }

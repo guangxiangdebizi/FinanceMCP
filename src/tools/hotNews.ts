@@ -132,13 +132,13 @@ async function fetchTushareNewsBatch(maxTotal: number, logs?: string[]): Promise
 
 export const hotNews = {
   name: 'hot_news_7x24',
-  description: '7x24热点：从Tushare新闻接口获取最新的财经、政治、科技、体育、娱乐、军事、社会、国际等新闻',
+  description: '7x24热点：按当前数据源优先级获取最新新闻；Tushare 单次上限1500条，Twingly 单次上限250条',
   parameters: {
     type: 'object',
     properties: {
       limit: {
         type: 'number',
-        description: '返回条数，默认100，上限1500。接口按此数量向Tushare请求后再进行内容相似度去重',
+        description: '返回条数，默认100；Tushare 上限1500，Twingly 上限250，实际限制取决于当前首选数据源',
         minimum: 1,
         maximum: 1500
       }
@@ -195,5 +195,4 @@ export const hotNews = {
     }
   }
 };
-
 

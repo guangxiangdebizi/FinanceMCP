@@ -1,17 +1,17 @@
 # Deploy Your Own Remote FinanceMCP Instance
 
-FinanceMCP already serves a public Streamable HTTP endpoint at
-[`https://finvestai.top/mcp`](https://finvestai.top/mcp). That endpoint is the
-default and nothing here changes it.
+FinanceMCP's former public domain has expired, and the official hosted
+Streamable HTTP endpoint is temporarily unavailable. A replacement domain may
+be introduced later and will be announced in the repository.
 
-This guide covers the other case: you want a dedicated remote `/mcp` URL, on
+This guide covers self-hosting a dedicated remote `/mcp` URL, on
 your own account and your own credentials, without running a VPS or a Docker
 host. It uses [Dockhold](https://dockhold.eu) as a worked example.
 
 > [!NOTE]
 > Dockhold is one worked example of a managed host, not an affiliated or
-> preferred FinanceMCP platform. The hosted endpoint above and a generic
-> container deployment remain the primary paths. Everything under "What the repo
+> preferred FinanceMCP platform. Local stdio usage and generic container
+> deployment remain the primary paths. Everything under "What the repo
 > already provides" is platform-neutral and applies to any host that runs the
 > root `Dockerfile`, terminates HTTPS, and assigns a port.
 

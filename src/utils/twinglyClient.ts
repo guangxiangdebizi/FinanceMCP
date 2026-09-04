@@ -7,6 +7,7 @@ export type TwinglyClientErrorKind =
   | 'timeout'
   | 'unavailable'
   | 'invalid_response'
+  | 'invalid_input'
   | 'request'
   | 'empty';
 
@@ -67,6 +68,10 @@ type TwinglySearchResult = {
 
 type ToolContent = { type: 'text'; text: string };
 type ToolResult = { content: ToolContent[] };
+
+const TWINGLY_MAX_TERMS = 250;
+const TWINGLY_MAX_RESULTS = 250;
+const TWINGLY_MAX_REQUEST_BYTES = 16 * 1024;
 
 const HOT_NEWS_TERMS = [
   'financial market', 'stock market', 'central bank', 'interest rate', 'bond market',
@@ -149,6 +154,15 @@ async function postSearch(
     throw new TwinglyClientError('not_configured', '未配置 Twingly API key');
   }
 
+  const body = JSON.stringify(query);
+  const bodyBytes = Buffer.byteLength(body, 'utf8');
+  if (bodyBytes > TWINGLY_MAX_REQUEST_BYTES) {
+    throw new TwinglyClientError(
+      'invalid_input',
+      `Twingly News Search request body exceeds the 16 KiB UTF-8 limit; received ${bodyBytes} bytes`,
+    );
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TWINGLY_CONFIG.TIMEOUT);
   try {
@@ -161,7 +175,7 @@ async function postSearch(
           'Content-Type': 'application/json; charset=utf-8',
           Accept: 'application/json; charset=utf-8',
         },
-        body: JSON.stringify(query),
+        body,
         signal: controller.signal,
       });
     } catch (error) {
@@ -239,12 +253,12 @@ function queryTerms(query: string): string[] {
   pushCurrent();
 
   if (terms.length === 0) {
-    throw new TwinglyClientError('request', 'Twingly search query is empty');
+    throw new TwinglyClientError('invalid_input', 'Twingly search query is empty');
   }
-  if (terms.length > 250) {
+  if (terms.length > TWINGLY_MAX_TERMS) {
     throw new TwinglyClientError(
-      'request',
-      `Twingly News Search supports at most 250 combined terms; received ${terms.length}`,
+      'invalid_input',
+      `Twingly News Search supports at most ${TWINGLY_MAX_TERMS} combined terms; received ${terms.length}`,
     );
   }
   return terms;
@@ -257,7 +271,7 @@ function normalizeRequestedSize(size: number, fallback: number): number {
 export async function searchTwinglyFinanceNews(query: string, size = 20): Promise<TwinglySearchResult> {
   const now = new Date();
   const requestedSize = normalizeRequestedSize(size, 20);
-  const appliedSize = Math.min(250, requestedSize);
+  const appliedSize = Math.min(TWINGLY_MAX_RESULTS, requestedSize);
   return postSearch({
     all: queryTerms(query),
     size: appliedSize,
@@ -274,7 +288,7 @@ export async function searchTwinglyFinanceNews(query: string, size = 20): Promis
 export async function searchTwinglyHotNews(size = 100): Promise<TwinglySearchResult> {
   const now = new Date();
   const requestedSize = normalizeRequestedSize(size, 100);
-  const appliedSize = Math.min(250, requestedSize);
+  const appliedSize = Math.min(TWINGLY_MAX_RESULTS, requestedSize);
   return postSearch({
     any: HOT_NEWS_TERMS,
     size: appliedSize,
@@ -310,7 +324,7 @@ function formatItem(item: TwinglyNewsItem): string {
 function sizeLimitLine(result: TwinglySearchResult): string {
   if (result.requestedSize <= result.appliedSize) return '';
   return `\n\nTwingly result limit: ${result.appliedSize}`
-    + ` (requested: ${result.requestedSize}; API maximum: 250)`;
+    + ` (requested: ${result.requestedSize}; API maximum: ${TWINGLY_MAX_RESULTS})`;
 }
 
 export async function runTwinglyForExistingTool(
@@ -319,7 +333,7 @@ export async function runTwinglyForExistingTool(
 ): Promise<ToolResult> {
   if (name === 'finance_news') {
     const query = String(args.query ?? '').trim();
-    if (!query) throw new TwinglyClientError('request', 'finance_news 缺少 query');
+    if (!query) throw new TwinglyClientError('invalid_input', 'finance_news 缺少 query');
     const result = await searchTwinglyFinanceNews(query, 20);
     if (result.items.length === 0) {
       throw new TwinglyClientError('empty', 'Twingly 未找到匹配新闻');
@@ -351,5 +365,5 @@ export async function runTwinglyForExistingTool(
     };
   }
 
-  throw new TwinglyClientError('request', `Twingly 不支持工具 ${name}`);
+  throw new TwinglyClientError('invalid_input', `Twingly 不支持工具 ${name}`);
 }

@@ -135,6 +135,7 @@ function twinglyFailureReason(error: unknown): { outcome: AttemptOutcome; reason
     timeout: '超时',
     unavailable: '服务不可用',
     invalid_response: '响应无效',
+    invalid_input: '请求参数无效',
     request: '请求不可用',
     empty: '无匹配数据',
   };
@@ -179,6 +180,9 @@ export async function routeToolCall(
         attempts.push({ source, outcome: 'success' });
         return annotateResult(result, source, attempts);
       } catch (error) {
+        if (error instanceof TwinglyClientError && error.kind === 'invalid_input') {
+          throw error;
+        }
         attempts.push({ source, ...twinglyFailureReason(error) });
         continue;
       }

@@ -166,6 +166,35 @@ test('Twingly routes news, preserves 64-bit IDs, groups duplicates, and never re
     }));
     assert.equal(requests.at(-1).body.all.length, 30);
 
+    const requestCountBeforeInvalidInput = requests.length;
+    const nativeCallsBeforeInvalidInput = nativeCalls;
+    const tooManyTerms = Array.from({ length: 251 }, (_, index) => `term${index}`).join(' ');
+    await assert.rejects(
+      () => runWithRequestContext({
+        twinglyApiKey: 'request-scoped-twingly-key',
+        sourcePriority: ['twingly', 'qveris', 'tushare', 'binance'],
+      }, () => routeToolCall('finance_news', { query: tooManyTerms }, async () => {
+        nativeCalls += 1;
+        return { content: [{ type: 'text', text: '# public fallback' }] };
+      })),
+      /at most 250 combined terms; received 251/,
+    );
+    assert.equal(requests.length, requestCountBeforeInvalidInput);
+    assert.equal(nativeCalls, nativeCallsBeforeInvalidInput);
+
+    await assert.rejects(
+      () => runWithRequestContext({
+        twinglyApiKey: 'request-scoped-twingly-key',
+        sourcePriority: ['twingly', 'qveris', 'tushare', 'binance'],
+      }, () => routeToolCall('finance_news', { query: '财'.repeat(6_000) }, async () => {
+        nativeCalls += 1;
+        return { content: [{ type: 'text', text: '# public fallback' }] };
+      })),
+      /request body exceeds the 16 KiB UTF-8 limit; received \d+ bytes/,
+    );
+    assert.equal(requests.length, requestCountBeforeInvalidInput);
+    assert.equal(nativeCalls, nativeCallsBeforeInvalidInput);
+
     mode = 'empty';
     const emptyFallback = await runWithRequestContext({
       twinglyApiKey: 'request-scoped-twingly-key',

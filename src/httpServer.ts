@@ -17,6 +17,7 @@ const SENSITIVE_HEADER_NAMES = new Set([
   'x-tushare-token',
   'x-qveris-api-key',
   'x-twingly-api-key',
+  'x-wusla-signature',
   'x-cg-api-key',
   'x-cg-demo-api-key',
   'x-cg-pro-api-key',

@@ -33,8 +33,11 @@
   </p>
 </div>
 
+> [!WARNING]
+> **服务状态：公网托管服务暂时停止。** 原公网域名已经到期，当前不提供官方在线体验或托管 `/mcp` Endpoint；后续可能更换域名，恢复时间与新地址将通过本仓库公告。npm 包、本地 stdio 使用和自行部署不受影响。
+
 > [!IMPORTANT]
-> **v4.10.2** 将 MCP SDK 升级至 1.30.0，修复依赖安全问题，并为 stdio 增加 MCP `2025-11-25` 协商回归测试和严格的 stdout JSON-RPC 隔离；HTTP 服务同时补充 Host 校验、代理加固、`DELETE /mcp` 会话清理和统一版本元数据。现有 19 个 Tool 名称、参数及多数据源路由行为保持不变。
+> **v4.11.2** 加固 Twingly 新闻路由的参数校验、请求大小限制、数据源回退和动态 Tool Schema，并补充敏感请求头脱敏。现有 19 个 Tool 名称与主要调用方式保持不变。
 
 > [!NOTE]
 > 需要在 Trae、Cursor、Claude Code 和 Codex 之间共享模型 Prompt/KV-cache 路由及对话 lineage 时，可选启动独立的 [`finance-cache-gateway`](./docs/cache-gateway.md)。它使用单独的进程、端口和配置；不修改现有 MCP Tool、stdio 或 `/mcp` 接口，不启用时现有用法完全不变。
@@ -43,7 +46,7 @@
 
 FinanceMCP 已与 [MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 进行项目联动与融合，形成面向金融研究、AI 分析与智能文档管理场景的一体化系统 **FinNote**。该项目已参加上海市大学生计算机应用能力大赛并获得二等奖。
 
-🌐 **在线体验：[https://finvestai.top/](https://finvestai.top/)**  
+🌐 **在线体验：暂时停止，后续可能更换域名**
 📝 **MarkiNote：[https://github.com/wink-wink-wink555/MarkiNote](https://github.com/wink-wink-wink555/MarkiNote)**
 
 在 FinNote 的整体架构中，FinanceMCP 作为核心的 **金融数据与 MCP 工具服务层**，基于 Node.js、Express 与 Model Context Protocol（MCP）SDK 构建。目前通过 19 个稳定的 MCP 工具，为 AI Agent 提供股票、基金、债券、宏观经济、财经新闻、技术指标以及多市场行情等金融数据能力，并支持 stdio 与 Streamable HTTP 两种接入方式。
@@ -160,9 +163,9 @@ tushare,twingly,qveris,binance
 
 1. 登录 [Twingly Dashboard](https://app.twingly.com/)，从右上角复制 API Key 并确认剩余额度。
 2. 将 Key 写入本地 `TWINGLY_API_KEY`，或在远程 MCP 请求中通过独立的 `X-Twingly-Api-Key` 传递。
-3. Twingly 仅作为 `finance_news` 与 `hot_news_7x24` 的可选上游；调用失败、限流或无匹配结果时按配置自动回退。
-4. `finance_news` 默认把空格分隔的内容作为多个必含词；需要精确短语时使用双引号，例如 `"Federal Reserve" inflation`。Twingly 最多接受 250 个组合词项，超出时会明确报错而不会静默截断。
-5. Twingly 单次最多返回 250 条新闻；当 `hot_news_7x24.limit` 超过 250 时，结果会明确标注该上游限制。
+3. Twingly 仅作为 `finance_news` 与 `hot_news_7x24` 的可选上游；认证失败、限流、服务异常或无匹配结果时按配置自动回退。调用方参数校验失败不会回退到语义不同的新闻源。
+4. `finance_news` 默认把空格分隔的内容作为多个必含词；需要精确短语时使用双引号，例如 `"Federal Reserve" inflation`。Twingly 最多接受 250 个组合词项，请求正文最多 16 KiB（按 UTF-8 字节计）；超出任一限制都会在发送上游请求前明确报错。
+5. Twingly 单次最多返回 250 条新闻。`tools/list` 在 Twingly 是当前首选新闻源时会把 `hot_news_7x24.limit` 的 schema 上限设为 250；其他数据源可继续公布自身上限。
 
 ### 无 Key 数据源
 
@@ -203,14 +206,14 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 
 ### Streamable HTTP
 
-在线 Endpoint：[`https://finvestai.top/mcp`](https://finvestai.top/mcp)
+公网托管 Endpoint 当前暂停。新域名确认前，请使用上面的本地 stdio 配置，或自行部署 Streamable HTTP 服务：
 
 ```json
 {
   "mcpServers": {
     "finance-mcp": {
       "type": "streamableHttp",
-      "url": "https://finvestai.top/mcp",
+      "url": "https://your-finance-mcp.example/mcp",
       "timeout": 600,
       "headers": {
         "X-Tushare-Token": "YOUR_TUSHARE_TOKEN",
@@ -244,9 +247,9 @@ Claude Desktop、Cursor 等本地 MCP 客户端配置：
 
 #### 自建远程实例（可选）
 
-上面的在线 Endpoint 仍然是默认选择。如果你需要一个独立的 `/mcp` 地址，仓库根目录的
+当前不提供官方在线 Endpoint。如果你需要一个独立的 `/mcp` 地址，仓库根目录的
 `Dockerfile` 可以直接部署：启动命令是 `node build/httpServer.js`，监听 `0.0.0.0`，
-从环境变量读取 `PORT`，并提供 `GET /health`。
+从环境变量读取 `PORT`，并提供 `GET /health`。后续若启用新的官方域名，将在本仓库公告。
 
 [docs/deploy-dockhold.md](docs/deploy-dockhold.md) 以 [Dockhold](https://dockhold.eu)
 为例（只是其中一种托管方式，并非关联或推荐平台），说明 HTTPS 端点、`TUSHARE_TOKEN`
@@ -337,7 +340,7 @@ npm run start:http    # http://127.0.0.1:3000/mcp
 </p>
 
 - FinanceMCP 可作为 [FinNote / MarkiNote](https://github.com/wink-wink-wink555/MarkiNote) 的金融数据后端。
-- 在线体验：[finvestai.top](https://finvestai.top/)
+- 在线体验：公网托管服务暂时停止，后续可能更换域名
 - MCP 生态收录：[Glama](https://glama.ai/mcp/servers/@guangxiangdebizi/my-mcp-server) · [Smithery](https://smithery.ai/servers/@guangxiangdebizi/FinanceMCP) · [MCP Toplist](https://mcptoplist.com/server/pulsemcp%2Fguangxiangdebizi-finance-market-data)
 - 视频教程：[FinanceMCP 完整使用指南](https://www.bilibili.com/video/BV1qeNnzEEQi/)
 - Bug 与功能建议：[GitHub Issues](https://github.com/guangxiangdebizi/FinanceMCP/issues)
