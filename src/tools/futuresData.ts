@@ -21,7 +21,7 @@ export const futuresData = {
       },
       broker: {
         type: "string",
-        description: "期货公司/席位名称，如'中信期货'。不填则返回所有席位"
+        description: "期货公司/席位名称，如'示例期货公司'（虚构示例，查询时请填写实际名称）。不填则返回所有席位"
       }
     },
     required: ["trade_date"]
