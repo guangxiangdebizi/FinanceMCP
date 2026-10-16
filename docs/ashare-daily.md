@@ -100,14 +100,27 @@ export ASHARE_DATA_DIR=$HOME/.local/share/finance-mcp-ashare
 
 node build/ashare/cli.js sync --start 20240102 --end 20261016    # 历史回填（按交易日批量）
 node build/ashare/cli.js evidence                                # 信号历史检验
-node build/ashare/cli.js replay --start 20260701 --end 20261015  # 历史日期重放（逐日股票池+报告）
-node build/ashare/cli.js daily                                   # 定时任务入口（今天）
-node build/ashare/cli.js report --date 20261016                  # 仅用本地缓存生成指定日报告
-node build/ashare/cli.js pool-eval --start 20260701 --end 20261009 # 股票池历史实际表现（研究记录）
+node build/ashare/cli.js replay --start 20260701 --end 20261015  # 历史日期重放（写入研究库 research.sqlite，不改正式数据）
+node build/ashare/cli.js daily                                   # 定时任务入口（今天；每次都重新查询当日行情）
+node build/ashare/cli.js report --date 20261016 [--research]     # 仅用本地缓存生成指定日报告；早于正式最新日期时自动进入研究库
+node build/ashare/cli.js pool-eval --start 20260701 --end 20261009 [--research] # 股票池实际表现（严格截至 end）
+node build/ashare/cli.js acceptance --days 3 [--allow-degraded]  # 连续真实交易日验收
 node build/ashare/cli.js status                                  # 数据完整性状态
 node build/ashare/cli.js quality --date 20261016
 node build/ashare/cli.js migrate                                 # 旧版缓存（按日期主键）一次性迁移
 ```
+
+正式库与研究库：
+- `ashare.sqlite`（正式库）：行情缓存 + 定时流水线的股票池、评分、报告。只有 `daily` 与不早于正式最新日期的 `report` 写入其中；
+  `daily --date` 早于正式最新股票池日期时直接拒绝，避免改写后续日期的连续性。
+- `research.sqlite`（研究库，`ASHARE_RESEARCH_DB_PATH` 可改）：`replay`、回溯日期的 `report` 与 `pool-eval --research` 使用。
+  它只保存自己的股票池/评分/质量检查/报告表，行情与信号证据通过只读 `ATTACH` 读取正式库；报告文件写在 `research/reports/`，
+  不会覆盖正式 `reports/<日期>/latest.json`。
+- MCP 工具以只读连接打开正式库，读取每个交易日的报告时按“交易日 → 正式/手动优先于重放 → 生成时间”排序。
+
+同日重复同步：`daily` 对 as-of 交易日总是重新请求 `daily/daily_basic/adj_factor/stk_limit` 与核心指数；返回完整（≥ 前一交易日
+和已存条数的 97%）时按交易日整体替换（修订值覆盖、撤回的行删除），明显偏短的返回只合并、不缩减已有数据。每次请求记入
+`sync_history`（`sync_log` 仅保留最新状态），验收据此确认 21:10 的运行确实复查了当日行情。
 
 ## 部署（本 VPS）
 
@@ -138,7 +151,9 @@ handle /ashare/mcp* {
 - Server URL：`https://share.shijingchang.cn/ashare/mcp`
 - 暴露工具：`ashare_data_status`、`ashare_daily_report`、`ashare_watchlist`、`ashare_stock_analysis`、`ashare_sector_rank`（均 `readOnlyHint`）
 - 定时任务建议在北京时间 21:30 之后运行（两次数据更新之后）；更早调用当日报告会得到 `PENDING`/`NOT_READY`，这是预期行为。
-- 匿名入口的安全边界：只读本地缓存，不接受请求中的数据源凭证，不触发外部 API，每 IP 每分钟 30 次；如需收紧，设置 `MCP_AUTH_TOKEN`（ChatGPT 侧需改用 OAuth，当前不支持静态 Bearer）。
+- 匿名入口的安全边界：工具只读（SQLite 只读连接），只访问本地 A 股缓存，不接受请求中的数据源凭证，不触发 Tushare 等外部 API；
+  每 IP 每分钟 30 次（`MCP_RATE_LIMIT`）、请求体 ≤ 64 KB（`MCP_BODY_LIMIT`）、会话表 ≤ 1000（`MCP_MAX_SESSIONS`）。
+  匿名开放的实际风险见 `docs/ashare-acceptance.md` §9.5。如需收紧，设置 `MCP_AUTH_TOKEN`（ChatGPT 侧需改用 OAuth，当前不支持静态 Bearer）。
 
 ## 验收记录
 
@@ -148,5 +163,8 @@ handle /ashare/mcp* {
 
 - 行业分类与股票名称（ST 判断）使用当前 `stock_basic` 口径，历史重放存在行业归属与 ST 状态偏差。
 - `fina_indicator_vip` 同一公告日的更正记录（`update_flag=1`）覆盖原记录，真实更正发布时间不可得。
-- 证据检验为本地缓存样本内统计，未计交易成本、滑点、退市；仅用于区分研究指标与有证据的规则，不是回测框架。
+- 证据检验为本地缓存样本内统计，未计交易成本、滑点、退市，不是回测框架。`evidence_supported` 只表示样本内方向性证据：
+  相邻事件日的持有期重叠（t 值偏高），9 信号 × 3 持有期 × 4 状态分组未做多重检验校正，不能称为策略有效性。
+  报告只引用证据窗口截至报告日期之前的统计；更晚计算的证据在历史重放中显示为“当时不可得”。
+- 复权因子缺失的股票不进入评分、不输出技术信号（风险提示中注明）。
 - 评分权重为第一版启发式规则，未做收益验证。

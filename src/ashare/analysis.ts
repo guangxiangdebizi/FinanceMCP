@@ -13,7 +13,8 @@ export const SCORE_VERSION = 'score-1.0.0';
  * a return forecast.
  *
  * Eligibility: not ST/*ST/退市整理, listed ≥ 250 calendar days, traded on the
- * as-of day, ≥ 130 bars of history, 20-day average turnover ≥ 1 亿元,
+ * as-of day, ≥ 130 bars of history with a complete adjustment factor
+ * series (otherwise the stock gets no signals either), 20-day average turnover ≥ 1 亿元,
  * circulating market value ≥ 50 亿元, and not loss-making in the latest
  * financial report announced on or before the as-of day.
  *
@@ -123,7 +124,9 @@ export function scanMarket(db: DatabaseSync, date: string): MarketScan {
     const info = basic.get(code) ?? { name: code, industry: '未知', list_date: '' };
     const db0 = dailyBasic.get(code);
     const state = technicalState(bars, x, i);
-    const signals = detectSignals(bars, x, i);
+    // Signals on a series that mixes adjusted and raw prices would look precise but be wrong.
+    const adjIncomplete = (bars.adjMissing ?? 0) > 0;
+    const signals = adjIncomplete ? [] : detectSignals(bars, x, i);
     signals.forEach(s => { signalCounts[s] = (signalCounts[s] ?? 0) + 1; });
     const f = fundamentals.get(code);
     const industry = info.industry || '未知';
@@ -152,12 +155,14 @@ export function scanMarket(db: DatabaseSync, date: string): MarketScan {
       risk_flags: [...risk.flags],
       eligible: true,
     };
+    if (adjIncomplete) row.risk_flags.push(`复权因子缺失 ${bars.adjMissing} 天，技术指标不可靠，未生成信号`);
     if (state.rsi14 > 80) row.risk_flags.push(`RSI14 过热 (${state.rsi14.toFixed(0)})`);
     if (state.atr_pct > 0.07) row.risk_flags.push(`波动率高 (ATR/价格 ${(state.atr_pct * 100).toFixed(1)}%)`);
     const reason =
       isSt(info.name) ? 'ST/退市风险'
       : !info.list_date || info.list_date > minListDate ? '上市不足 250 天'
       : bars.dates.length < SCORE_RULES.min_bars ? '历史数据不足'
+      : adjIncomplete ? '复权因子缺失，价格序列不连续'
       : !(row.amount20_yi >= SCORE_RULES.min_amount20_yi) ? '20 日均成交额 < 1 亿'
       : row.circ_mv_yi === null || row.circ_mv_yi < SCORE_RULES.min_circ_mv_yi ? '流通市值 < 50 亿或缺失'
       : risk.exclude ? '最近已披露财报亏损'

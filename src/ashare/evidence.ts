@@ -21,11 +21,24 @@ import { inTransaction } from './db.js';
  *   contradicted: t ≥ 2 against the signal's direction;
  *   research_only: everything else.
  * The sample is in-sample history of the local cache; costs, slippage and
- * delisting are not modelled.
+ * delisting are not modelled. `evidence_supported` therefore means in-sample
+ * directional evidence only: consecutive event days have overlapping return
+ * windows (the t-stat is overstated) and 9 signals × 3 horizons × 4 regime
+ * groups are tested without a multiple-testing correction.
  */
 export const EVIDENCE_VERSION = 'evi-1.0.0';
 export const HORIZONS = [5, 10, 20];
 const PRIMARY_HORIZON = 10;
+
+export const EVIDENCE_SCOPE = {
+  meaning: 'evidence_supported 仅表示样本内方向性证据：在本地缓存的历史样本中，该信号 10 日超额收益方向与信号方向一致且按日期聚类 t ≥ 2；不是生产策略有效性，也不代表未来盈利概率。',
+  limitations: [
+    '样本内统计：分类规则与检验使用同一段历史，未做样本外检验',
+    '收益窗口重叠：相邻事件日的 10 日持有期大量重叠，按日聚类的 t 值仍会高估显著性',
+    '多重检验：9 个信号 × 3 个持有期 × 4 个市场状态分组同时检验，未做多重比较校正',
+    '未计交易成本、滑点、停牌与退市',
+  ],
+};
 
 export interface EvidenceRow {
   signal: string;
@@ -68,6 +81,8 @@ export function computeEvidence(db: DatabaseSync, start: string, end: string): E
 
   forEachStockBars(db, start, end, (code, b) => {
     if (/ST|退/.test(names.get(code) ?? '')) return;
+    // Without a complete adjustment factor history the price series mixes adjusted and raw prices.
+    if (b.adjMissing) return;
     const x = computeIndicators(b);
     const n = b.dates.length;
     for (let i = 130; i < n - 1; i++) {
@@ -140,16 +155,34 @@ export function computeEvidence(db: DatabaseSync, start: string, end: string): E
   return { version: EVIDENCE_VERSION, signal_version: SIGNAL_VERSION, start, end, computed_at: computedAt, events: events.length, rows, verdicts };
 }
 
-/** Load the stored evidence and classify signals without recomputing. */
-export function loadVerdicts(db: DatabaseSync): { verdicts: Map<string, SignalVerdict>; meta: { start?: string; end?: string; computed_at?: string } } {
-  const rows = db.prepare('SELECT * FROM signal_evidence').all() as any[];
-  const meta = rows[0] ? { start: rows[0].start_date, end: rows[0].end_date, computed_at: rows[0].computed_at } : {};
+export interface EvidenceMeta {
+  start?: string;
+  end?: string;
+  computed_at?: string;
+  /** False when the stored evidence window ends after the as-of date and was therefore not known then. */
+  usable_as_of?: boolean;
+  as_of?: string;
+}
+
+/**
+ * Load the stored evidence and classify signals without recomputing. With
+ * `asOf`, evidence whose window ends after that date is not used: a replayed
+ * or back-dated report must not present later statistics as known at the time.
+ */
+export function loadVerdicts(db: DatabaseSync, asOf?: string): { verdicts: Map<string, SignalVerdict>; meta: EvidenceMeta } {
+  const stored = db.prepare('SELECT * FROM signal_evidence').all() as any[];
+  const first = stored[0];
+  const usable = !asOf || !first || String(first.end_date) <= asOf;
+  const meta: EvidenceMeta = first ? { start: first.start_date, end: first.end_date, computed_at: first.computed_at } : {};
+  if (asOf) Object.assign(meta, { as_of: asOf, usable_as_of: usable });
+  const rows = usable ? stored : [];
+  const missingBasis = usable ? '尚无历史检验结果' : `已存证据窗口截至 ${first.end_date}，晚于 ${asOf}，该日期当时不可得，不予引用`;
   const verdicts = new Map<string, SignalVerdict>();
   for (const def of SIGNAL_DEFINITIONS) {
     const sign = def.direction === 'bullish' ? 1 : -1;
     const all = rows.find(r => r.signal === def.id && r.regime === 'all' && r.horizon === PRIMARY_HORIZON);
     if (!all) {
-      verdicts.set(def.id, { signal: def.id, name: def.name, direction: def.direction, classification: 'research_only', basis: '尚无历史检验结果' });
+      verdicts.set(def.id, { signal: def.id, name: def.name, direction: def.direction, classification: 'research_only', basis: missingBasis });
       continue;
     }
     const against = rows.filter(r => r.signal === def.id && r.regime !== 'all' && r.horizon === PRIMARY_HORIZON && r.days >= 20 && sign * r.t_stat <= -1).map(r => r.regime);
@@ -158,7 +191,7 @@ export function loadVerdicts(db: DatabaseSync): { verdicts: Map<string, SignalVe
     else if (sign * all.t_stat <= -2) classification = 'contradicted';
     verdicts.set(def.id, {
       signal: def.id, name: def.name, direction: def.direction, classification,
-      basis: `${PRIMARY_HORIZON}日超额 ${all.mean_excess}%，t=${all.t_stat}，事件 ${all.n} 个/${all.days} 天（${all.start_date}~${all.end_date}）` +
+      basis: `样本内 ${PRIMARY_HORIZON}日超额 ${all.mean_excess}%，t=${all.t_stat}（窗口重叠、未做多重检验校正），事件 ${all.n} 个/${all.days} 天（${all.start_date}~${all.end_date}）` +
         (against.length ? `；在 ${against.join(',')} 状态下方向相反` : ''),
     });
   }
@@ -170,9 +203,13 @@ export function loadVerdicts(db: DatabaseSync): { verdicts: Map<string, SignalVe
  * a backtest): for each watchlist date t, members' return from the open of
  * t+1 to the close of t+h versus the equal-weight return of every stock
  * trading on both days. Prices are adjusted with adj_factor.
+ *
+ * Strictly as of `end`: only dates whose whole window t+1..t+h lies on or
+ * before `end` are counted, and no price after `end` is read, so data that
+ * arrives later cannot change an earlier report's figures.
  */
-export function evaluateWatchlist(db: DatabaseSync, start: string, end: string, horizon = 5) {
-  const days = (db.prepare('SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date >= ? ORDER BY cal_date').all(start) as any[]).map(r => r.cal_date as string);
+export function evaluateWatchlist(db: DatabaseSync, start: string, end: string, horizon = 5, minUniverse = 1000) {
+  const days = (db.prepare('SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date').all(start, end) as any[]).map(r => r.cal_date as string);
   const wlDates = (db.prepare('SELECT DISTINCT trade_date FROM watchlist WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date').all(start, end) as any[]).map(r => r.trade_date as string);
   const ret = db.prepare(`
     SELECT d1.ts_code, (dh.close * ah.adj_factor) / (d1.open * a1.adj_factor) - 1 AS r
@@ -187,7 +224,7 @@ export function evaluateWatchlist(db: DatabaseSync, start: string, end: string, 
     const i = days.indexOf(t);
     if (i < 0 || i + horizon >= days.length) continue;
     const rows = ret.all(days[i + horizon], days[i + 1]) as any[];
-    if (rows.length < 1000) continue;
+    if (rows.length < minUniverse) continue;
     const byCode = new Map(rows.map(r => [r.ts_code, r.r as number]));
     const pool = (members.all(t) as any[]).map(m => byCode.get(m.ts_code)).filter((v): v is number => Number.isFinite(v));
     if (!pool.length) continue;
@@ -202,6 +239,8 @@ export function evaluateWatchlist(db: DatabaseSync, start: string, end: string, 
   const pct = (v: number) => Math.round(v * 1e4) / 100;
   return {
     horizon,
+    as_of: end,
+    pending_dates: wlDates.length - perDate.length,
     dates: perDate.length,
     mean_excess_pct: pct(avg),
     hit_rate: ex.length ? Math.round((ex.filter(v => v > 0).length / ex.length) * 1000) / 1000 : null,

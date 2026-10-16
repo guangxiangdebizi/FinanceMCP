@@ -10,6 +10,7 @@ import { SERVER_VERSION } from "./version.js";
 
 interface Session { id: string; createdAt: Date; lastActivity: Date }
 const sessions = new Map<string, Session>();
+const MAX_SESSIONS = Number(process.env.MCP_MAX_SESSIONS || 1000);
 
 const SENSITIVE_HEADER_NAMES = new Set([
   'authorization',
@@ -224,7 +225,8 @@ app.use(cors({
   ],
   exposedHeaders: ['Content-Type','Mcp-Session-Id']
 }));
-app.use(express.json({ limit: '10mb' }));
+// Tool calls are small JSON-RPC messages; deployments can lower the cap (e.g. MCP_BODY_LIMIT=64kb).
+app.use(express.json({ limit: process.env.MCP_BODY_LIMIT?.trim() || '10mb' }));
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'healthy', transport: 'streamable-http', activeSessions: sessions.size });
@@ -304,6 +306,11 @@ app.post('/mcp', async (req: Request, res: Response) => {
   console.log(`🔧 [MCP-${method}] Request ID: ${body.id}`);
   
   if (method === 'initialize') {
+    // Sessions are only bookkeeping, but anonymous clients can create them freely: keep the map bounded.
+    if (sessions.size >= MAX_SESSIONS) {
+      const oldest = [...sessions.values()].sort((a, b) => a.lastActivity.getTime() - b.lastActivity.getTime());
+      for (const old of oldest.slice(0, sessions.size - MAX_SESSIONS + 1)) sessions.delete(old.id);
+    }
     const newId = randomUUID();
     sessions.set(newId, { id: newId, createdAt: new Date(), lastActivity: new Date() });
     res.setHeader('Mcp-Session-Id', newId);

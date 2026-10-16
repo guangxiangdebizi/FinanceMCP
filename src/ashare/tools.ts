@@ -62,8 +62,8 @@ function dataStatus(args: Record<string, any>): ToolResult {
   const fina = d.prepare('SELECT key period, rows, synced_at FROM sync_log WHERE dataset = \'fina_indicator\' ORDER BY key DESC LIMIT 4').all();
   const lastSync = d.prepare('SELECT dataset, MAX(synced_at) synced_at FROM sync_log GROUP BY dataset ORDER BY dataset').all() as any[];
   const report = latestReportMeta(d, date);
-  const latestReady = latestReportMeta(d, undefined, true);
-  const evidence = loadVerdicts(d).meta;
+  const latestReady = latestReportMeta(d, undefined, true, date);
+  const evidence = loadVerdicts(d, date).meta;
   const status = {
     as_of_trade_date: date,
     note,
@@ -145,6 +145,7 @@ function reportMarkdown(r: any): string {
     ...w.members.map((s: any) => `| ${s.ts_code} | ${s.name} | ${s.industry} | ${fmt(s.close)} | ${fmt(s.pct_chg)} | ${fmt(s.score, 1)} | ${s.rank} | ${s.status === 'new' ? '新增' : '保留'} | ${s.technical.trend} | ${fmt(s.technical.rsi14, 0)} | ${s.signals_today.map((g: any) => g.name).join('/') || '-'} | ${s.risks.join('；') || '-'} |`),
     '',
     '## 信号（全市场触发数）与证据分类',
+    `> 证据分类均为样本内统计：evidence_supported 仅表示样本内方向性证据（收益窗口重叠、多重检验未校正），不代表策略有效或未来收益。`,
     ...r.signals.market_summary.map((g: any) => `- **${g.name}** ×${g.market_count}｜${g.evidence}（${g.evidence_basis}）｜触发：${g.trigger}｜失效：${g.invalidation}｜风险：${g.risk}`),
     '',
     `## 风险`,
@@ -223,12 +224,16 @@ function stockAnalysis(args: Record<string, any>): ToolResult {
     const last = (k: number) => b.dates.slice(-k);
     const series = (arr: number[], k = 10, s = 1) => arr.slice(-k).map(v => (Number.isFinite(v) ? Math.round(v * s * 1000) / 1000 : null));
     const recentSignals: any[] = [];
-    for (let k = Math.max(0, i - 19); k <= i; k++) {
+    const adjMissing = b.adjMissing ?? 0;
+    for (let k = Math.max(0, i - 19); k <= i && !adjMissing; k++) {
       for (const id of detectSignals(b, x, k)) recentSignals.push({ trade_date: b.dates[k], id, name: SIGNAL_BY_ID.get(id)!.name });
     }
     result = {
       last_bar: b.dates[i],
       stale: b.dates[i] !== date,
+      adjustment_warning: adjMissing
+        ? `区间内 ${adjMissing} 根K线缺少复权因子，复权价格序列不连续：技术指标仅供参考，不输出信号`
+        : undefined,
       state: technicalState(b, x, i),
       latest: {
         close: b.rawClose[i],
@@ -250,7 +255,7 @@ function stockAnalysis(args: Record<string, any>): ToolResult {
   }, [code]);
   if (!result) return text(`${code} 在 ${date} 前无本地行情数据`);
 
-  const verdicts = loadVerdicts(d).verdicts;
+  const verdicts = loadVerdicts(d, date).verdicts;
   const f = fundamentalsAsOf(d, date).get(code);
   const basic = d.prepare('SELECT * FROM daily_basic WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 1').get(code, date) as any;
   const score = d.prepare('SELECT trade_date, score, rank, detail FROM stock_score WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 1').get(code, date) as any;

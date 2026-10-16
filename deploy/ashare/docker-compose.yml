@@ -25,6 +25,9 @@ services:
       MCP_ACCEPT_REQUEST_CREDENTIALS: "0"
       MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-share.shijingchang.cn,localhost,127.0.0.1}
       MCP_RATE_LIMIT: ${MCP_RATE_LIMIT:-30}
+      # Anonymous endpoint: tool calls are tiny, so reject large bodies and bound the session map.
+      MCP_BODY_LIMIT: ${MCP_BODY_LIMIT:-64kb}
+      MCP_MAX_SESSIONS: ${MCP_MAX_SESSIONS:-1000}
       # Caddy reaches the container through the Docker bridge; trust it for X-Forwarded-For.
       MCP_TRUST_PROXY: loopback,uniquelocal
     volumes:

@@ -88,6 +88,8 @@ export interface Bars {
   rawOpen: number[];
   rawClose: number[];
   upLimit: number[];
+  /** Bars without an adjustment factor; their prices are not on the same basis as the rest. */
+  adjMissing?: number;
 }
 
 export interface IndicatorSet {

@@ -13,7 +13,28 @@ mkdir -p "$LOG_DIR"
 STAMP="$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)"
 OUT="$LOG_DIR/daily-$STAMP.json"
 ERR="$LOG_DIR/daily-$STAMP.log"
-if docker exec finance-mcp-ashare node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"; then
+CONTAINER="${ASHARE_CONTAINER:-finance-mcp-ashare}"
+
+# After a reboot the timer (Persistent=true) can fire before the docker daemon or the
+# container is up; the user manager cannot order itself after the system docker.service.
+# Wait a bounded time, then fail loudly so the unit is marked failed in journald.
+WAIT="${ASHARE_DOCKER_WAIT_SECONDS:-300}"
+waited=0
+until state="$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER" 2>/dev/null)" \
+  && { [ "$state" = "running/healthy" ] || [ "$state" = "running/none" ]; }; do
+  if [ "$waited" -ge "$WAIT" ]; then
+    if ! docker info >/dev/null 2>&1; then
+      echo "finance-ashare daily FAILED: docker daemon not reachable after ${WAIT}s" | tee "$ERR" >&2
+    else
+      echo "finance-ashare daily FAILED: container $CONTAINER not ready after ${WAIT}s (state: ${state:-missing})" | tee "$ERR" >&2
+    fi
+    exit 75
+  fi
+  sleep 10
+  waited=$((waited + 10))
+done
+[ "$waited" -gt 0 ] && echo "waited ${waited}s for $CONTAINER ($state)"
+if docker exec "$CONTAINER" node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"; then
   echo "finance-ashare daily ok: $OUT"
   grep -E '"(report_id|status|trade_date|skipped)"' "$OUT" | head -5
 else

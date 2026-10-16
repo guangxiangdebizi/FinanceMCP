@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { fetchAll } from './fetch.js';
-import { logSync, upsertRows } from './db.js';
+import { logSync, replaceDate, upsertRows } from './db.js';
 
 export const CORE_INDICES: Record<string, string> = {
   '000001.SH': '上证指数',
@@ -103,31 +103,64 @@ function countFor(db: DatabaseSync, table: string, date: string): number {
   return (db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE trade_date = ?`).get(date) as any).n;
 }
 
+export type SyncMode = 'skip_ok' | 'refresh';
+
+export interface DatasetSync {
+  rows: number;
+  /** Whether Tushare was actually queried in this run. */
+  fetched: boolean;
+  status?: string;
+  /** replaced = the date's rows were swapped for the new snapshot; merged = upserted, nothing deleted. */
+  write?: 'replaced' | 'merged';
+}
+
 /**
  * Download one whole-market trading day per dataset (one paginated request
- * per dataset, never per stock). A dataset is marked `partial` when its row
- * count falls well short of the previous day so the next run fetches again.
+ * per dataset, never per stock). A dataset is `partial` when its row count
+ * falls well short of the previous day, so a later run fetches it again.
+ *
+ * `refresh` re-queries Tushare even when the date is already `ok`: the daily
+ * pipeline uses it for the as-of day, whose data can still be completed or
+ * revised between the 18:40 and 21:10 runs. A complete response (≥ 97% of the
+ * previous day and of what is stored) replaces the date as a whole: revised
+ * values win and withdrawn rows disappear. A materially shorter response is
+ * only merged, so a truncated answer never shrinks good data.
  */
-export async function syncTradeDate(db: DatabaseSync, date: string, force = false): Promise<Record<string, number>> {
-  const result: Record<string, number> = {};
+export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMode | boolean = 'skip_ok'): Promise<Record<string, DatasetSync>> {
+  const refresh = mode === true || mode === 'refresh';
+  const result: Record<string, DatasetSync> = {};
   const prev = previousTradeDay(db, date);
   for (const ds of DATED_DATASETS) {
-    if (!force && syncedOk(db, ds.table, date)) {
-      result[ds.table] = countFor(db, ds.table, date);
+    if (!refresh && syncedOk(db, ds.table, date)) {
+      result[ds.table] = { rows: countFor(db, ds.table, date), fetched: false };
       continue;
     }
     const rows = await fetchAll(ds.api, { trade_date: date }, ds.fields, 6000);
-    upsertRows(db, ds.table, ds.fields.split(','), rows);
+    const before = countFor(db, ds.table, date);
     const prevCount = prev ? countFor(db, ds.table, prev) : 0;
     const complete = rows.length > 0 && (prevCount === 0 || rows.length >= prevCount * 0.97);
-    logSync(db, ds.table, date, rows.length, complete ? 'ok' : (rows.length ? 'partial' : 'empty'),
-      prevCount ? `prev ${prev}=${prevCount}` : '');
-    result[ds.table] = rows.length;
+    const columns = ds.fields.split(',');
+    // Replace unless the answer is materially smaller than what is stored (a truncated response);
+    // a few withdrawn rows must still disappear, so this is not a strict `>= before`.
+    const write = complete && rows.length >= before * 0.97 ? 'replaced' : 'merged';
+    if (write === 'replaced') replaceDate(db, ds.table, columns, date, rows);
+    else upsertRows(db, ds.table, columns, rows);
+    const after = countFor(db, ds.table, date);
+    // Status describes what is stored: a short refresh response over complete data stays `ok`.
+    const status = after > 0 && (prevCount === 0 || after >= prevCount * 0.97) ? 'ok' : after ? 'partial' : 'empty';
+    logSync(db, ds.table, date, rows.length, status,
+      [refresh ? 'refresh' : '', `${write} ${before}->${after}`, prevCount ? `prev ${prev}=${prevCount}` : ''].filter(Boolean).join('; '));
+    result[ds.table] = { rows: after, fetched: true, status, write };
   }
   return result;
 }
 
-export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart: string): Promise<Record<string, number>> {
+/**
+ * Core index bars. Missing history is filled in both directions; bars from
+ * `refreshFrom` to `end` are fetched again even when already stored, so the
+ * as-of day's index close is re-checked like the stock data.
+ */
+export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart: string, refreshFrom?: string): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
   const fields = 'ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount';
   for (const code of Object.keys(CORE_INDICES)) {
@@ -137,7 +170,8 @@ export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart
     if (!span?.first) ranges.push([defaultStart, end]);
     else {
       if (span.first > defaultStart) ranges.push([defaultStart, addDays(span.first, -1)]);
-      if (span.last < end) ranges.push([addDays(span.last, 1), end]);
+      const from = refreshFrom && refreshFrom <= span.last ? refreshFrom : addDays(span.last, 1);
+      if (from <= end) ranges.push([from, end]);
     }
     let count = 0;
     for (const [start, stop] of ranges) {

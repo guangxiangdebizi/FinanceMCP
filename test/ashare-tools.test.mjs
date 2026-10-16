@@ -167,3 +167,16 @@ test('ping is answered so MCP clients can keep sessions alive', async () => {
     await server.stop();
   }
 });
+
+test('MCP_BODY_LIMIT rejects oversized requests and the session map stays bounded', async () => {
+  const server = await startServer({ MCP_BODY_LIMIT: '2kb', MCP_MAX_SESSIONS: '3' });
+  try {
+    const big = await server.rpc('tools/list', { padding: 'x'.repeat(5000) });
+    assert.equal(big.status, 413);
+    for (let i = 0; i < 6; i++) assert.equal((await server.rpc('initialize', {})).status, 200);
+    const health = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
+    assert.ok(health.activeSessions <= 3, `sessions ${health.activeSessions}`);
+  } finally {
+    await server.stop();
+  }
+});

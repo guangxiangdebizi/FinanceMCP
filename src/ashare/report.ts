@@ -1,15 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
-import { ashareDataDir } from './db.js';
+import { join } from 'node:path';
+import { ashareDataDir, isResearchDb, resolveReportPath } from './db.js';
 import { checkQuality, QualityReport, recentTradeDays } from './ingest.js';
 import { scanMarket, SCORE_RULES, SCORE_VERSION, SectorRow, StockRow } from './analysis.js';
 import { indexPerformance, marketBreadth, Regime, REGIME_LABELS, regimeSeries } from './market.js';
 import { INDICATOR_VERSION } from './indicators.js';
 import { SIGNAL_BY_ID, SIGNAL_VERSION } from './signals.js';
 import { updateWatchlist, WATCHLIST_RULES, WATCHLIST_VERSION } from './watchlist.js';
-import { EVIDENCE_VERSION, evaluateWatchlist, loadVerdicts, SignalVerdict } from './evidence.js';
+import { EVIDENCE_SCOPE, EVIDENCE_VERSION, evaluateWatchlist, loadVerdicts, SignalVerdict } from './evidence.js';
+
+export { resolveReportPath };
 
 export const REPORT_SCHEMA_VERSION = 'ashare-report-1.0.0';
 
@@ -38,6 +40,7 @@ export interface ReportMeta {
   status: string;
   generated_at: string;
   path: string;
+  run_mode?: string | null;
 }
 
 function signalView(id: string, verdicts: Map<string, SignalVerdict>) {
@@ -136,28 +139,35 @@ function versions() {
 }
 
 function persist(db: DatabaseSync, report: any): ReportMeta {
-  const dir = join(ashareDataDir(), 'reports', report.as_of_trade_date);
+  // Research reports (replay / back-dated) get their own tree and never touch the live latest.json.
+  const research = isResearchDb(db);
+  const rel = join(research ? 'research' : '', 'reports', report.as_of_trade_date);
+  const dir = join(ashareDataDir(), rel);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${report.report_id}.json`);
   writeFileSync(path, JSON.stringify(report, null, 2));
-  writeFileSync(join(dir, 'latest.json'), JSON.stringify(report, null, 2));
+  if (!research) writeFileSync(join(dir, 'latest.json'), JSON.stringify(report, null, 2));
   // Store the path relative to the data directory so host and container (/data) agree.
-  db.prepare('INSERT INTO report (report_id, trade_date, status, generated_at, path) VALUES (?,?,?,?,?)')
-    .run(report.report_id, report.as_of_trade_date, report.status, report.generated_at, join('reports', report.as_of_trade_date, `${report.report_id}.json`));
-  return { report_id: report.report_id, trade_date: report.as_of_trade_date, status: report.status, generated_at: report.generated_at, path };
+  db.prepare('INSERT INTO report (report_id, trade_date, status, generated_at, path, run_mode) VALUES (?,?,?,?,?,?)')
+    .run(report.report_id, report.as_of_trade_date, report.status, report.generated_at, join(rel, `${report.report_id}.json`), report.run_mode);
+  return { report_id: report.report_id, trade_date: report.as_of_trade_date, status: report.status, generated_at: report.generated_at, path, run_mode: report.run_mode };
 }
 
-export function latestReportMeta(db: DatabaseSync, date?: string, readyOnly = false): ReportMeta | undefined {
-  const cond = [date ? 'trade_date = ?' : '1=1', readyOnly ? "status != 'NOT_READY'" : '1=1'].join(' AND ');
-  return db.prepare(`SELECT * FROM report WHERE ${cond} ORDER BY generated_at DESC LIMIT 1`).get(...(date ? [date] : [])) as ReportMeta | undefined;
-}
-
-export function resolveReportPath(stored: string): string {
-  if (!isAbsolute(stored)) return join(ashareDataDir(), stored);
-  if (existsSync(stored)) return stored;
-  // Absolute paths written by another runtime (e.g. /data inside the container).
-  const i = stored.lastIndexOf('/reports/');
-  return i >= 0 ? join(ashareDataDir(), stored.slice(i + 1)) : stored;
+/**
+ * The report served for a date (or, without a date, the most recent one).
+ * Ordered by trade date first, so a report generated later for an older date
+ * never becomes "latest"; within a date, live/manual reports win over replays,
+ * then the most recently generated one. `asOf` limits the search to trade
+ * dates on or before it.
+ */
+export function latestReportMeta(db: DatabaseSync, date?: string, readyOnly = false, asOf?: string): ReportMeta | undefined {
+  const cond: string[] = [];
+  const params: string[] = [];
+  if (date) { cond.push('trade_date = ?'); params.push(date); }
+  if (asOf) { cond.push('trade_date <= ?'); params.push(asOf); }
+  if (readyOnly) cond.push("status != 'NOT_READY'");
+  return db.prepare(`SELECT * FROM report ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''}
+    ORDER BY trade_date DESC, COALESCE(run_mode, '') = 'replay', generated_at DESC LIMIT 1`).get(...params) as ReportMeta | undefined;
 }
 
 export function loadReport(meta: ReportMeta): any {
@@ -195,7 +205,7 @@ export function generateReport(db: DatabaseSync, date: string, mode: RunMode = '
   };
 
   if (quality.status === 'NOT_READY') {
-    const lastReady = latestReportMeta(db, undefined, true);
+    const lastReady = latestReportMeta(db, undefined, true, date);
     const report = {
       ...base,
       not_ready: {
@@ -210,7 +220,7 @@ export function generateReport(db: DatabaseSync, date: string, mode: RunMode = '
 
   const scan = scanMarket(db, date);
   const watch = updateWatchlist(db, scan);
-  const { verdicts, meta: evidenceMeta } = loadVerdicts(db);
+  const { verdicts, meta: evidenceMeta } = loadVerdicts(db, date);
   const regimes = regimeSeries(db, date);
   const regime = regimes.get(date);
   const indices = indexPerformance(db, date);
@@ -252,7 +262,7 @@ export function generateReport(db: DatabaseSync, date: string, mode: RunMode = '
       industry_distribution: watch.industry_distribution,
       track_record: {
         ...trackRecord,
-        method: '近 60 个交易日内每个股票池日期：成员次日开盘至第 5 个交易日收盘的等权收益，减去全市场等权收益',
+        method: `近 60 个交易日内每个股票池日期：成员次日开盘至第 5 个交易日收盘的等权收益，减去全市场等权收益；只统计截至 ${date} 已完整实现的窗口`,
       },
       added: watch.changes.filter(c => c.action === 'add'),
       removed: watch.changes.filter(c => c.action === 'remove'),
@@ -261,7 +271,8 @@ export function generateReport(db: DatabaseSync, date: string, mode: RunMode = '
     signals: {
       market_summary: signalSummary,
       evidence_window: evidenceMeta,
-      note: 'evidence=evidence_supported 表示历史样本内超额收益统计显著；research_only 为研究指标，不应视为交易规则。',
+      evidence_scope: EVIDENCE_SCOPE,
+      note: 'evidence_supported = 样本内方向性证据（收益窗口重叠、未做多重检验校正），不是策略有效性；research_only 为研究指标；contradicted 为样本内方向相反。均不应视为交易规则。',
     },
     risks: [
       ...(quality.status === 'DEGRADED' ? quality.reasons.map(r => `数据降级：${r}`) : []),
