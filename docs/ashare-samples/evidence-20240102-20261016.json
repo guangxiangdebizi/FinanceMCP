@@ -1,0 +1,435 @@
+{
+  "version": "evi-1.0.0",
+  "signal_version": "sig-1.0.0",
+  "start": "20240102",
+  "end": "20261016",
+  "computed_at": "2026-10-16T16:16:16.867Z",
+  "events": 1473812,
+  "rows": [
+    {
+      "signal": "boll_squeeze_breakout",
+      "regime": "all",
+      "horizon": 10,
+      "n": 36063,
+      "days": 525,
+      "mean_excess": -0.9968,
+      "hit_rate": 0.387,
+      "t_stat": -5.5
+    },
+    {
+      "signal": "boll_squeeze_breakout",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 7339,
+      "days": 179,
+      "mean_excess": -1.9817,
+      "hit_rate": 0.344,
+      "t_stat": -6.3
+    },
+    {
+      "signal": "boll_squeeze_breakout",
+      "regime": "range",
+      "horizon": 10,
+      "n": 5743,
+      "days": 93,
+      "mean_excess": -0.3989,
+      "hit_rate": 0.409,
+      "t_stat": -1.14
+    },
+    {
+      "signal": "boll_squeeze_breakout",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 22981,
+      "days": 253,
+      "mean_excess": -0.5198,
+      "hit_rate": 0.395,
+      "t_stat": -1.95
+    },
+    {
+      "signal": "breakout_20d",
+      "regime": "all",
+      "horizon": 10,
+      "n": 82243,
+      "days": 533,
+      "mean_excess": -1.3189,
+      "hit_rate": 0.372,
+      "t_stat": -9.27
+    },
+    {
+      "signal": "breakout_20d",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 14319,
+      "days": 179,
+      "mean_excess": -2.604,
+      "hit_rate": 0.363,
+      "t_stat": -8.92
+    },
+    {
+      "signal": "breakout_20d",
+      "regime": "range",
+      "horizon": 10,
+      "n": 11702,
+      "days": 93,
+      "mean_excess": -0.8432,
+      "hit_rate": 0.373,
+      "t_stat": -2.85
+    },
+    {
+      "signal": "breakout_20d",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 56222,
+      "days": 261,
+      "mean_excess": -0.607,
+      "hit_rate": 0.374,
+      "t_stat": -3.7
+    },
+    {
+      "signal": "macd_bear_divergence",
+      "regime": "all",
+      "horizon": 10,
+      "n": 79351,
+      "days": 531,
+      "mean_excess": -0.2912,
+      "hit_rate": 0.406,
+      "t_stat": -2.04
+    },
+    {
+      "signal": "macd_bear_divergence",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 17125,
+      "days": 179,
+      "mean_excess": -0.9372,
+      "hit_rate": 0.401,
+      "t_stat": -3.31
+    },
+    {
+      "signal": "macd_bear_divergence",
+      "regime": "range",
+      "horizon": 10,
+      "n": 17027,
+      "days": 93,
+      "mean_excess": -0.0933,
+      "hit_rate": 0.401,
+      "t_stat": -0.27
+    },
+    {
+      "signal": "macd_bear_divergence",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 45199,
+      "days": 259,
+      "mean_excess": 0.0842,
+      "hit_rate": 0.41,
+      "t_stat": 0.48
+    },
+    {
+      "signal": "macd_bull_divergence",
+      "regime": "all",
+      "horizon": 10,
+      "n": 63064,
+      "days": 521,
+      "mean_excess": -0.3723,
+      "hit_rate": 0.424,
+      "t_stat": -2.77
+    },
+    {
+      "signal": "macd_bull_divergence",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 34347,
+      "days": 179,
+      "mean_excess": -0.8228,
+      "hit_rate": 0.422,
+      "t_stat": -4.07
+    },
+    {
+      "signal": "macd_bull_divergence",
+      "regime": "range",
+      "horizon": 10,
+      "n": 8269,
+      "days": 92,
+      "mean_excess": 0.2049,
+      "hit_rate": 0.431,
+      "t_stat": 0.57
+    },
+    {
+      "signal": "macd_bull_divergence",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 20448,
+      "days": 250,
+      "mean_excess": -0.2621,
+      "hit_rate": 0.423,
+      "t_stat": -1.32
+    },
+    {
+      "signal": "macd_golden_cross",
+      "regime": "all",
+      "horizon": 10,
+      "n": 85122,
+      "days": 532,
+      "mean_excess": -0.4054,
+      "hit_rate": 0.414,
+      "t_stat": -4.12
+    },
+    {
+      "signal": "macd_golden_cross",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 28058,
+      "days": 179,
+      "mean_excess": -0.4473,
+      "hit_rate": 0.427,
+      "t_stat": -2.46
+    },
+    {
+      "signal": "macd_golden_cross",
+      "regime": "range",
+      "horizon": 10,
+      "n": 17391,
+      "days": 93,
+      "mean_excess": -0.18,
+      "hit_rate": 0.416,
+      "t_stat": -1.03
+    },
+    {
+      "signal": "macd_golden_cross",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 39673,
+      "days": 260,
+      "mean_excess": -0.4571,
+      "hit_rate": 0.404,
+      "t_stat": -3.16
+    },
+    {
+      "signal": "overheated",
+      "regime": "all",
+      "horizon": 10,
+      "n": 27209,
+      "days": 532,
+      "mean_excess": -1.7316,
+      "hit_rate": 0.349,
+      "t_stat": -6.48
+    },
+    {
+      "signal": "overheated",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 3348,
+      "days": 179,
+      "mean_excess": -3.1464,
+      "hit_rate": 0.349,
+      "t_stat": -5.07
+    },
+    {
+      "signal": "overheated",
+      "regime": "range",
+      "horizon": 10,
+      "n": 3235,
+      "days": 93,
+      "mean_excess": -0.5101,
+      "hit_rate": 0.366,
+      "t_stat": -0.95
+    },
+    {
+      "signal": "overheated",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 20626,
+      "days": 260,
+      "mean_excess": -1.1945,
+      "hit_rate": 0.347,
+      "t_stat": -4.45
+    },
+    {
+      "signal": "rsi_oversold_rebound",
+      "regime": "all",
+      "horizon": 10,
+      "n": 20397,
+      "days": 432,
+      "mean_excess": -0.0902,
+      "hit_rate": 0.464,
+      "t_stat": -0.45
+    },
+    {
+      "signal": "rsi_oversold_rebound",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 12541,
+      "days": 169,
+      "mean_excess": 0.4148,
+      "hit_rate": 0.475,
+      "t_stat": 1.3
+    },
+    {
+      "signal": "rsi_oversold_rebound",
+      "regime": "range",
+      "horizon": 10,
+      "n": 2527,
+      "days": 71,
+      "mean_excess": -1.2519,
+      "hit_rate": 0.357,
+      "t_stat": -2.68
+    },
+    {
+      "signal": "rsi_oversold_rebound",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 5329,
+      "days": 192,
+      "mean_excess": -0.1051,
+      "hit_rate": 0.488,
+      "t_stat": -0.35
+    },
+    {
+      "signal": "trend_breakdown",
+      "regime": "all",
+      "horizon": 10,
+      "n": 27833,
+      "days": 529,
+      "mean_excess": -0.5859,
+      "hit_rate": 0.401,
+      "t_stat": -4.9
+    },
+    {
+      "signal": "trend_breakdown",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 9947,
+      "days": 179,
+      "mean_excess": -0.8373,
+      "hit_rate": 0.397,
+      "t_stat": -4.08
+    },
+    {
+      "signal": "trend_breakdown",
+      "regime": "range",
+      "horizon": 10,
+      "n": 4418,
+      "days": 92,
+      "mean_excess": -0.5197,
+      "hit_rate": 0.425,
+      "t_stat": -1.64
+    },
+    {
+      "signal": "trend_breakdown",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 13468,
+      "days": 258,
+      "mean_excess": -0.435,
+      "hit_rate": 0.395,
+      "t_stat": -2.65
+    },
+    {
+      "signal": "trend_up",
+      "regime": "all",
+      "horizon": 10,
+      "n": 71535,
+      "days": 533,
+      "mean_excess": -0.4696,
+      "hit_rate": 0.412,
+      "t_stat": -3.87
+    },
+    {
+      "signal": "trend_up",
+      "regime": "downtrend",
+      "horizon": 10,
+      "n": 14226,
+      "days": 179,
+      "mean_excess": -1.3019,
+      "hit_rate": 0.398,
+      "t_stat": -5.45
+    },
+    {
+      "signal": "trend_up",
+      "regime": "range",
+      "horizon": 10,
+      "n": 15197,
+      "days": 93,
+      "mean_excess": 0.1429,
+      "hit_rate": 0.434,
+      "t_stat": 0.52
+    },
+    {
+      "signal": "trend_up",
+      "regime": "uptrend",
+      "horizon": 10,
+      "n": 42112,
+      "days": 261,
+      "mean_excess": -0.117,
+      "hit_rate": 0.41,
+      "t_stat": -0.78
+    }
+  ],
+  "verdicts": [
+    {
+      "signal": "trend_up",
+      "name": "多头趋势",
+      "direction": "bullish",
+      "classification": "contradicted",
+      "basis": "10日超额 -0.4696%，t=-3.87，事件 71535 个/533 天（20240102~20261016）；在 downtrend 状态下方向相反"
+    },
+    {
+      "signal": "breakout_20d",
+      "name": "20日放量突破",
+      "direction": "bullish",
+      "classification": "contradicted",
+      "basis": "10日超额 -1.3189%，t=-9.27，事件 82243 个/533 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    },
+    {
+      "signal": "macd_golden_cross",
+      "name": "MACD金叉",
+      "direction": "bullish",
+      "classification": "contradicted",
+      "basis": "10日超额 -0.4054%，t=-4.12，事件 85122 个/532 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    },
+    {
+      "signal": "macd_bull_divergence",
+      "name": "MACD底背离",
+      "direction": "bullish",
+      "classification": "contradicted",
+      "basis": "10日超额 -0.3723%，t=-2.77，事件 63064 个/521 天（20240102~20261016）；在 downtrend,uptrend 状态下方向相反"
+    },
+    {
+      "signal": "rsi_oversold_rebound",
+      "name": "RSI超卖反弹",
+      "direction": "bullish",
+      "classification": "research_only",
+      "basis": "10日超额 -0.0902%，t=-0.45，事件 20397 个/432 天（20240102~20261016）；在 range 状态下方向相反"
+    },
+    {
+      "signal": "boll_squeeze_breakout",
+      "name": "布林收口突破",
+      "direction": "bullish",
+      "classification": "contradicted",
+      "basis": "10日超额 -0.9968%，t=-5.5，事件 36063 个/525 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    },
+    {
+      "signal": "trend_breakdown",
+      "name": "跌破中期均线",
+      "direction": "bearish",
+      "classification": "evidence_supported",
+      "basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+    },
+    {
+      "signal": "macd_bear_divergence",
+      "name": "MACD顶背离",
+      "direction": "bearish",
+      "classification": "evidence_supported",
+      "basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）"
+    },
+    {
+      "signal": "overheated",
+      "name": "短期过热",
+      "direction": "bearish",
+      "classification": "evidence_supported",
+      "basis": "10日超额 -1.7316%，t=-6.48，事件 27209 个/532 天（20240102~20261016）"
+    }
+  ]
+}

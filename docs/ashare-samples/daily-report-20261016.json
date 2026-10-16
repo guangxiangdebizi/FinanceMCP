@@ -1,0 +1,3587 @@
+{
+  "report_id": "ASR-20261016-20261016163620-ddd0d0",
+  "schema": "ashare-report-1.0.0",
+  "as_of_trade_date": "20261016",
+  "generated_at": "2026-10-17T00:36:20.909+08:00",
+  "status": "READY",
+  "run_mode": "live",
+  "run_mode_note": "日常流水线（同步→检查→分析→发布）生成，生成时间见 generated_at",
+  "versions": {
+    "report_schema": "ashare-report-1.0.0",
+    "indicators": "ind-1.0.0",
+    "signals": "sig-1.0.0",
+    "score": "score-1.0.0",
+    "watchlist": "wl-1.0.0",
+    "evidence": "evi-1.0.0"
+  },
+  "data": {
+    "sources": [
+      "Tushare Pro trade_cal（交易日历）",
+      "Tushare Pro stock_basic（股票基础信息，行业为当前分类）",
+      "Tushare Pro daily（日线行情，按交易日批量）",
+      "Tushare Pro daily_basic（每日指标：估值/换手/市值）",
+      "Tushare Pro adj_factor（复权因子）",
+      "Tushare Pro stk_limit（涨跌停价）",
+      "Tushare Pro index_daily（核心指数日线）",
+      "Tushare Pro fina_indicator_vip（财务指标，按公告日约束）"
+    ],
+    "quality": {
+      "trade_date": "20261016",
+      "status": "READY",
+      "reasons": [],
+      "counts": {
+        "daily": 5567,
+        "daily_basic": 5567,
+        "adj_factor": 5577,
+        "stk_limit": 5655,
+        "prev_daily": 5565,
+        "listed": 5577
+      },
+      "coverage": {
+        "daily_vs_prev": 1.0004,
+        "daily_vs_listed": 0.9982,
+        "daily_basic_vs_daily": 1,
+        "adj_factor_vs_daily": 1,
+        "stk_limit_vs_daily": 1.0158
+      },
+      "anomalies": {
+        "bad_close": 0,
+        "ohlc_inconsistent": 0,
+        "zero_amount": 0,
+        "extreme_move": 1
+      },
+      "indices_present": [
+        "000001.SH",
+        "000300.SH",
+        "000688.SH",
+        "000852.SH",
+        "000905.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "899050.BJ"
+      ],
+      "checked_at": "2026-10-16T16:36:20.908Z"
+    },
+    "last_sync": [
+      {
+        "dataset": "adj_factor",
+        "synced_at": "2026-10-16T16:36:14.542Z"
+      },
+      {
+        "dataset": "daily",
+        "synced_at": "2026-10-16T16:36:13.289Z"
+      },
+      {
+        "dataset": "daily_basic",
+        "synced_at": "2026-10-16T16:36:13.959Z"
+      },
+      {
+        "dataset": "fina_indicator",
+        "synced_at": "2026-10-16T16:36:20.884Z"
+      },
+      {
+        "dataset": "index_daily",
+        "synced_at": "2026-10-16T16:36:17.837Z"
+      },
+      {
+        "dataset": "stk_limit",
+        "synced_at": "2026-10-16T16:36:15.134Z"
+      },
+      {
+        "dataset": "stock_basic",
+        "synced_at": "2026-10-16T16:36:11.049Z"
+      },
+      {
+        "dataset": "trade_cal",
+        "synced_at": "2026-10-16T16:36:07.918Z"
+      }
+    ]
+  },
+  "market": {
+    "regime": "downtrend",
+    "regime_label": "下降趋势",
+    "tone": "neutral",
+    "judgement": [
+      "沪深300 趋势状态：下降趋势（规则：收盘相对 MA60 与 MA20 五日斜率）",
+      "上涨 3301 家 / 下跌 2128 家（上涨占比 59.3%），涨停 63、跌停 12",
+      "站上 MA20 的个股占比 16.9%，站上 MA60 占比 25.2%",
+      "两市成交额 15691 亿，为 20 日均值的 90%（量能持平）",
+      "近 20 日中证1000 相对沪深300 弱 3.6 个百分点（大盘占优）"
+    ],
+    "indices": [
+      {
+        "ts_code": "000001.SH",
+        "name": "上证指数",
+        "close": 3716.28,
+        "pct_chg": 0.24,
+        "ret5": -2.56,
+        "ret20": -5.54,
+        "amount_yi": 7324.75,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "399001.SZ",
+        "name": "深证成指",
+        "close": 11802.46,
+        "pct_chg": -0.12,
+        "ret5": -6.64,
+        "ret20": -13.33,
+        "amount_yi": 3843.87,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "399006.SZ",
+        "name": "创业板指",
+        "close": 2772.38,
+        "pct_chg": -0.39,
+        "ret5": -8.9,
+        "ret20": -16.96,
+        "amount_yi": 1444.27,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "000300.SH",
+        "name": "沪深300",
+        "close": 4170.61,
+        "pct_chg": 0.11,
+        "ret5": -3.4,
+        "ret20": -8.31,
+        "amount_yi": 4137.49,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "000905.SH",
+        "name": "中证500",
+        "close": 6772.75,
+        "pct_chg": 0.05,
+        "ret5": -6.6,
+        "ret20": -12.25,
+        "amount_yi": 2580.45,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "000852.SH",
+        "name": "中证1000",
+        "close": 6681.94,
+        "pct_chg": 0.05,
+        "ret5": -6.62,
+        "ret20": -11.94,
+        "amount_yi": 3101.19,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "000688.SH",
+        "name": "科创50",
+        "close": 1358.65,
+        "pct_chg": -0.06,
+        "ret5": -6.77,
+        "ret20": -13.42,
+        "amount_yi": 716.08,
+        "above_ma20": false,
+        "above_ma60": false
+      },
+      {
+        "ts_code": "899050.BJ",
+        "name": "北证50",
+        "close": 950,
+        "pct_chg": -1.81,
+        "ret5": -8.42,
+        "ret20": -9.65,
+        "amount_yi": 138.12,
+        "above_ma20": false,
+        "above_ma60": false
+      }
+    ],
+    "breadth": {
+      "stocks": 5567,
+      "up": 3301,
+      "down": 2128,
+      "flat": 138,
+      "limit_up": 63,
+      "limit_down": 12,
+      "up_ratio": 0.593,
+      "median_pct_chg": 0.47,
+      "amount_yi": 15690.66,
+      "amount_prev_yi": 16457.18,
+      "amount_chg_pct": -4.66,
+      "amount_ma20_yi": 17432.31,
+      "pct_above_ma20": 16.9,
+      "pct_above_ma60": 25.2
+    },
+    "suspended_or_missing": 35
+  },
+  "sectors": {
+    "method": "行业为 Tushare stock_basic 行业；强度 = 0.5·pr(20日中位收益) + 0.3·pr(5日中位收益) + 0.2·pr(站上MA20比例)",
+    "top": [
+      {
+        "industry": "出版业",
+        "rank": 1,
+        "strength": 1,
+        "stocks": 29,
+        "ret5_median_pct": 2.79,
+        "ret20_median_pct": 7.63,
+        "pct_above_ma20": 86.2,
+        "amount20_yi": 93
+      },
+      {
+        "industry": "电信运营",
+        "rank": 2,
+        "strength": 0.981,
+        "stocks": 5,
+        "ret5_median_pct": 1.86,
+        "ret20_median_pct": 4.29,
+        "pct_above_ma20": 60,
+        "amount20_yi": 26
+      },
+      {
+        "industry": "路桥",
+        "rank": 3,
+        "strength": 0.97,
+        "stocks": 19,
+        "ret5_median_pct": 1.34,
+        "ret20_median_pct": 1.77,
+        "pct_above_ma20": 78.9,
+        "amount20_yi": 15
+      },
+      {
+        "industry": "啤酒",
+        "rank": 4,
+        "strength": 0.97,
+        "stocks": 8,
+        "ret5_median_pct": 0.79,
+        "ret20_median_pct": 3.08,
+        "pct_above_ma20": 75,
+        "amount20_yi": 9
+      },
+      {
+        "industry": "白酒",
+        "rank": 5,
+        "strength": 0.951,
+        "stocks": 19,
+        "ret5_median_pct": 0.62,
+        "ret20_median_pct": 0.34,
+        "pct_above_ma20": 73.7,
+        "amount20_yi": 84
+      },
+      {
+        "industry": "影视音像",
+        "rank": 6,
+        "strength": 0.943,
+        "stocks": 35,
+        "ret5_median_pct": -1.4,
+        "ret20_median_pct": 3.43,
+        "pct_above_ma20": 68.6,
+        "amount20_yi": 132
+      },
+      {
+        "industry": "铁路",
+        "rank": 7,
+        "strength": 0.938,
+        "stocks": 7,
+        "ret5_median_pct": 0,
+        "ret20_median_pct": 0,
+        "pct_above_ma20": 71.4,
+        "amount20_yi": 22
+      },
+      {
+        "industry": "机场",
+        "rank": 8,
+        "strength": 0.931,
+        "stocks": 5,
+        "ret5_median_pct": 0.6,
+        "ret20_median_pct": -0.38,
+        "pct_above_ma20": 60,
+        "amount20_yi": 6
+      }
+    ],
+    "bottom": [
+      {
+        "industry": "铅锌",
+        "rank": 105,
+        "strength": 0.02,
+        "stocks": 14,
+        "ret5_median_pct": -8.69,
+        "ret20_median_pct": -18.15,
+        "pct_above_ma20": 0,
+        "amount20_yi": 55
+      },
+      {
+        "industry": "铜",
+        "rank": 104,
+        "strength": 0.025,
+        "stocks": 18,
+        "ret5_median_pct": -8.03,
+        "ret20_median_pct": -18.93,
+        "pct_above_ma20": 0,
+        "amount20_yi": 154
+      },
+      {
+        "industry": "种植业",
+        "rank": 103,
+        "strength": 0.041,
+        "stocks": 19,
+        "ret5_median_pct": -11.79,
+        "ret20_median_pct": -16.43,
+        "pct_above_ma20": 5.3,
+        "amount20_yi": 80
+      },
+      {
+        "industry": "半导体",
+        "rank": 102,
+        "strength": 0.048,
+        "stocks": 200,
+        "ret5_median_pct": -10.18,
+        "ret20_median_pct": -14.78,
+        "pct_above_ma20": 3.5,
+        "amount20_yi": 2216
+      },
+      {
+        "industry": "小金属",
+        "rank": 101,
+        "strength": 0.067,
+        "stocks": 69,
+        "ret5_median_pct": -8.72,
+        "ret20_median_pct": -13.79,
+        "pct_above_ma20": 7.2,
+        "amount20_yi": 364
+      }
+    ],
+    "all": [
+      {
+        "industry": "出版业",
+        "rank": 1,
+        "strength": 1,
+        "stocks": 29,
+        "ret5_median_pct": 2.79,
+        "ret20_median_pct": 7.63,
+        "pct_above_ma20": 86.2,
+        "amount20_yi": 93
+      },
+      {
+        "industry": "电信运营",
+        "rank": 2,
+        "strength": 0.981,
+        "stocks": 5,
+        "ret5_median_pct": 1.86,
+        "ret20_median_pct": 4.29,
+        "pct_above_ma20": 60,
+        "amount20_yi": 26
+      },
+      {
+        "industry": "路桥",
+        "rank": 3,
+        "strength": 0.97,
+        "stocks": 19,
+        "ret5_median_pct": 1.34,
+        "ret20_median_pct": 1.77,
+        "pct_above_ma20": 78.9,
+        "amount20_yi": 15
+      },
+      {
+        "industry": "啤酒",
+        "rank": 4,
+        "strength": 0.97,
+        "stocks": 8,
+        "ret5_median_pct": 0.79,
+        "ret20_median_pct": 3.08,
+        "pct_above_ma20": 75,
+        "amount20_yi": 9
+      },
+      {
+        "industry": "白酒",
+        "rank": 5,
+        "strength": 0.951,
+        "stocks": 19,
+        "ret5_median_pct": 0.62,
+        "ret20_median_pct": 0.34,
+        "pct_above_ma20": 73.7,
+        "amount20_yi": 84
+      },
+      {
+        "industry": "影视音像",
+        "rank": 6,
+        "strength": 0.943,
+        "stocks": 35,
+        "ret5_median_pct": -1.4,
+        "ret20_median_pct": 3.43,
+        "pct_above_ma20": 68.6,
+        "amount20_yi": 132
+      },
+      {
+        "industry": "铁路",
+        "rank": 7,
+        "strength": 0.938,
+        "stocks": 7,
+        "ret5_median_pct": 0,
+        "ret20_median_pct": 0,
+        "pct_above_ma20": 71.4,
+        "amount20_yi": 22
+      },
+      {
+        "industry": "机场",
+        "rank": 8,
+        "strength": 0.931,
+        "stocks": 5,
+        "ret5_median_pct": 0.6,
+        "ret20_median_pct": -0.38,
+        "pct_above_ma20": 60,
+        "amount20_yi": 6
+      },
+      {
+        "industry": "银行",
+        "rank": 9,
+        "strength": 0.902,
+        "stocks": 42,
+        "ret5_median_pct": -0.17,
+        "ret20_median_pct": -1.84,
+        "pct_above_ma20": 50,
+        "amount20_yi": 277
+      },
+      {
+        "industry": "港口",
+        "rank": 10,
+        "strength": 0.902,
+        "stocks": 16,
+        "ret5_median_pct": -1.1,
+        "ret20_median_pct": -1.33,
+        "pct_above_ma20": 56.3,
+        "amount20_yi": 26
+      },
+      {
+        "industry": "汽车服务",
+        "rank": 11,
+        "strength": 0.859,
+        "stocks": 10,
+        "ret5_median_pct": -2.27,
+        "ret20_median_pct": -1.71,
+        "pct_above_ma20": 30,
+        "amount20_yi": 8
+      },
+      {
+        "industry": "中成药",
+        "rank": 12,
+        "strength": 0.811,
+        "stocks": 68,
+        "ret5_median_pct": -3.63,
+        "ret20_median_pct": -2.33,
+        "pct_above_ma20": 35.3,
+        "amount20_yi": 104
+      },
+      {
+        "industry": "软饮料",
+        "rank": 13,
+        "strength": 0.804,
+        "stocks": 9,
+        "ret5_median_pct": -4.43,
+        "ret20_median_pct": 0.86,
+        "pct_above_ma20": 33.3,
+        "amount20_yi": 18
+      },
+      {
+        "industry": "水泥",
+        "rank": 14,
+        "strength": 0.79,
+        "stocks": 22,
+        "ret5_median_pct": -2.94,
+        "ret20_median_pct": -3.19,
+        "pct_above_ma20": 36.4,
+        "amount20_yi": 25
+      },
+      {
+        "industry": "水务",
+        "rank": 15,
+        "strength": 0.787,
+        "stocks": 15,
+        "ret5_median_pct": -2.37,
+        "ret20_median_pct": -3.12,
+        "pct_above_ma20": 26.7,
+        "amount20_yi": 11
+      },
+      {
+        "industry": "摩托车",
+        "rank": 16,
+        "strength": 0.763,
+        "stocks": 13,
+        "ret5_median_pct": -3.33,
+        "ret20_median_pct": -2.43,
+        "pct_above_ma20": 23.1,
+        "amount20_yi": 22
+      },
+      {
+        "industry": "仓储物流",
+        "rank": 17,
+        "strength": 0.758,
+        "stocks": 47,
+        "ret5_median_pct": -3.26,
+        "ret20_median_pct": -3.51,
+        "pct_above_ma20": 29.8,
+        "amount20_yi": 48
+      },
+      {
+        "industry": "特种钢",
+        "rank": 18,
+        "strength": 0.746,
+        "stocks": 10,
+        "ret5_median_pct": -0.47,
+        "ret20_median_pct": -5.59,
+        "pct_above_ma20": 40,
+        "amount20_yi": 10
+      },
+      {
+        "industry": "医药商业",
+        "rank": 19,
+        "strength": 0.743,
+        "stocks": 37,
+        "ret5_median_pct": -4.77,
+        "ret20_median_pct": -2.27,
+        "pct_above_ma20": 32.4,
+        "amount20_yi": 46
+      },
+      {
+        "industry": "钢加工",
+        "rank": 20,
+        "strength": 0.713,
+        "stocks": 23,
+        "ret5_median_pct": -2.96,
+        "ret20_median_pct": -4.27,
+        "pct_above_ma20": 21.7,
+        "amount20_yi": 23
+      },
+      {
+        "industry": "互联网",
+        "rank": 21,
+        "strength": 0.707,
+        "stocks": 81,
+        "ret5_median_pct": -3.01,
+        "ret20_median_pct": -4.32,
+        "pct_above_ma20": 23.5,
+        "amount20_yi": 297
+      },
+      {
+        "industry": "航空",
+        "rank": 22,
+        "strength": 0.697,
+        "stocks": 53,
+        "ret5_median_pct": 1.36,
+        "ret20_median_pct": -6.67,
+        "pct_above_ma20": 39.6,
+        "amount20_yi": 143
+      },
+      {
+        "industry": "食品",
+        "rank": 23,
+        "strength": 0.695,
+        "stocks": 92,
+        "ret5_median_pct": -4,
+        "ret20_median_pct": -4.55,
+        "pct_above_ma20": 34.8,
+        "amount20_yi": 139
+      },
+      {
+        "industry": "水力发电",
+        "rank": 24,
+        "strength": 0.695,
+        "stocks": 22,
+        "ret5_median_pct": -2.44,
+        "ret20_median_pct": -6.09,
+        "pct_above_ma20": 40.9,
+        "amount20_yi": 86
+      },
+      {
+        "industry": "纺织",
+        "rank": 25,
+        "strength": 0.692,
+        "stocks": 44,
+        "ret5_median_pct": -4.66,
+        "ret20_median_pct": -2.94,
+        "pct_above_ma20": 27.3,
+        "amount20_yi": 34
+      },
+      {
+        "industry": "证券",
+        "rank": 26,
+        "strength": 0.687,
+        "stocks": 48,
+        "ret5_median_pct": -0.77,
+        "ret20_median_pct": -5.29,
+        "pct_above_ma20": 20.8,
+        "amount20_yi": 191
+      },
+      {
+        "industry": "运输设备",
+        "rank": 27,
+        "strength": 0.682,
+        "stocks": 49,
+        "ret5_median_pct": -3.72,
+        "ret20_median_pct": -4.42,
+        "pct_above_ma20": 26.5,
+        "amount20_yi": 61
+      },
+      {
+        "industry": "文教休闲",
+        "rank": 28,
+        "strength": 0.678,
+        "stocks": 51,
+        "ret5_median_pct": -3.7,
+        "ret20_median_pct": -4.32,
+        "pct_above_ma20": 23.5,
+        "amount20_yi": 62
+      },
+      {
+        "industry": "乳制品",
+        "rank": 29,
+        "strength": 0.675,
+        "stocks": 22,
+        "ret5_median_pct": -5.51,
+        "ret20_median_pct": -2.67,
+        "pct_above_ma20": 36.4,
+        "amount20_yi": 31
+      },
+      {
+        "industry": "日用化工",
+        "rank": 30,
+        "strength": 0.675,
+        "stocks": 21,
+        "ret5_median_pct": -5.15,
+        "ret20_median_pct": -2.59,
+        "pct_above_ma20": 28.6,
+        "amount20_yi": 25
+      },
+      {
+        "industry": "广告包装",
+        "rank": 31,
+        "strength": 0.672,
+        "stocks": 54,
+        "ret5_median_pct": -3.63,
+        "ret20_median_pct": -4.96,
+        "pct_above_ma20": 25.9,
+        "amount20_yi": 89
+      },
+      {
+        "industry": "汽车整车",
+        "rank": 32,
+        "strength": 0.652,
+        "stocks": 23,
+        "ret5_median_pct": -3.67,
+        "ret20_median_pct": -3.71,
+        "pct_above_ma20": 13,
+        "amount20_yi": 121
+      },
+      {
+        "industry": "园区开发",
+        "rank": 33,
+        "strength": 0.648,
+        "stocks": 14,
+        "ret5_median_pct": -4.88,
+        "ret20_median_pct": -2.86,
+        "pct_above_ma20": 21.4,
+        "amount20_yi": 15
+      },
+      {
+        "industry": "化工机械",
+        "rank": 34,
+        "strength": 0.621,
+        "stocks": 13,
+        "ret5_median_pct": -2.78,
+        "ret20_median_pct": -6.26,
+        "pct_above_ma20": 23.1,
+        "amount20_yi": 32
+      },
+      {
+        "industry": "家用电器",
+        "rank": 35,
+        "strength": 0.619,
+        "stocks": 91,
+        "ret5_median_pct": -4.83,
+        "ret20_median_pct": -4.3,
+        "pct_above_ma20": 23.1,
+        "amount20_yi": 167
+      },
+      {
+        "industry": "化学制药",
+        "rank": 36,
+        "strength": 0.615,
+        "stocks": 149,
+        "ret5_median_pct": -6.17,
+        "ret20_median_pct": -2.34,
+        "pct_above_ma20": 21.5,
+        "amount20_yi": 440
+      },
+      {
+        "industry": "空运",
+        "rank": 37,
+        "strength": 0.609,
+        "stocks": 8,
+        "ret5_median_pct": -2.25,
+        "ret20_median_pct": -5.91,
+        "pct_above_ma20": 12.5,
+        "amount20_yi": 20
+      },
+      {
+        "industry": "房产服务",
+        "rank": 38,
+        "strength": 0.6,
+        "stocks": 13,
+        "ret5_median_pct": -7.55,
+        "ret20_median_pct": -1.16,
+        "pct_above_ma20": 23.1,
+        "amount20_yi": 40
+      },
+      {
+        "industry": "商贸代理",
+        "rank": 39,
+        "strength": 0.597,
+        "stocks": 16,
+        "ret5_median_pct": -4.02,
+        "ret20_median_pct": -4.56,
+        "pct_above_ma20": 12.5,
+        "amount20_yi": 12
+      },
+      {
+        "industry": "建筑工程",
+        "rank": 40,
+        "strength": 0.594,
+        "stocks": 128,
+        "ret5_median_pct": -4.1,
+        "ret20_median_pct": -5.53,
+        "pct_above_ma20": 21.1,
+        "amount20_yi": 140
+      },
+      {
+        "industry": "供气供热",
+        "rank": 41,
+        "strength": 0.594,
+        "stocks": 44,
+        "ret5_median_pct": -4.63,
+        "ret20_median_pct": -5.42,
+        "pct_above_ma20": 25,
+        "amount20_yi": 61
+      },
+      {
+        "industry": "火力发电",
+        "rank": 42,
+        "strength": 0.589,
+        "stocks": 31,
+        "ret5_median_pct": -2.99,
+        "ret20_median_pct": -7.07,
+        "pct_above_ma20": 32.3,
+        "amount20_yi": 103
+      },
+      {
+        "industry": "红黄酒",
+        "rank": 43,
+        "strength": 0.576,
+        "stocks": 9,
+        "ret5_median_pct": -6.86,
+        "ret20_median_pct": -2.35,
+        "pct_above_ma20": 22.2,
+        "amount20_yi": 29
+      },
+      {
+        "industry": "其他建材",
+        "rank": 44,
+        "strength": 0.573,
+        "stocks": 31,
+        "ret5_median_pct": -3.67,
+        "ret20_median_pct": -6.64,
+        "pct_above_ma20": 25.8,
+        "amount20_yi": 31
+      },
+      {
+        "industry": "医疗保健",
+        "rank": 45,
+        "strength": 0.569,
+        "stocks": 186,
+        "ret5_median_pct": -6.39,
+        "ret20_median_pct": -2.48,
+        "pct_above_ma20": 17.2,
+        "amount20_yi": 288
+      },
+      {
+        "industry": "家居用品",
+        "rank": 46,
+        "strength": 0.563,
+        "stocks": 71,
+        "ret5_median_pct": -4.89,
+        "ret20_median_pct": -4.73,
+        "pct_above_ma20": 19.7,
+        "amount20_yi": 72
+      },
+      {
+        "industry": "服饰",
+        "rank": 47,
+        "strength": 0.559,
+        "stocks": 64,
+        "ret5_median_pct": -5.36,
+        "ret20_median_pct": -5.14,
+        "pct_above_ma20": 25,
+        "amount20_yi": 67
+      },
+      {
+        "industry": "水运",
+        "rank": 48,
+        "strength": 0.551,
+        "stocks": 19,
+        "ret5_median_pct": -4.11,
+        "ret20_median_pct": -6.25,
+        "pct_above_ma20": 21.1,
+        "amount20_yi": 99
+      },
+      {
+        "industry": "石油加工",
+        "rank": 49,
+        "strength": 0.523,
+        "stocks": 14,
+        "ret5_median_pct": -4.23,
+        "ret20_median_pct": -7.29,
+        "pct_above_ma20": 28.6,
+        "amount20_yi": 29
+      },
+      {
+        "industry": "普钢",
+        "rank": 50,
+        "strength": 0.521,
+        "stocks": 27,
+        "ret5_median_pct": -2.4,
+        "ret20_median_pct": -7.77,
+        "pct_above_ma20": 18.5,
+        "amount20_yi": 41
+      },
+      {
+        "industry": "煤炭开采",
+        "rank": 51,
+        "strength": 0.517,
+        "stocks": 25,
+        "ret5_median_pct": -4.75,
+        "ret20_median_pct": -6.61,
+        "pct_above_ma20": 24,
+        "amount20_yi": 96
+      },
+      {
+        "industry": "工程机械",
+        "rank": 52,
+        "strength": 0.511,
+        "stocks": 38,
+        "ret5_median_pct": -3.45,
+        "ret20_median_pct": -6.93,
+        "pct_above_ma20": 13.2,
+        "amount20_yi": 80
+      },
+      {
+        "industry": "多元金融",
+        "rank": 53,
+        "strength": 0.509,
+        "stocks": 23,
+        "ret5_median_pct": -2.67,
+        "ret20_median_pct": -8.21,
+        "pct_above_ma20": 21.7,
+        "amount20_yi": 40
+      },
+      {
+        "industry": "公共交通",
+        "rank": 54,
+        "strength": 0.507,
+        "stocks": 7,
+        "ret5_median_pct": -4.29,
+        "ret20_median_pct": -6.36,
+        "pct_above_ma20": 14.3,
+        "amount20_yi": 4
+      },
+      {
+        "industry": "石油开采",
+        "rank": 55,
+        "strength": 0.488,
+        "stocks": 22,
+        "ret5_median_pct": -4.08,
+        "ret20_median_pct": -8.95,
+        "pct_above_ma20": 36.4,
+        "amount20_yi": 82
+      },
+      {
+        "industry": "软件服务",
+        "rank": 56,
+        "strength": 0.488,
+        "stocks": 279,
+        "ret5_median_pct": -5.07,
+        "ret20_median_pct": -6.08,
+        "pct_above_ma20": 15.4,
+        "amount20_yi": 574
+      },
+      {
+        "industry": "汽车配件",
+        "rank": 57,
+        "strength": 0.488,
+        "stocks": 273,
+        "ret5_median_pct": -4.77,
+        "ret20_median_pct": -6.34,
+        "pct_above_ma20": 16.8,
+        "amount20_yi": 402
+      },
+      {
+        "industry": "船舶",
+        "rank": 58,
+        "strength": 0.481,
+        "stocks": 11,
+        "ret5_median_pct": -0.99,
+        "ret20_median_pct": -10.9,
+        "pct_above_ma20": 27.3,
+        "amount20_yi": 85
+      },
+      {
+        "industry": "超市连锁",
+        "rank": 59,
+        "strength": 0.471,
+        "stocks": 8,
+        "ret5_median_pct": -4.23,
+        "ret20_median_pct": -9.5,
+        "pct_above_ma20": 37.5,
+        "amount20_yi": 20
+      },
+      {
+        "industry": "生物制药",
+        "rank": 60,
+        "strength": 0.469,
+        "stocks": 82,
+        "ret5_median_pct": -8.48,
+        "ret20_median_pct": -3.64,
+        "pct_above_ma20": 13.4,
+        "amount20_yi": 252
+      },
+      {
+        "industry": "综合类",
+        "rank": 61,
+        "strength": 0.466,
+        "stocks": 20,
+        "ret5_median_pct": -4.99,
+        "ret20_median_pct": -5.66,
+        "pct_above_ma20": 10,
+        "amount20_yi": 31
+      },
+      {
+        "industry": "区域地产",
+        "rank": 62,
+        "strength": 0.454,
+        "stocks": 43,
+        "ret5_median_pct": -6.14,
+        "ret20_median_pct": -5.09,
+        "pct_above_ma20": 11.6,
+        "amount20_yi": 63
+      },
+      {
+        "industry": "其他商业",
+        "rank": 63,
+        "strength": 0.45,
+        "stocks": 12,
+        "ret5_median_pct": -5.08,
+        "ret20_median_pct": -6.42,
+        "pct_above_ma20": 16.7,
+        "amount20_yi": 13
+      },
+      {
+        "industry": "全国地产",
+        "rank": 64,
+        "strength": 0.439,
+        "stocks": 26,
+        "ret5_median_pct": -8.11,
+        "ret20_median_pct": -4.17,
+        "pct_above_ma20": 11.5,
+        "amount20_yi": 84
+      },
+      {
+        "industry": "造纸",
+        "rank": 65,
+        "strength": 0.434,
+        "stocks": 35,
+        "ret5_median_pct": -5.06,
+        "ret20_median_pct": -6.15,
+        "pct_above_ma20": 8.6,
+        "amount20_yi": 54
+      },
+      {
+        "industry": "染料涂料",
+        "rank": 66,
+        "strength": 0.426,
+        "stocks": 37,
+        "ret5_median_pct": -6.74,
+        "ret20_median_pct": -5.82,
+        "pct_above_ma20": 18.9,
+        "amount20_yi": 73
+      },
+      {
+        "industry": "百货",
+        "rank": 67,
+        "strength": 0.402,
+        "stocks": 35,
+        "ret5_median_pct": -4.49,
+        "ret20_median_pct": -7.73,
+        "pct_above_ma20": 11.4,
+        "amount20_yi": 59
+      },
+      {
+        "industry": "IT设备",
+        "rank": 68,
+        "strength": 0.383,
+        "stocks": 81,
+        "ret5_median_pct": -5.41,
+        "ret20_median_pct": -6.95,
+        "pct_above_ma20": 12.3,
+        "amount20_yi": 251
+      },
+      {
+        "industry": "饲料",
+        "rank": 69,
+        "strength": 0.382,
+        "stocks": 23,
+        "ret5_median_pct": -4.58,
+        "ret20_median_pct": -8.35,
+        "pct_above_ma20": 13,
+        "amount20_yi": 27
+      },
+      {
+        "industry": "化纤",
+        "rank": 70,
+        "strength": 0.366,
+        "stocks": 33,
+        "ret5_median_pct": -5.43,
+        "ret20_median_pct": -7.21,
+        "pct_above_ma20": 12.1,
+        "amount20_yi": 61
+      },
+      {
+        "industry": "旅游景点",
+        "rank": 71,
+        "strength": 0.362,
+        "stocks": 18,
+        "ret5_median_pct": -1.99,
+        "ret20_median_pct": -11.23,
+        "pct_above_ma20": 11.1,
+        "amount20_yi": 34
+      },
+      {
+        "industry": "农用机械",
+        "rank": 72,
+        "strength": 0.358,
+        "stocks": 13,
+        "ret5_median_pct": -5.71,
+        "ret20_median_pct": -7.75,
+        "pct_above_ma20": 15.4,
+        "amount20_yi": 10
+      },
+      {
+        "industry": "新型电力",
+        "rank": 73,
+        "strength": 0.352,
+        "stocks": 32,
+        "ret5_median_pct": -5.08,
+        "ret20_median_pct": -7.55,
+        "pct_above_ma20": 9.4,
+        "amount20_yi": 83
+      },
+      {
+        "industry": "批发业",
+        "rank": 74,
+        "strength": 0.351,
+        "stocks": 5,
+        "ret5_median_pct": -2.96,
+        "ret20_median_pct": -9.6,
+        "pct_above_ma20": 0,
+        "amount20_yi": 3
+      },
+      {
+        "industry": "轻工机械",
+        "rank": 75,
+        "strength": 0.349,
+        "stocks": 7,
+        "ret5_median_pct": -5.07,
+        "ret20_median_pct": -6.94,
+        "pct_above_ma20": 0,
+        "amount20_yi": 6
+      },
+      {
+        "industry": "塑料",
+        "rank": 76,
+        "strength": 0.346,
+        "stocks": 81,
+        "ret5_median_pct": -5.91,
+        "ret20_median_pct": -6.79,
+        "pct_above_ma20": 8.6,
+        "amount20_yi": 141
+      },
+      {
+        "industry": "陶瓷",
+        "rank": 77,
+        "strength": 0.332,
+        "stocks": 5,
+        "ret5_median_pct": -5.44,
+        "ret20_median_pct": -9.15,
+        "pct_above_ma20": 20,
+        "amount20_yi": 55
+      },
+      {
+        "industry": "农业综合",
+        "rank": 78,
+        "strength": 0.328,
+        "stocks": 40,
+        "ret5_median_pct": -4.32,
+        "ret20_median_pct": -9.93,
+        "pct_above_ma20": 12.5,
+        "amount20_yi": 99
+      },
+      {
+        "industry": "环境保护",
+        "rank": 79,
+        "strength": 0.29,
+        "stocks": 118,
+        "ret5_median_pct": -5.84,
+        "ret20_median_pct": -8,
+        "pct_above_ma20": 8.5,
+        "amount20_yi": 115
+      },
+      {
+        "industry": "橡胶",
+        "rank": 80,
+        "strength": 0.271,
+        "stocks": 18,
+        "ret5_median_pct": -5.84,
+        "ret20_median_pct": -8.06,
+        "pct_above_ma20": 5.6,
+        "amount20_yi": 24
+      },
+      {
+        "industry": "电器仪表",
+        "rank": 81,
+        "strength": 0.269,
+        "stocks": 109,
+        "ret5_median_pct": -6.35,
+        "ret20_median_pct": -7.86,
+        "pct_above_ma20": 7.3,
+        "amount20_yi": 204
+      },
+      {
+        "industry": "保险",
+        "rank": 82,
+        "strength": 0.263,
+        "stocks": 5,
+        "ret5_median_pct": -4.62,
+        "ret20_median_pct": -9.93,
+        "pct_above_ma20": 0,
+        "amount20_yi": 62
+      },
+      {
+        "industry": "化工原料",
+        "rank": 83,
+        "strength": 0.259,
+        "stocks": 262,
+        "ret5_median_pct": -6.79,
+        "ret20_median_pct": -8.14,
+        "pct_above_ma20": 12.2,
+        "amount20_yi": 678
+      },
+      {
+        "industry": "旅游服务",
+        "rank": 84,
+        "strength": 0.259,
+        "stocks": 8,
+        "ret5_median_pct": -3.3,
+        "ret20_median_pct": -13.71,
+        "pct_above_ma20": 0,
+        "amount20_yi": 14
+      },
+      {
+        "industry": "渔业",
+        "rank": 85,
+        "strength": 0.256,
+        "stocks": 7,
+        "ret5_median_pct": -5.63,
+        "ret20_median_pct": -10.47,
+        "pct_above_ma20": 14.3,
+        "amount20_yi": 9
+      },
+      {
+        "industry": "电气设备",
+        "rank": 86,
+        "strength": 0.243,
+        "stocks": 347,
+        "ret5_median_pct": -6.46,
+        "ret20_median_pct": -8.38,
+        "pct_above_ma20": 10.7,
+        "amount20_yi": 1105
+      },
+      {
+        "industry": "酒店餐饮",
+        "rank": 87,
+        "strength": 0.238,
+        "stocks": 9,
+        "ret5_median_pct": -4.32,
+        "ret20_median_pct": -10.78,
+        "pct_above_ma20": 0,
+        "amount20_yi": 8
+      },
+      {
+        "industry": "专用机械",
+        "rank": 88,
+        "strength": 0.234,
+        "stocks": 296,
+        "ret5_median_pct": -6.64,
+        "ret20_median_pct": -8.69,
+        "pct_above_ma20": 11.1,
+        "amount20_yi": 798
+      },
+      {
+        "industry": "农药化肥",
+        "rank": 89,
+        "strength": 0.211,
+        "stocks": 58,
+        "ret5_median_pct": -5.51,
+        "ret20_median_pct": -9.75,
+        "pct_above_ma20": 3.4,
+        "amount20_yi": 102
+      },
+      {
+        "industry": "机械基件",
+        "rank": 90,
+        "strength": 0.197,
+        "stocks": 142,
+        "ret5_median_pct": -6.38,
+        "ret20_median_pct": -9.67,
+        "pct_above_ma20": 7,
+        "amount20_yi": 277
+      },
+      {
+        "industry": "装修装饰",
+        "rank": 91,
+        "strength": 0.19,
+        "stocks": 25,
+        "ret5_median_pct": -6.41,
+        "ret20_median_pct": -10.55,
+        "pct_above_ma20": 12,
+        "amount20_yi": 41
+      },
+      {
+        "industry": "焦炭加工",
+        "rank": 92,
+        "strength": 0.188,
+        "stocks": 7,
+        "ret5_median_pct": -6.59,
+        "ret20_median_pct": -10.95,
+        "pct_above_ma20": 14.3,
+        "amount20_yi": 19
+      },
+      {
+        "industry": "铝",
+        "rank": 93,
+        "strength": 0.188,
+        "stocks": 30,
+        "ret5_median_pct": -6.3,
+        "ret20_median_pct": -9.69,
+        "pct_above_ma20": 3.3,
+        "amount20_yi": 93
+      },
+      {
+        "industry": "纺织机械",
+        "rank": 94,
+        "strength": 0.175,
+        "stocks": 13,
+        "ret5_median_pct": -7.5,
+        "ret20_median_pct": -9.56,
+        "pct_above_ma20": 7.7,
+        "amount20_yi": 17
+      },
+      {
+        "industry": "通信设备",
+        "rank": 95,
+        "strength": 0.145,
+        "stocks": 137,
+        "ret5_median_pct": -6.38,
+        "ret20_median_pct": -12.07,
+        "pct_above_ma20": 8,
+        "amount20_yi": 1401
+      },
+      {
+        "industry": "机床制造",
+        "rank": 96,
+        "strength": 0.134,
+        "stocks": 24,
+        "ret5_median_pct": -7.29,
+        "ret20_median_pct": -9.98,
+        "pct_above_ma20": 4.2,
+        "amount20_yi": 27
+      },
+      {
+        "industry": "矿物制品",
+        "rank": 97,
+        "strength": 0.113,
+        "stocks": 36,
+        "ret5_median_pct": -6.49,
+        "ret20_median_pct": -11.18,
+        "pct_above_ma20": 0,
+        "amount20_yi": 130
+      },
+      {
+        "industry": "元器件",
+        "rank": 98,
+        "strength": 0.098,
+        "stocks": 309,
+        "ret5_median_pct": -6.86,
+        "ret20_median_pct": -12.84,
+        "pct_above_ma20": 4.5,
+        "amount20_yi": 2159
+      },
+      {
+        "industry": "玻璃",
+        "rank": 99,
+        "strength": 0.097,
+        "stocks": 18,
+        "ret5_median_pct": -6.13,
+        "ret20_median_pct": -15.97,
+        "pct_above_ma20": 0,
+        "amount20_yi": 256
+      },
+      {
+        "industry": "黄金",
+        "rank": 100,
+        "strength": 0.081,
+        "stocks": 10,
+        "ret5_median_pct": -7.37,
+        "ret20_median_pct": -18.24,
+        "pct_above_ma20": 10,
+        "amount20_yi": 107
+      },
+      {
+        "industry": "小金属",
+        "rank": 101,
+        "strength": 0.067,
+        "stocks": 69,
+        "ret5_median_pct": -8.72,
+        "ret20_median_pct": -13.79,
+        "pct_above_ma20": 7.2,
+        "amount20_yi": 364
+      },
+      {
+        "industry": "半导体",
+        "rank": 102,
+        "strength": 0.048,
+        "stocks": 200,
+        "ret5_median_pct": -10.18,
+        "ret20_median_pct": -14.78,
+        "pct_above_ma20": 3.5,
+        "amount20_yi": 2216
+      },
+      {
+        "industry": "种植业",
+        "rank": 103,
+        "strength": 0.041,
+        "stocks": 19,
+        "ret5_median_pct": -11.79,
+        "ret20_median_pct": -16.43,
+        "pct_above_ma20": 5.3,
+        "amount20_yi": 80
+      },
+      {
+        "industry": "铜",
+        "rank": 104,
+        "strength": 0.025,
+        "stocks": 18,
+        "ret5_median_pct": -8.03,
+        "ret20_median_pct": -18.93,
+        "pct_above_ma20": 0,
+        "amount20_yi": 154
+      },
+      {
+        "industry": "铅锌",
+        "rank": 105,
+        "strength": 0.02,
+        "stocks": 14,
+        "ret5_median_pct": -8.69,
+        "ret20_median_pct": -18.15,
+        "pct_above_ma20": 0,
+        "amount20_yi": 55
+      }
+    ]
+  },
+  "watchlist": {
+    "rules": {
+      "target": 40,
+      "min": 30,
+      "max": 50,
+      "industry_cap": 4,
+      "entry_rank": 40,
+      "exit_rank": 150,
+      "min_hold_days": 5,
+      "max_adds_per_day": 6,
+      "swap_candidate_rank": 10,
+      "swap_member_rank": 100
+    },
+    "score_rules": {
+      "weights": {
+        "technical": 35,
+        "liquidity": 15,
+        "fundamental": 30,
+        "valuation": 10,
+        "sector": 10
+      },
+      "min_listed_days": 250,
+      "min_bars": 130,
+      "min_amount20_yi": 1,
+      "min_circ_mv_yi": 50
+    },
+    "previous_date": "20261015",
+    "count": 40,
+    "eligible_universe": 1756,
+    "industry_distribution": {
+      "煤炭开采": 4,
+      "医疗保健": 4,
+      "水运": 4,
+      "化工原料": 3,
+      "石油开采": 3,
+      "影视音像": 2,
+      "白酒": 2,
+      "水力发电": 2,
+      "火力发电": 1,
+      "广告包装": 1,
+      "电气设备": 1,
+      "红黄酒": 1,
+      "造纸": 1,
+      "生物制药": 1,
+      "港口": 1,
+      "船舶": 1,
+      "仓储物流": 1,
+      "乳制品": 1,
+      "电信运营": 1,
+      "百货": 1,
+      "出版业": 1,
+      "化学制药": 1,
+      "通信设备": 1,
+      "软件服务": 1
+    },
+    "track_record": {
+      "horizon": 5,
+      "dates": 60,
+      "mean_excess_pct": -1.86,
+      "hit_rate": 0.183,
+      "t_stat_overlapping": -7.08,
+      "note": "股票池为启发式评分结果；样本短且持有期重叠，不能据此推断盈利概率",
+      "method": "近 60 个交易日内每个股票池日期：成员次日开盘至第 5 个交易日收盘的等权收益，减去全市场等权收益"
+    },
+    "added": [],
+    "removed": [],
+    "members": [
+      {
+        "ts_code": "600938.SH",
+        "name": "中国海油",
+        "industry": "石油开采",
+        "close": 34.74,
+        "pct_chg": 2.27,
+        "score": 86.73,
+        "rank": 1,
+        "status": "kept",
+        "entered_on": "20260824",
+        "membership_reason": "排名 1，仍在保留阈值内",
+        "components": {
+          "technical": 0.958,
+          "liquidity": 0.899,
+          "fundamental": 0.853,
+          "valuation": 0.923,
+          "sector": 0.488
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 5.17,
+          "ret20_pct": 3.33,
+          "ret60_pct": 22.81,
+          "rsi14": 62.2,
+          "atr_pct": 2.9,
+          "ma20": 32.89,
+          "ma60": 32.29
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260827",
+          "roe": 10.35,
+          "netprofit_yoy": 23.42,
+          "ocf_to_profit": 124.63,
+          "debt_to_assets": 28.6
+        },
+        "valuation": {
+          "pe_ttm": 11.93,
+          "pb": 1.93
+        },
+        "signals_today": [
+          {
+            "id": "boll_squeeze_breakout",
+            "name": "布林收口突破",
+            "direction": "bullish",
+            "trigger": "布林带宽处于近 120 日最低 20% 分位后，收盘价上穿上轨",
+            "invalidation": "收盘价跌回布林中轨下方",
+            "risk": "收口方向判断错误时回撤较快",
+            "evidence": "contradicted",
+            "evidence_basis": "10日超额 -0.9968%，t=-5.5，事件 36063 个/525 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 32.29）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600941.SH",
+        "name": "中国移动",
+        "industry": "电信运营",
+        "close": 101.4,
+        "pct_chg": -0.1,
+        "score": 85.69,
+        "rank": 2,
+        "status": "kept",
+        "entered_on": "20260930",
+        "membership_reason": "排名 2，仍在保留阈值内",
+        "components": {
+          "technical": 0.912,
+          "liquidity": 0.804,
+          "fundamental": 0.73,
+          "valuation": 1,
+          "sector": 0.981
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 3.49,
+          "ret20_pct": 7.12,
+          "ret60_pct": 11.86,
+          "rsi14": 76,
+          "atr_pct": 1.48,
+          "ma20": 96.46,
+          "ma60": 95.18
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260814",
+          "roe": 5.61,
+          "netprofit_yoy": -6.29,
+          "ocf_to_profit": 117.27,
+          "debt_to_assets": 32.79
+        },
+        "valuation": {
+          "pe_ttm": 16.69,
+          "pb": 1.55
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 95.18）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601225.SH",
+        "name": "陕西煤业",
+        "industry": "煤炭开采",
+        "close": 28.28,
+        "pct_chg": 0.64,
+        "score": 85.42,
+        "rank": 3,
+        "status": "kept",
+        "entered_on": "20260824",
+        "membership_reason": "排名 3，仍在保留阈值内",
+        "components": {
+          "technical": 0.949,
+          "liquidity": 0.805,
+          "fundamental": 0.887,
+          "valuation": 0.833,
+          "sector": 0.517
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 4.86,
+          "ret20_pct": 8.39,
+          "ret60_pct": 18.48,
+          "rsi14": 72.7,
+          "atr_pct": 2.94,
+          "ma20": 26.39,
+          "ma60": 25.78
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260828",
+          "roe": 11.38,
+          "netprofit_yoy": 47.57,
+          "ocf_to_profit": 98.2,
+          "debt_to_assets": 40.26
+        },
+        "valuation": {
+          "pe_ttm": 13.44,
+          "pb": 2.71
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 25.78）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002292.SZ",
+        "name": "奥飞娱乐",
+        "industry": "影视音像",
+        "close": 9.14,
+        "pct_chg": 0.11,
+        "score": 84.45,
+        "rank": 4,
+        "status": "kept",
+        "entered_on": "20261009",
+        "membership_reason": "排名 4，仍在保留阈值内",
+        "components": {
+          "technical": 0.944,
+          "liquidity": 0.657,
+          "fundamental": 0.863,
+          "valuation": 0.625,
+          "sector": 0.943
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 1.11,
+          "ret20_pct": 5.66,
+          "ret60_pct": 17.03,
+          "rsi14": 58.5,
+          "atr_pct": 4.61,
+          "ma20": 8.77,
+          "ma60": 8.35
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260825",
+          "roe": 5.83,
+          "netprofit_yoy": 370.7,
+          "ocf_to_profit": 27.28,
+          "debt_to_assets": 29.26
+        },
+        "valuation": {
+          "pe_ttm": 64.65,
+          "pb": 4.46
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 8.35）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600519.SH",
+        "name": "贵州茅台",
+        "industry": "白酒",
+        "close": 1329,
+        "pct_chg": 1.22,
+        "score": 84.22,
+        "rank": 5,
+        "status": "kept",
+        "entered_on": "20261015",
+        "membership_reason": "排名 5，仍在保留阈值内",
+        "components": {
+          "technical": 0.844,
+          "liquidity": 0.977,
+          "fundamental": 0.817,
+          "valuation": 0.6,
+          "sector": 0.951
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 5.23,
+          "ret20_pct": 3.41,
+          "ret60_pct": 5.56,
+          "rsi14": 65.4,
+          "atr_pct": 1.68,
+          "ma20": 1267.52,
+          "ma60": 1296.91
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260815",
+          "roe": 17.95,
+          "netprofit_yoy": -1.95,
+          "ocf_to_profit": 115.11,
+          "debt_to_assets": 15.19
+        },
+        "valuation": {
+          "pe_ttm": 20.4,
+          "pb": 6.61
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 1296.91）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601857.SH",
+        "name": "中国石油",
+        "industry": "石油开采",
+        "close": 12.76,
+        "pct_chg": 1.35,
+        "score": 83.18,
+        "rank": 6,
+        "status": "kept",
+        "entered_on": "20260908",
+        "membership_reason": "排名 6，仍在保留阈值内",
+        "components": {
+          "technical": 0.912,
+          "liquidity": 0.915,
+          "fundamental": 0.806,
+          "valuation": 0.846,
+          "sector": 0.488
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 10,
+          "ret20_pct": 15.93,
+          "ret60_pct": 30.79,
+          "rsi14": 82,
+          "atr_pct": 2.68,
+          "ma20": 11.32,
+          "ma60": 10.93
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260831",
+          "roe": 6.39,
+          "netprofit_yoy": 22.03,
+          "ocf_to_profit": 169.02,
+          "debt_to_assets": 38.88
+        },
+        "valuation": {
+          "pe_ttm": 13.26,
+          "pb": 1.43
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 10.93）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": [
+          "RSI14 过热 (82)"
+        ]
+      },
+      {
+        "ts_code": "601919.SH",
+        "name": "中远海控",
+        "industry": "水运",
+        "close": 16.88,
+        "pct_chg": -0.3,
+        "score": 82.71,
+        "rank": 7,
+        "status": "kept",
+        "entered_on": "20260724",
+        "membership_reason": "排名 7，仍在保留阈值内",
+        "components": {
+          "technical": 0.945,
+          "liquidity": 0.865,
+          "fundamental": 0.704,
+          "valuation": 1,
+          "sector": 0.551
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 1.26,
+          "ret20_pct": 3.05,
+          "ret60_pct": 16.01,
+          "rsi14": 56.6,
+          "atr_pct": 2.19,
+          "ma20": 16.53,
+          "ma60": 16.15
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260829",
+          "roe": 5.76,
+          "netprofit_yoy": -23.48,
+          "ocf_to_profit": 127.82,
+          "debt_to_assets": 41.01
+        },
+        "valuation": {
+          "pe_ttm": 9.6,
+          "pb": 1.1
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 16.15）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600900.SH",
+        "name": "长江电力",
+        "industry": "水力发电",
+        "close": 29.38,
+        "pct_chg": -0.74,
+        "score": 82.23,
+        "rank": 8,
+        "status": "kept",
+        "entered_on": "20261008",
+        "membership_reason": "排名 8，仍在保留阈值内",
+        "components": {
+          "technical": 0.918,
+          "liquidity": 0.954,
+          "fundamental": 0.795,
+          "valuation": 0.5,
+          "sector": 0.695
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 1.35,
+          "ret20_pct": 4.59,
+          "ret60_pct": 7.03,
+          "rsi14": 63.2,
+          "atr_pct": 1.33,
+          "ma20": 28.68,
+          "ma60": 28.46
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260831",
+          "roe": 6.75,
+          "netprofit_yoy": 13.02,
+          "ocf_to_profit": 131.43,
+          "debt_to_assets": 59.36
+        },
+        "valuation": {
+          "pe_ttm": 19.86,
+          "pb": 3.33
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 28.46）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "300760.SZ",
+        "name": "迈瑞医疗",
+        "industry": "医疗保健",
+        "close": 167.3,
+        "pct_chg": 0.18,
+        "score": 81.9,
+        "rank": 9,
+        "status": "kept",
+        "entered_on": "20260928",
+        "membership_reason": "排名 9，仍在保留阈值内",
+        "components": {
+          "technical": 0.929,
+          "liquidity": 0.836,
+          "fundamental": 0.8,
+          "valuation": 0.718,
+          "sector": 0.569
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 3.66,
+          "ret20_pct": 0.97,
+          "ret60_pct": 12.18,
+          "rsi14": 61.8,
+          "atr_pct": 2.33,
+          "ma20": 160.31,
+          "ma60": 157.59
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260829",
+          "roe": 12.2,
+          "netprofit_yoy": -5.37,
+          "ocf_to_profit": 87.62,
+          "debt_to_assets": 25.47
+        },
+        "valuation": {
+          "pe_ttm": 25.78,
+          "pb": 5
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 157.59）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002027.SZ",
+        "name": "分众传媒",
+        "industry": "广告包装",
+        "close": 5.16,
+        "pct_chg": -1.34,
+        "score": 80.96,
+        "rank": 10,
+        "status": "kept",
+        "entered_on": "20261012",
+        "membership_reason": "排名 10，仍在保留阈值内",
+        "components": {
+          "technical": 0.838,
+          "liquidity": 0.782,
+          "fundamental": 0.867,
+          "valuation": 0.714,
+          "sector": 0.672
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 5.09,
+          "ret20_pct": 7.28,
+          "ret60_pct": 2.24,
+          "rsi14": 65.5,
+          "atr_pct": 2.7,
+          "ma20": 4.83,
+          "ma60": 4.98
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260819",
+          "roe": 22.15,
+          "netprofit_yoy": 17.39,
+          "ocf_to_profit": 126.6,
+          "debt_to_assets": 35.64
+        },
+        "valuation": {
+          "pe_ttm": 21.86,
+          "pb": 5.33
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 4.98）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600887.SH",
+        "name": "伊利股份",
+        "industry": "乳制品",
+        "close": 28.2,
+        "pct_chg": 0.36,
+        "score": 80.96,
+        "rank": 11,
+        "status": "kept",
+        "entered_on": "20260929",
+        "membership_reason": "排名 11，仍在保留阈值内",
+        "components": {
+          "technical": 0.912,
+          "liquidity": 0.866,
+          "fundamental": 0.643,
+          "valuation": 1,
+          "sector": 0.675
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 1.95,
+          "ret20_pct": 6.25,
+          "ret60_pct": 8.34,
+          "rsi14": 72.7,
+          "atr_pct": 1.59,
+          "ma20": 27.15,
+          "ma60": 26.64
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260827",
+          "roe": 10.63,
+          "netprofit_yoy": -20.02,
+          "ocf_to_profit": 129.91,
+          "debt_to_assets": 63.56
+        },
+        "valuation": {
+          "pe_ttm": 17.62,
+          "pb": 3.32
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 26.64）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600674.SH",
+        "name": "川投能源",
+        "industry": "水力发电",
+        "close": 17.4,
+        "pct_chg": -0.46,
+        "score": 80.68,
+        "rank": 12,
+        "status": "kept",
+        "entered_on": "20261014",
+        "membership_reason": "排名 12，仍在保留阈值内",
+        "components": {
+          "technical": 0.924,
+          "liquidity": 0.644,
+          "fundamental": 0.807,
+          "valuation": 0.75,
+          "sector": 0.695
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 2.11,
+          "ret20_pct": 8.68,
+          "ret60_pct": 16.04,
+          "rsi14": 76.2,
+          "atr_pct": 1.94,
+          "ma20": 16.51,
+          "ma60": 15.84
+        },
+        "fundamentals": {
+          "report_period": "20260930",
+          "announced": "20261014",
+          "roe": 9.62,
+          "netprofit_yoy": 4.36,
+          "ocf_to_profit": 15.87,
+          "debt_to_assets": 33.35
+        },
+        "valuation": {
+          "pe_ttm": 17.18,
+          "pb": 1.82
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 15.84）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601900.SH",
+        "name": "南方传媒",
+        "industry": "出版业",
+        "close": 13.26,
+        "pct_chg": -2.21,
+        "score": 80.63,
+        "rank": 13,
+        "status": "kept",
+        "entered_on": "20261012",
+        "membership_reason": "排名 13，仍在保留阈值内",
+        "components": {
+          "technical": 0.96,
+          "liquidity": 0.305,
+          "fundamental": 0.749,
+          "valuation": 1,
+          "sector": 1
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 2.79,
+          "ret20_pct": 8.16,
+          "ret60_pct": 16.37,
+          "rsi14": 60.9,
+          "atr_pct": 4.07,
+          "ma20": 12.66,
+          "ma60": 12.12
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260822",
+          "roe": 5.38,
+          "netprofit_yoy": 5.26,
+          "ocf_to_profit": 8.1,
+          "debt_to_assets": 47.03
+        },
+        "valuation": {
+          "pe_ttm": 10.96,
+          "pb": 1.33
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 12.12）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601088.SH",
+        "name": "中国神华",
+        "industry": "煤炭开采",
+        "close": 50.98,
+        "pct_chg": 0.75,
+        "score": 80.23,
+        "rank": 14,
+        "status": "kept",
+        "entered_on": "20261013",
+        "membership_reason": "排名 14，仍在保留阈值内",
+        "components": {
+          "technical": 0.954,
+          "liquidity": 0.889,
+          "fundamental": 0.759,
+          "valuation": 0.556,
+          "sector": 0.517
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 5.33,
+          "ret20_pct": 7.83,
+          "ret60_pct": 17.82,
+          "rsi14": 71.5,
+          "atr_pct": 2.38,
+          "ma20": 48.07,
+          "ma60": 46.57
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260829",
+          "roe": 5.96,
+          "netprofit_yoy": 4.1,
+          "ocf_to_profit": 119.14,
+          "debt_to_assets": 40.27
+        },
+        "valuation": {
+          "pe_ttm": 20.48,
+          "pb": 2.45
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 46.57）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601898.SH",
+        "name": "中煤能源",
+        "industry": "煤炭开采",
+        "close": 14.93,
+        "pct_chg": -0.2,
+        "score": 79.78,
+        "rank": 16,
+        "status": "kept",
+        "entered_on": "20261014",
+        "membership_reason": "排名 16，仍在保留阈值内",
+        "components": {
+          "technical": 0.941,
+          "liquidity": 0.633,
+          "fundamental": 0.739,
+          "valuation": 1,
+          "sector": 0.517
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 3.75,
+          "ret20_pct": 0,
+          "ret60_pct": 20.82,
+          "rsi14": 57.7,
+          "atr_pct": 3.34,
+          "ma20": 14.33,
+          "ma60": 14.24
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260822",
+          "roe": 4.99,
+          "netprofit_yoy": 5.83,
+          "ocf_to_profit": 76.19,
+          "debt_to_assets": 46.54
+        },
+        "valuation": {
+          "pe_ttm": 10.8,
+          "pb": 1.19
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 14.24）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600018.SH",
+        "name": "上港集团",
+        "industry": "港口",
+        "close": 5.46,
+        "pct_chg": -0.18,
+        "score": 79.62,
+        "rank": 17,
+        "status": "kept",
+        "entered_on": "20261015",
+        "membership_reason": "排名 17，仍在保留阈值内",
+        "components": {
+          "technical": 0.91,
+          "liquidity": 0.39,
+          "fundamental": 0.763,
+          "valuation": 1,
+          "sector": 0.902
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 0.16,
+          "ret20_pct": -0.2,
+          "ret60_pct": 9.47,
+          "rsi14": 55.7,
+          "atr_pct": 1.83,
+          "ma20": 5.41,
+          "ma60": 5.26
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260828",
+          "roe": 5.93,
+          "netprofit_yoy": 5.97,
+          "ocf_to_profit": 62.28,
+          "debt_to_assets": 31.55
+        },
+        "valuation": {
+          "pe_ttm": 9.05,
+          "pb": 0.87
+        },
+        "signals_today": [
+          {
+            "id": "macd_bear_divergence",
+            "name": "MACD顶背离",
+            "direction": "bearish",
+            "trigger": "近 10 日最高价高于 20~60 日前区间最高价，但对应 DIF 更低，且当日收阴",
+            "invalidation": "收盘价创新高且 DIF 同步创新高",
+            "risk": "强势趋势中顶背离可能持续",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 5.26）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600809.SH",
+        "name": "山西汾酒",
+        "industry": "白酒",
+        "close": 116.7,
+        "pct_chg": 0.52,
+        "score": 79.58,
+        "rank": 18,
+        "status": "kept",
+        "entered_on": "20261015",
+        "membership_reason": "排名 18，仍在保留阈值内",
+        "components": {
+          "technical": 0.755,
+          "liquidity": 0.684,
+          "fundamental": 0.779,
+          "valuation": 1,
+          "sector": 0.951
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 0.84,
+          "ret20_pct": 0.55,
+          "ret60_pct": 2.91,
+          "rsi14": 53.8,
+          "atr_pct": 2.77,
+          "ma20": 113.67,
+          "ma60": 117.68
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260831",
+          "roe": 16.57,
+          "netprofit_yoy": -24.29,
+          "ocf_to_profit": 75.41,
+          "debt_to_assets": 39.34
+        },
+        "valuation": {
+          "pe_ttm": 13.98,
+          "pb": 3.74
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 117.68）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "688111.SH",
+        "name": "金山办公",
+        "industry": "软件服务",
+        "close": 231.44,
+        "pct_chg": -0.46,
+        "score": 78.8,
+        "rank": 19,
+        "status": "kept",
+        "entered_on": "20261014",
+        "membership_reason": "排名 19，仍在保留阈值内",
+        "components": {
+          "technical": 0.659,
+          "liquidity": 0.822,
+          "fundamental": 0.978,
+          "valuation": 0.919,
+          "sector": 0.488
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": 1.09,
+          "ret20_pct": 1.63,
+          "ret60_pct": -2.81,
+          "rsi14": 51.7,
+          "atr_pct": 3.2,
+          "ma20": 225.75,
+          "ma60": 240.27
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260820",
+          "roe": 18.03,
+          "netprofit_yoy": 236.94,
+          "ocf_to_profit": 23.42,
+          "debt_to_assets": 27.79
+        },
+        "valuation": {
+          "pe_ttm": 29.77,
+          "pb": 7.12
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 240.27）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "003006.SZ",
+        "name": "百亚股份",
+        "industry": "造纸",
+        "close": 24.09,
+        "pct_chg": 5.57,
+        "score": 78.71,
+        "rank": 20,
+        "status": "kept",
+        "entered_on": "20261008",
+        "membership_reason": "排名 20，仍在保留阈值内",
+        "components": {
+          "technical": 0.966,
+          "liquidity": 0.833,
+          "fundamental": 0.802,
+          "valuation": 0.4,
+          "sector": 0.434
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 5.47,
+          "ret20_pct": 40.88,
+          "ret60_pct": 73.31,
+          "rsi14": 73.9,
+          "atr_pct": 4.29,
+          "ma20": 21.6,
+          "ma60": 16.66
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260822",
+          "roe": 12.47,
+          "netprofit_yoy": -4.82,
+          "ocf_to_profit": 87.32,
+          "debt_to_assets": 30.1
+        },
+        "valuation": {
+          "pe_ttm": 52.03,
+          "pb": 7.19
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 16.66）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002246.SZ",
+        "name": "北化股份",
+        "industry": "化工原料",
+        "close": 24.81,
+        "pct_chg": 3.81,
+        "score": 78.61,
+        "rank": 21,
+        "status": "kept",
+        "entered_on": "20260924",
+        "membership_reason": "排名 21，仍在保留阈值内",
+        "components": {
+          "technical": 0.932,
+          "liquidity": 0.746,
+          "fundamental": 0.884,
+          "valuation": 0.568,
+          "sector": 0.259
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": -3.65,
+          "ret20_pct": 7.68,
+          "ret60_pct": 36.02,
+          "rsi14": 54.2,
+          "atr_pct": 6.3,
+          "ma20": 24.64,
+          "ma60": 21.78
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260810",
+          "roe": 7.13,
+          "netprofit_yoy": 111.09,
+          "ocf_to_profit": 93.83,
+          "debt_to_assets": 36.19
+        },
+        "valuation": {
+          "pe_ttm": 35.7,
+          "pb": 4.17
+        },
+        "signals_today": [
+          {
+            "id": "trend_up",
+            "name": "多头趋势",
+            "direction": "bullish",
+            "trigger": "收盘价 > MA20 > MA60，且 MA20 高于 5 个交易日前（首次满足当日触发）",
+            "invalidation": "收盘价跌破 MA60，或 MA20 拐头低于 5 日前",
+            "risk": "趋势末端追高；震荡市中频繁进出",
+            "evidence": "contradicted",
+            "evidence_basis": "10日超额 -0.4696%，t=-3.87，事件 71535 个/533 天（20240102~20261016）；在 downtrend 状态下方向相反"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 21.78）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "300770.SZ",
+        "name": "新媒股份",
+        "industry": "影视音像",
+        "close": 36.6,
+        "pct_chg": -3.63,
+        "score": 78.38,
+        "rank": 22,
+        "status": "kept",
+        "entered_on": "20261015",
+        "membership_reason": "排名 22，仍在保留阈值内",
+        "components": {
+          "technical": 0.941,
+          "liquidity": 0.215,
+          "fundamental": 0.759,
+          "valuation": 1,
+          "sector": 0.943
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": -1.67,
+          "ret20_pct": 8.03,
+          "ret60_pct": 9.89,
+          "rsi14": 60.5,
+          "atr_pct": 3.55,
+          "ma20": 34.77,
+          "ma60": 33.83
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260828",
+          "roe": 8.22,
+          "netprofit_yoy": -13.51,
+          "ocf_to_profit": 202.71,
+          "debt_to_assets": 24.06
+        },
+        "valuation": {
+          "pe_ttm": 13.59,
+          "pb": 2.25
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 33.83）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002074.SZ",
+        "name": "国轩高科",
+        "industry": "电气设备",
+        "close": 27.78,
+        "pct_chg": -1.35,
+        "score": 78.36,
+        "rank": 23,
+        "status": "kept",
+        "entered_on": "20261012",
+        "membership_reason": "排名 23，仍在保留阈值内",
+        "components": {
+          "technical": 0.91,
+          "liquidity": 0.895,
+          "fundamental": 0.704,
+          "valuation": 0.953,
+          "sector": 0.243
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": -8.65,
+          "ret20_pct": 9.07,
+          "ret60_pct": 5.91,
+          "rsi14": 50.3,
+          "atr_pct": 4.78,
+          "ma20": 27.53,
+          "ma60": 27.33
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260825",
+          "roe": 4.68,
+          "netprofit_yoy": 278.05,
+          "ocf_to_profit": 31.15,
+          "debt_to_assets": 71.73
+        },
+        "valuation": {
+          "pe_ttm": 14.82,
+          "pb": 1.67
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 27.33）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "688617.SH",
+        "name": "惠泰医疗",
+        "industry": "医疗保健",
+        "close": 249.3,
+        "pct_chg": -3.6,
+        "score": 78.33,
+        "rank": 24,
+        "status": "kept",
+        "entered_on": "20261015",
+        "membership_reason": "排名 24，仍在保留阈值内",
+        "components": {
+          "technical": 0.95,
+          "liquidity": 0.547,
+          "fundamental": 0.877,
+          "valuation": 0.487,
+          "sector": 0.569
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": 2.66,
+          "ret20_pct": 3.92,
+          "ret60_pct": 18.71,
+          "rsi14": 53.8,
+          "atr_pct": 4.23,
+          "ma20": 245.79,
+          "ma60": 234.65
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260820",
+          "roe": 17.4,
+          "netprofit_yoy": 26.38,
+          "ocf_to_profit": 90.93,
+          "debt_to_assets": 13.79
+        },
+        "valuation": {
+          "pe_ttm": 37.83,
+          "pb": 11.43
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 234.65）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600256.SH",
+        "name": "广汇能源",
+        "industry": "石油开采",
+        "close": 7.07,
+        "pct_chg": 1.73,
+        "score": 78.21,
+        "rank": 25,
+        "status": "kept",
+        "entered_on": "20260910",
+        "membership_reason": "排名 25，仍在保留阈值内",
+        "components": {
+          "technical": 0.931,
+          "liquidity": 0.836,
+          "fundamental": 0.811,
+          "valuation": 0.385,
+          "sector": 0.488
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": -1.81,
+          "ret20_pct": -1.67,
+          "ret60_pct": 32.15,
+          "rsi14": 55.2,
+          "atr_pct": 4.51,
+          "ma20": 6.94,
+          "ma60": 6.33
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260821",
+          "roe": 5.2,
+          "netprofit_yoy": 49.81,
+          "ocf_to_profit": 175.64,
+          "debt_to_assets": 51.79
+        },
+        "valuation": {
+          "pe_ttm": 25.53,
+          "pb": 1.81
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 6.33）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "603259.SH",
+        "name": "药明康德",
+        "industry": "化学制药",
+        "close": 144.3,
+        "pct_chg": -6.6,
+        "score": 78.06,
+        "rank": 27,
+        "status": "kept",
+        "entered_on": "20260701",
+        "membership_reason": "排名 27，仍在保留阈值内",
+        "components": {
+          "technical": 0.68,
+          "liquidity": 0.993,
+          "fundamental": 0.875,
+          "valuation": 0.696,
+          "sector": 0.615
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -8.56,
+          "ret20_pct": -6.6,
+          "ret60_pct": 13.99,
+          "rsi14": 34.3,
+          "atr_pct": 4.98,
+          "ma20": 159.45,
+          "ma60": 151.35
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260804",
+          "roe": 13.59,
+          "netprofit_yoy": 29.43,
+          "ocf_to_profit": 71.68,
+          "debt_to_assets": 27.85
+        },
+        "valuation": {
+          "pe_ttm": 20.21,
+          "pb": 5.26
+        },
+        "signals_today": [
+          {
+            "id": "trend_breakdown",
+            "name": "跌破中期均线",
+            "direction": "bearish",
+            "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+            "invalidation": "收盘价重新站上 MA60",
+            "risk": "风险提示信号，不构成做空建议",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 151.35）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002128.SZ",
+        "name": "电投能源",
+        "industry": "煤炭开采",
+        "close": 27.57,
+        "pct_chg": 1.51,
+        "score": 77.95,
+        "rank": 28,
+        "status": "kept",
+        "entered_on": "20261008",
+        "membership_reason": "排名 28，仍在保留阈值内",
+        "components": {
+          "technical": 0.819,
+          "liquidity": 0.571,
+          "fundamental": 0.889,
+          "valuation": 0.889,
+          "sector": 0.517
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -4.27,
+          "ret20_pct": -2.85,
+          "ret60_pct": 6.24,
+          "rsi14": 48,
+          "atr_pct": 3.23,
+          "ma20": 27.7,
+          "ma60": 27.56
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260826",
+          "roe": 11.63,
+          "netprofit_yoy": 49.13,
+          "ocf_to_profit": 97.63,
+          "debt_to_assets": 33.82
+        },
+        "valuation": {
+          "pe_ttm": 12.03,
+          "pb": 1.63
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 27.56）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600026.SH",
+        "name": "中远海能",
+        "industry": "水运",
+        "close": 20.07,
+        "pct_chg": -4.11,
+        "score": 77.8,
+        "rank": 29,
+        "status": "kept",
+        "entered_on": "20260903",
+        "membership_reason": "排名 29，仍在保留阈值内",
+        "components": {
+          "technical": 0.807,
+          "liquidity": 0.921,
+          "fundamental": 0.934,
+          "valuation": 0.222,
+          "sector": 0.551
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -14.56,
+          "ret20_pct": -5.77,
+          "ret60_pct": 37.84,
+          "rsi14": 45.7,
+          "atr_pct": 6.46,
+          "ma20": 21.59,
+          "ma60": 19.03
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260829",
+          "roe": 9.46,
+          "netprofit_yoy": 143.21,
+          "ocf_to_profit": 117.66,
+          "debt_to_assets": 49.05
+        },
+        "valuation": {
+          "pe_ttm": 16.36,
+          "pb": 2.28
+        },
+        "signals_today": [
+          {
+            "id": "macd_bear_divergence",
+            "name": "MACD顶背离",
+            "direction": "bearish",
+            "trigger": "近 10 日最高价高于 20~60 日前区间最高价，但对应 DIF 更低，且当日收阴",
+            "invalidation": "收盘价创新高且 DIF 同步创新高",
+            "risk": "强势趋势中顶背离可能持续",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 19.03）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "603127.SH",
+        "name": "昭衍新药",
+        "industry": "医疗保健",
+        "close": 48.71,
+        "pct_chg": -3.83,
+        "score": 77.69,
+        "rank": 30,
+        "status": "kept",
+        "entered_on": "20260924",
+        "membership_reason": "排名 30，仍在保留阈值内",
+        "components": {
+          "technical": 0.71,
+          "liquidity": 0.929,
+          "fundamental": 0.936,
+          "valuation": 0.513,
+          "sector": 0.569
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -7.4,
+          "ret20_pct": 14.42,
+          "ret60_pct": -8.53,
+          "rsi14": 52.9,
+          "atr_pct": 6.79,
+          "ma20": 47.04,
+          "ma60": 47.12
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260829",
+          "roe": 8.64,
+          "netprofit_yoy": 1126.8,
+          "ocf_to_profit": 56.08,
+          "debt_to_assets": 17.09
+        },
+        "valuation": {
+          "pe_ttm": 37.08,
+          "pb": 4.07
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 47.12）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "000690.SZ",
+        "name": "宝新能源",
+        "industry": "火力发电",
+        "close": 5.55,
+        "pct_chg": -1.07,
+        "score": 77.59,
+        "rank": 33,
+        "status": "kept",
+        "entered_on": "20261014",
+        "membership_reason": "排名 33，仍在保留阈值内",
+        "components": {
+          "technical": 0.96,
+          "liquidity": 0.524,
+          "fundamental": 0.755,
+          "valuation": 0.76,
+          "sector": 0.589
+        },
+        "technical": {
+          "trend": "up",
+          "ret5_pct": -0.72,
+          "ret20_pct": 5.51,
+          "ret60_pct": 19.61,
+          "rsi14": 62.1,
+          "atr_pct": 3.31,
+          "ma20": 5.32,
+          "ma60": 5.04
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260822",
+          "roe": 4.91,
+          "netprofit_yoy": 13.28,
+          "ocf_to_profit": 191.12,
+          "debt_to_assets": 41.98
+        },
+        "valuation": {
+          "pe_ttm": 10.99,
+          "pb": 0.93
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 5.04）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600233.SH",
+        "name": "圆通速递",
+        "industry": "仓储物流",
+        "close": 17.6,
+        "pct_chg": 0.8,
+        "score": 77.46,
+        "rank": 34,
+        "status": "kept",
+        "entered_on": "20260929",
+        "membership_reason": "排名 34，仍在保留阈值内",
+        "components": {
+          "technical": 0.75,
+          "liquidity": 0.573,
+          "fundamental": 0.886,
+          "valuation": 0.846,
+          "sector": 0.758
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -3.35,
+          "ret20_pct": 0.76,
+          "ret60_pct": 1.86,
+          "rsi14": 49,
+          "atr_pct": 3.36,
+          "ma20": 17.75,
+          "ma60": 17.73
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260820",
+          "roe": 8.82,
+          "netprofit_yoy": 73.44,
+          "ocf_to_profit": 101.98,
+          "debt_to_assets": 33.11
+        },
+        "valuation": {
+          "pe_ttm": 10.64,
+          "pb": 1.62
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 17.73）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601872.SH",
+        "name": "招商轮船",
+        "industry": "水运",
+        "close": 18.19,
+        "pct_chg": -5.9,
+        "score": 77.2,
+        "rank": 37,
+        "status": "kept",
+        "entered_on": "20260820",
+        "membership_reason": "排名 37，仍在保留阈值内",
+        "components": {
+          "technical": 0.647,
+          "liquidity": 0.966,
+          "fundamental": 0.967,
+          "valuation": 0.556,
+          "sector": 0.551
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -17.58,
+          "ret20_pct": -11.61,
+          "ret60_pct": 28.46,
+          "rsi14": 41.2,
+          "atr_pct": 7.81,
+          "ma20": 20.79,
+          "ma60": 18.68
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260831",
+          "roe": 15.49,
+          "netprofit_yoy": 227.57,
+          "ocf_to_profit": 99.61,
+          "debt_to_assets": 47.53
+        },
+        "valuation": {
+          "pe_ttm": 13.54,
+          "pb": 3.14
+        },
+        "signals_today": [
+          {
+            "id": "macd_bear_divergence",
+            "name": "MACD顶背离",
+            "direction": "bearish",
+            "trigger": "近 10 日最高价高于 20~60 日前区间最高价，但对应 DIF 更低，且当日收阴",
+            "invalidation": "收盘价创新高且 DIF 同步创新高",
+            "risk": "强势趋势中顶背离可能持续",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）"
+          },
+          {
+            "id": "trend_breakdown",
+            "name": "跌破中期均线",
+            "direction": "bearish",
+            "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+            "invalidation": "收盘价重新站上 MA60",
+            "risk": "风险提示信号，不构成做空建议",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 18.68）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": [
+          "波动率高 (ATR/价格 7.8%)"
+        ]
+      },
+      {
+        "ts_code": "300765.SZ",
+        "name": "石药创新",
+        "industry": "生物制药",
+        "close": 44.1,
+        "pct_chg": 2.61,
+        "score": 76.82,
+        "rank": 44,
+        "status": "kept",
+        "entered_on": "20260921",
+        "membership_reason": "排名 44，仍在保留阈值内",
+        "components": {
+          "technical": 0.834,
+          "liquidity": 0.704,
+          "fundamental": 0.964,
+          "valuation": 0.346,
+          "sector": 0.469
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -2.86,
+          "ret20_pct": 3.45,
+          "ret60_pct": 10.33,
+          "rsi14": 50,
+          "atr_pct": 5.67,
+          "ma20": 44.42,
+          "ma60": 42.82
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260818",
+          "roe": 38.2,
+          "netprofit_yoy": 46025.71,
+          "ocf_to_profit": 176.71,
+          "debt_to_assets": 49.96
+        },
+        "valuation": {
+          "pe_ttm": 60.56,
+          "pb": 15.74
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 42.82）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "688002.SH",
+        "name": "睿创微纳",
+        "industry": "通信设备",
+        "close": 164.77,
+        "pct_chg": -1.64,
+        "score": 76.35,
+        "rank": 49,
+        "status": "kept",
+        "entered_on": "20260807",
+        "membership_reason": "排名 49，仍在保留阈值内",
+        "components": {
+          "technical": 0.707,
+          "liquidity": 0.915,
+          "fundamental": 0.975,
+          "valuation": 0.717,
+          "sector": 0.145
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -3.49,
+          "ret20_pct": -9.93,
+          "ret60_pct": 21.6,
+          "rsi14": 41.5,
+          "atr_pct": 5.36,
+          "ma20": 176.44,
+          "ma60": 165.56
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260818",
+          "roe": 17.07,
+          "netprofit_yoy": 258.78,
+          "ocf_to_profit": 104.02,
+          "debt_to_assets": 34.5
+        },
+        "valuation": {
+          "pe_ttm": 37.73,
+          "pb": 9.68
+        },
+        "signals_today": [
+          {
+            "id": "trend_breakdown",
+            "name": "跌破中期均线",
+            "direction": "bearish",
+            "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+            "invalidation": "收盘价重新站上 MA60",
+            "risk": "风险提示信号，不构成做空建议",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 165.56）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "600150.SH",
+        "name": "中国船舶",
+        "industry": "船舶",
+        "close": 35.77,
+        "pct_chg": 0.9,
+        "score": 76.34,
+        "rank": 50,
+        "status": "kept",
+        "entered_on": "20260904",
+        "membership_reason": "排名 50，仍在保留阈值内",
+        "components": {
+          "technical": 0.672,
+          "liquidity": 0.983,
+          "fundamental": 0.776,
+          "valuation": 1,
+          "sector": 0.481
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -7.19,
+          "ret20_pct": -12.37,
+          "ret60_pct": 9.61,
+          "rsi14": 41.6,
+          "atr_pct": 4.5,
+          "ma20": 38.59,
+          "ma60": 35.93
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260831",
+          "roe": 6.73,
+          "netprofit_yoy": 163.51,
+          "ocf_to_profit": 92.15,
+          "debt_to_assets": 62.41
+        },
+        "valuation": {
+          "pe_ttm": 19.19,
+          "pb": 1.77
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 35.93）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002648.SZ",
+        "name": "卫星化学",
+        "industry": "化工原料",
+        "close": 24.9,
+        "pct_chg": 0.36,
+        "score": 75.69,
+        "rank": 56,
+        "status": "kept",
+        "entered_on": "20260817",
+        "membership_reason": "排名 56，仍在保留阈值内",
+        "components": {
+          "technical": 0.66,
+          "liquidity": 0.779,
+          "fundamental": 0.943,
+          "valuation": 1,
+          "sector": 0.259
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -10.33,
+          "ret20_pct": -11.29,
+          "ret60_pct": 8.73,
+          "rsi14": 37.2,
+          "atr_pct": 3.69,
+          "ma20": 26.58,
+          "ma60": 26.28
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260815",
+          "roe": 17.39,
+          "netprofit_yoy": 126.94,
+          "ocf_to_profit": 134.51,
+          "debt_to_assets": 51.03
+        },
+        "valuation": {
+          "pe_ttm": 9.54,
+          "pb": 2.2
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 26.28）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601086.SH",
+        "name": "国芳集团",
+        "industry": "百货",
+        "close": 12.14,
+        "pct_chg": 0.25,
+        "score": 75.62,
+        "rank": 58,
+        "status": "kept",
+        "entered_on": "20260908",
+        "membership_reason": "排名 58，仍在保留阈值内",
+        "components": {
+          "technical": 0.659,
+          "liquidity": 0.862,
+          "fundamental": 0.854,
+          "valuation": 1,
+          "sector": 0.402
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -18.74,
+          "ret20_pct": -19.66,
+          "ret60_pct": 66.53,
+          "rsi14": 43.7,
+          "atr_pct": 10.9,
+          "ma20": 14.97,
+          "ma60": 10.83
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260826",
+          "roe": 4.43,
+          "netprofit_yoy": 214.09,
+          "ocf_to_profit": 119.2,
+          "debt_to_assets": 42.77
+        },
+        "valuation": {
+          "pe_ttm": 68.08,
+          "pb": 5.05
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 10.83）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": [
+          "波动率高 (ATR/价格 10.9%)"
+        ]
+      },
+      {
+        "ts_code": "600989.SH",
+        "name": "宝丰能源",
+        "industry": "化工原料",
+        "close": 22.4,
+        "pct_chg": 1.73,
+        "score": 75.48,
+        "rank": 61,
+        "status": "kept",
+        "entered_on": "20260902",
+        "membership_reason": "排名 61，仍在保留阈值内",
+        "components": {
+          "technical": 0.642,
+          "liquidity": 0.87,
+          "fundamental": 0.917,
+          "valuation": 0.986,
+          "sector": 0.259
+        },
+        "technical": {
+          "trend": "down",
+          "ret5_pct": -3.66,
+          "ret20_pct": -9.31,
+          "ret60_pct": 5.65,
+          "rsi14": 44.1,
+          "atr_pct": 3.58,
+          "ma20": 23.06,
+          "ma60": 23.19
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260813",
+          "roe": 18.78,
+          "netprofit_yoy": 70.14,
+          "ocf_to_profit": 100.9,
+          "debt_to_assets": 41.84
+        },
+        "valuation": {
+          "pe_ttm": 10.69,
+          "pb": 2.98
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 23.19）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "002568.SZ",
+        "name": "百润股份",
+        "industry": "红黄酒",
+        "close": 18.59,
+        "pct_chg": -0.21,
+        "score": 75.32,
+        "rank": 63,
+        "status": "kept",
+        "entered_on": "20260929",
+        "membership_reason": "排名 63，仍在保留阈值内",
+        "components": {
+          "technical": 0.831,
+          "liquidity": 0.337,
+          "fundamental": 0.847,
+          "valuation": 1,
+          "sector": 0.576
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -5.06,
+          "ret20_pct": 4.5,
+          "ret60_pct": 2.26,
+          "rsi14": 49.3,
+          "atr_pct": 3.28,
+          "ma20": 18.56,
+          "ma60": 18.59
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260805",
+          "roe": 9.49,
+          "netprofit_yoy": 23.08,
+          "ocf_to_profit": 75.43,
+          "debt_to_assets": 41.4
+        },
+        "valuation": {
+          "pe_ttm": 26.61,
+          "pb": 3.88
+        },
+        "signals_today": [],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 18.59）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      },
+      {
+        "ts_code": "601975.SH",
+        "name": "招商南油",
+        "industry": "水运",
+        "close": 3.9,
+        "pct_chg": -3.94,
+        "score": 72.24,
+        "rank": 119,
+        "status": "kept",
+        "entered_on": "20260904",
+        "membership_reason": "排名 119，仍在保留阈值内",
+        "components": {
+          "technical": 0.581,
+          "liquidity": 0.825,
+          "fundamental": 0.838,
+          "valuation": 0.889,
+          "sector": 0.551
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -18.41,
+          "ret20_pct": -19.25,
+          "ret60_pct": 15.38,
+          "rsi14": 38.6,
+          "atr_pct": 7.12,
+          "ma20": 4.52,
+          "ma60": 4.08
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260828",
+          "roe": 6.82,
+          "netprofit_yoy": 42.41,
+          "ocf_to_profit": 93.2,
+          "debt_to_assets": 10.72
+        },
+        "valuation": {
+          "pe_ttm": 11.75,
+          "pb": 1.5
+        },
+        "signals_today": [
+          {
+            "id": "macd_bear_divergence",
+            "name": "MACD顶背离",
+            "direction": "bearish",
+            "trigger": "近 10 日最高价高于 20~60 日前区间最高价，但对应 DIF 更低，且当日收阴",
+            "invalidation": "收盘价创新高且 DIF 同步创新高",
+            "risk": "强势趋势中顶背离可能持续",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 4.08）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": [
+          "波动率高 (ATR/价格 7.1%)"
+        ]
+      },
+      {
+        "ts_code": "300358.SZ",
+        "name": "楚天科技",
+        "industry": "医疗保健",
+        "close": 8.68,
+        "pct_chg": -2.36,
+        "score": 71.73,
+        "rank": 128,
+        "status": "kept",
+        "entered_on": "20260929",
+        "membership_reason": "排名 128，仍在保留阈值内",
+        "components": {
+          "technical": 0.757,
+          "liquidity": 0.427,
+          "fundamental": 0.779,
+          "valuation": 0.974,
+          "sector": 0.569
+        },
+        "technical": {
+          "trend": "range",
+          "ret5_pct": -8.34,
+          "ret20_pct": 6.9,
+          "ret60_pct": 3.09,
+          "rsi14": 43.6,
+          "atr_pct": 4.67,
+          "ma20": 8.99,
+          "ma60": 8.76
+        },
+        "fundamentals": {
+          "report_period": "20260630",
+          "announced": "20260825",
+          "roe": 2.61,
+          "netprofit_yoy": 1280.71,
+          "ocf_to_profit": 20.29,
+          "debt_to_assets": 55.5
+        },
+        "valuation": {
+          "pe_ttm": 15.06,
+          "pb": 1.11
+        },
+        "signals_today": [
+          {
+            "id": "trend_breakdown",
+            "name": "跌破中期均线",
+            "direction": "bearish",
+            "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+            "invalidation": "收盘价重新站上 MA60",
+            "risk": "风险提示信号，不构成做空建议",
+            "evidence": "evidence_supported",
+            "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+          }
+        ],
+        "watch_invalidation": [
+          "收盘价跌破 MA60（约 8.76）视为趋势条件失效",
+          "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+        ],
+        "risks": []
+      }
+    ]
+  },
+  "signals": {
+    "market_summary": [
+      {
+        "id": "rsi_oversold_rebound",
+        "name": "RSI超卖反弹",
+        "direction": "bullish",
+        "trigger": "RSI14 由 30 以下上穿 30",
+        "invalidation": "RSI14 再次跌破 30 或收盘价创 20 日新低",
+        "risk": "弱势股超卖后继续超卖",
+        "evidence": "research_only",
+        "evidence_basis": "10日超额 -0.0902%，t=-0.45，事件 20397 个/432 天（20240102~20261016）；在 range 状态下方向相反",
+        "market_count": 308
+      },
+      {
+        "id": "macd_bear_divergence",
+        "name": "MACD顶背离",
+        "direction": "bearish",
+        "trigger": "近 10 日最高价高于 20~60 日前区间最高价，但对应 DIF 更低，且当日收阴",
+        "invalidation": "收盘价创新高且 DIF 同步创新高",
+        "risk": "强势趋势中顶背离可能持续",
+        "evidence": "evidence_supported",
+        "evidence_basis": "10日超额 -0.2912%，t=-2.04，事件 79351 个/531 天（20240102~20261016）",
+        "market_count": 207
+      },
+      {
+        "id": "macd_bull_divergence",
+        "name": "MACD底背离",
+        "direction": "bullish",
+        "trigger": "近 10 日最低价低于 20~60 日前区间最低价，但对应 DIF 更高，且当日收阳并站上 MA5",
+        "invalidation": "收盘价跌破背离低点",
+        "risk": "下跌趋势中背离可多次出现，需结合市场环境",
+        "evidence": "contradicted",
+        "evidence_basis": "10日超额 -0.3723%，t=-2.77，事件 63064 个/521 天（20240102~20261016）；在 downtrend,uptrend 状态下方向相反",
+        "market_count": 99
+      },
+      {
+        "id": "trend_up",
+        "name": "多头趋势",
+        "direction": "bullish",
+        "trigger": "收盘价 > MA20 > MA60，且 MA20 高于 5 个交易日前（首次满足当日触发）",
+        "invalidation": "收盘价跌破 MA60，或 MA20 拐头低于 5 日前",
+        "risk": "趋势末端追高；震荡市中频繁进出",
+        "evidence": "contradicted",
+        "evidence_basis": "10日超额 -0.4696%，t=-3.87，事件 71535 个/533 天（20240102~20261016）；在 downtrend 状态下方向相反",
+        "market_count": 85
+      },
+      {
+        "id": "trend_breakdown",
+        "name": "跌破中期均线",
+        "direction": "bearish",
+        "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+        "invalidation": "收盘价重新站上 MA60",
+        "risk": "风险提示信号，不构成做空建议",
+        "evidence": "evidence_supported",
+        "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）",
+        "market_count": 76
+      },
+      {
+        "id": "macd_golden_cross",
+        "name": "MACD金叉",
+        "direction": "bullish",
+        "trigger": "DIF 上穿 DEA（前一日 DIF ≤ DEA，当日 DIF > DEA）",
+        "invalidation": "DIF 重新下穿 DEA",
+        "risk": "震荡区间内金叉/死叉反复，信号滞后",
+        "evidence": "contradicted",
+        "evidence_basis": "10日超额 -0.4054%，t=-4.12，事件 85122 个/532 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反",
+        "market_count": 60
+      },
+      {
+        "id": "boll_squeeze_breakout",
+        "name": "布林收口突破",
+        "direction": "bullish",
+        "trigger": "布林带宽处于近 120 日最低 20% 分位后，收盘价上穿上轨",
+        "invalidation": "收盘价跌回布林中轨下方",
+        "risk": "收口方向判断错误时回撤较快",
+        "evidence": "contradicted",
+        "evidence_basis": "10日超额 -0.9968%，t=-5.5，事件 36063 个/525 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反",
+        "market_count": 38
+      },
+      {
+        "id": "breakout_20d",
+        "name": "20日放量突破",
+        "direction": "bullish",
+        "trigger": "收盘价突破此前 20 个交易日最高价，且当日成交量 ≥ 20 日均量 1.5 倍",
+        "invalidation": "收盘价回落至突破前 20 日最高价下方 3% 以上",
+        "risk": "假突破；涨停封板次日无法按开盘价成交",
+        "evidence": "contradicted",
+        "evidence_basis": "10日超额 -1.3189%，t=-9.27，事件 82243 个/533 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反",
+        "market_count": 37
+      },
+      {
+        "id": "overheated",
+        "name": "短期过热",
+        "direction": "bearish",
+        "trigger": "RSI6 > 85 且 CCI14 > 200",
+        "invalidation": "RSI6 回落至 70 以下",
+        "risk": "强势股可持续过热，仅作风险提示",
+        "evidence": "evidence_supported",
+        "evidence_basis": "10日超额 -1.7316%，t=-6.48，事件 27209 个/532 天（20240102~20261016）",
+        "market_count": 9
+      }
+    ],
+    "evidence_window": {
+      "start": "20240102",
+      "end": "20261016",
+      "computed_at": "2026-10-16T16:16:16.867Z"
+    },
+    "note": "evidence=evidence_supported 表示历史样本内超额收益统计显著；research_only 为研究指标，不应视为交易规则。"
+  },
+  "risks": [
+    "行业分类为当前口径，历史重放存在行业归属偏差"
+  ],
+  "disclaimer": "评分为启发式规则排序，不代表盈利概率；本报告仅为研究辅助，不构成投资建议。"
+}

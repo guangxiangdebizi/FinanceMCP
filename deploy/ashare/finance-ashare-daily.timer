@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the FinanceMCP A-share daily pipeline after the close (Asia/Shanghai)
+
+[Timer]
+# First run after Tushare publishes daily/daily_basic; the second run fills in
+# anything that was still missing (the report is regenerated, NOT_READY → READY).
+OnCalendar=Mon..Fri *-*-* 18:40:00 Asia/Shanghai
+OnCalendar=Mon..Fri *-*-* 21:10:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

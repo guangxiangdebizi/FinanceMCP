@@ -17,6 +17,9 @@ __pycache__/
 .venv/
 venv/
 
+# A-share local cache and report snapshots
+/data/
+
 # Logs
 logs/
 *.log

@@ -27,12 +27,12 @@ export function calculateRequiredDays(indicators: string[]): number {
         if (params.length < 3) continue; // 跳过参数不完整的指标
         const slowPeriod = params[1];
         const signalPeriod = params[2];
-        requiredDays = slowPeriod + signalPeriod + 10; // 额外10天保证计算准确性
+        requiredDays = slowPeriod * 3 + signalPeriod; // EMA 以首日价格起算，需要足够预热期收敛
         break;
       case 'rsi':
         if (params.length < 1) continue;
         const rsiPeriod = params[0];
-        requiredDays = rsiPeriod + 10;
+        requiredDays = rsiPeriod * 5; // Wilder 平滑需要预热期收敛
         break;
       case 'kdj':
         if (params.length < 1) continue;
@@ -94,3 +94,26 @@ export function filterDataToUserRange(data: any[], startDate: string, endDate: s
     return tradeDate >= startDate && tradeDate <= endDate;
   });
 } 
+/**
+ * 按同一掩码过滤行情行和技术指标数组，保证截取用户区间后两者仍逐行对齐
+ */
+export function filterRowsAndIndicators(
+  data: any[],
+  indicators: Record<string, any>,
+  startDate: string,
+  endDate: string,
+): any[] {
+  const keep = data.map(item => item.trade_date >= startDate && item.trade_date <= endDate);
+  const pick = (values: any[]) => values.filter((_, i) => keep[i]);
+  for (const key of Object.keys(indicators)) {
+    const value = indicators[key];
+    if (Array.isArray(value)) {
+      indicators[key] = pick(value);
+    } else if (value && typeof value === 'object') {
+      for (const subKey of Object.keys(value)) {
+        if (Array.isArray(value[subKey])) value[subKey] = pick(value[subKey]);
+      }
+    }
+  }
+  return data.filter((_, i) => keep[i]);
+}

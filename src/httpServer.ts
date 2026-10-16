@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
 import { getAvailableToolList, dispatchTool } from "./dispatch.js";
@@ -59,7 +59,32 @@ function parseConfigHeader(req: Request): Record<string, unknown> | undefined {
   }
 }
 
+// Client authentication and data-source credentials are separate concerns:
+// - MCP_AUTH_TOKEN set: `Authorization: Bearer` authenticates the MCP client
+//   and is never forwarded to Tushare.
+// - MCP_AUTH_TOKEN unset: legacy behaviour, Bearer is read as a Tushare token
+//   unless MCP_BEARER_AS_TUSHARE_TOKEN=0.
+// - MCP_ACCEPT_REQUEST_CREDENTIALS=0: ignore every request-supplied data-source
+//   credential and use only the server environment.
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN?.trim() || '';
+const BEARER_AS_TUSHARE_TOKEN = !MCP_AUTH_TOKEN && process.env.MCP_BEARER_AS_TUSHARE_TOKEN !== '0';
+const ACCEPT_REQUEST_CREDENTIALS = process.env.MCP_ACCEPT_REQUEST_CREDENTIALS !== '0';
+
+function bearerToken(req: Request): string | undefined {
+  const auth = req.headers['authorization'];
+  if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return undefined;
+}
+
+function isClientAuthorized(req: Request): boolean {
+  if (!MCP_AUTH_TOKEN) return true;
+  const presented = Buffer.from(bearerToken(req) ?? '');
+  const expected = Buffer.from(MCP_AUTH_TOKEN);
+  return presented.length === expected.length && timingSafeEqual(presented, expected);
+}
+
 function extractTokenFromHeaders(req: Request): string | undefined {
+  if (!ACCEPT_REQUEST_CREDENTIALS) return undefined;
   const h = req.headers;
   
   // 1. 尝试从标准请求头读取
@@ -69,11 +94,11 @@ function extractTokenFromHeaders(req: Request): string | undefined {
     return tokenHeader.trim();
   }
   
-  // 2. 尝试从 Authorization Bearer 读取
-  const auth = h['authorization'];
-  if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) {
+  // 2. 尝试从 Authorization Bearer 读取（仅在未启用客户端认证时）
+  const bearer = BEARER_AS_TUSHARE_TOKEN ? bearerToken(req) : undefined;
+  if (bearer) {
     console.log(`[TOKEN] Found in Authorization Bearer header`);
-    return auth.slice(7).trim();
+    return bearer;
   }
   
   // 3. 🔍 尝试从 Smithery 特殊头读取（可能的头名称）
@@ -98,6 +123,7 @@ function extractTokenFromHeaders(req: Request): string | undefined {
 }
 
 function extractQverisApiKeyFromHeaders(req: Request): string | undefined {
+  if (!ACCEPT_REQUEST_CREDENTIALS) return undefined;
   const header = req.headers['x-qveris-api-key'];
   if (typeof header === 'string' && header.trim()) {
     console.log('[TOKEN] Found Qveris key in X-Qveris-Api-Key header');
@@ -113,6 +139,7 @@ function extractQverisApiKeyFromHeaders(req: Request): string | undefined {
 }
 
 function extractTwinglyApiKeyFromHeaders(req: Request): string | undefined {
+  if (!ACCEPT_REQUEST_CREDENTIALS) return undefined;
   const header = req.headers['x-twingly-api-key'];
   if (typeof header === 'string' && header.trim()) {
     console.log('[TOKEN] Found Twingly key in X-Twingly-Api-Key header');
@@ -128,6 +155,7 @@ function extractTwinglyApiKeyFromHeaders(req: Request): string | undefined {
 }
 
 function extractSourcePriorityFromHeaders(req: Request) {
+  if (!ACCEPT_REQUEST_CREDENTIALS) return undefined;
   const header = req.headers['x-finance-source-priority'];
   const config = parseConfigHeader(req);
   const configured = config?.FINANCE_SOURCE_PRIORITY ?? config?.SOURCE_PRIORITY;
@@ -140,7 +168,8 @@ function extractSourcePriorityFromHeaders(req: Request) {
 }
 
 const app = express();
-app.set('trust proxy', 'loopback');
+// Behind a containerised reverse proxy set MCP_TRUST_PROXY (e.g. "loopback,uniquelocal") so req.ip is the client.
+app.set('trust proxy', process.env.MCP_TRUST_PROXY?.trim() || 'loopback');
 app.disable('x-powered-by');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.MCP_HTTP_HOST?.trim() || process.env.HOST?.trim() || '127.0.0.1';
@@ -199,6 +228,37 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'healthy', transport: 'streamable-http', activeSessions: sessions.size });
+});
+
+// Optional fixed-window rate limit per client IP for /mcp (MCP_RATE_LIMIT requests per minute).
+const RATE_LIMIT = Number(process.env.MCP_RATE_LIMIT || 0);
+const rateWindows = new Map<string, { start: number; count: number }>();
+function rateLimited(req: Request): boolean {
+  if (!(RATE_LIMIT > 0)) return false;
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = rateWindows.get(key);
+  if (!entry || now - entry.start >= 60_000) {
+    rateWindows.set(key, { start: now, count: 1 });
+    if (rateWindows.size > 10_000) {
+      for (const [k, v] of rateWindows) if (now - v.start >= 60_000) rateWindows.delete(k);
+    }
+    return false;
+  }
+  entry.count++;
+  return entry.count > RATE_LIMIT;
+}
+
+app.use('/mcp', (req: Request, res: Response, next) => {
+  if (req.method === 'OPTIONS') return next();
+  if (!isClientAuthorized(req)) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null });
+  }
+  if (rateLimited(req)) {
+    return res.status(429).json({ jsonrpc: '2.0', error: { code: -32002, message: 'Too many requests' }, id: null });
+  }
+  next();
 });
 
 app.get('/mcp', (req: Request, res: Response) => {
@@ -264,6 +324,10 @@ app.post('/mcp', async (req: Request, res: Response) => {
     }, async () => getAvailableToolList());
     console.log(`📋 [MCP-tools/list] Returning ${availableTools.length} tools`);
     return res.json({ jsonrpc: '2.0', result: { tools: availableTools }, id: body.id });
+  }
+
+  if (method === 'ping') {
+    return res.json({ jsonrpc: '2.0', result: {}, id: body.id });
   }
 
   // 明确表示不支持 resources 和 prompts（返回空列表而不是错误）

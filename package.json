@@ -10,7 +10,8 @@
     "finance-mcp": "build/index.js",
     "finance-mcp-http": "build/httpServer.js",
     "finance-cache-gateway": "build/cacheGateway.js",
-    "finance-cache": "build/cacheCli.js"
+    "finance-cache": "build/cacheCli.js",
+    "finance-ashare": "build/ashare/cli.js"
   },
   "files": [
     "build",
@@ -20,7 +21,7 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc && node -e \"for(const f of ['build/index.js','build/httpServer.js','build/cacheGateway.js','build/cacheCli.js']){try{require('fs').chmodSync(f,'755')}catch(e){}}\"",
+    "build": "npm run clean && tsc && node -e \"for(const f of ['build/index.js','build/httpServer.js','build/cacheGateway.js','build/cacheCli.js','build/ashare/cli.js']){try{require('fs').chmodSync(f,'755')}catch(e){}}\"",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
@@ -31,7 +32,9 @@
     "start:cache": "node build/cacheGateway.js",
     "start:sse": "npx supergateway --stdio \"node build/index.js\" --port 3100",
     "test": "npm run build && node --test test/*.test.mjs",
-    "test:cache": "npm run build && node --test test/cache-gateway.test.mjs"
+    "test:cache": "npm run build && node --test test/cache-gateway.test.mjs",
+    "test:ashare": "npm run build && node --test test/ashare-*.test.mjs",
+    "ashare": "node build/ashare/cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -43,7 +46,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.11.24",
+    "@types/node": "^22.20.5",
     "typescript": "^5.3.3"
   }
 }
