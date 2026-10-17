@@ -107,6 +107,7 @@ node build/ashare/cli.js pool-eval --start 20260701 --end 20261009 [--research] 
 node build/ashare/cli.js acceptance --days 3 [--allow-degraded]  # 连续真实交易日验收
 node build/ashare/cli.js status                                  # 数据完整性状态
 node build/ashare/cli.js quality --date 20261016
+node build/ashare/cli.js audit --start 20240102 --end 20261016 [--fix]   # 历史缓存缺口审计；--fix 只补缺失部分（见 ashare-data-service.md）
 node build/ashare/cli.js migrate                                 # 旧版缓存（按日期主键）一次性迁移
 ```
 
@@ -156,7 +157,8 @@ handle /ashare/mcp* {
 与已验证的 XFullReader 接入方式一致（Custom MCP server，“No authentication”）：
 
 - Server URL：`https://share.shijingchang.cn/ashare/mcp`
-- 暴露工具：`ashare_data_status`、`ashare_daily_report`、`ashare_watchlist`、`ashare_stock_analysis`、`ashare_sector_rank`（均 `readOnlyHint`）
+- 暴露工具：`ashare_data_status`、`ashare_daily_report`、`ashare_watchlist`、`ashare_stock_analysis`、`ashare_sector_rank`，以及数据查询工具
+  `ashare_stock_history`、`ashare_financial_data`、`ashare_market_data`、`ashare_stock_basic`（均 `readOnlyHint`；数据契约见 `docs/ashare-data-service.md`）
 - 定时任务建议在北京时间 21:30 之后运行（两次数据更新之后）；更早调用当日报告会得到 `PENDING`/`NOT_READY`，这是预期行为。
 - 匿名入口的安全边界：工具只读（SQLite 只读连接），只访问本地 A 股缓存，不接受请求中的数据源凭证，不触发 Tushare 等外部 API；
   每 IP 每分钟 30 次（`MCP_RATE_LIMIT`）、请求体 ≤ 64 KB（`MCP_BODY_LIMIT`）、会话表 ≤ 1000（`MCP_MAX_SESSIONS`）。

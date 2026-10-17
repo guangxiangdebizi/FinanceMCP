@@ -1,0 +1,120 @@
+{
+  "url": "https://share.shijingchang.cn/ashare/mcp",
+  "date": "20261016",
+  "checked_at": "2026-10-17T13:59:54.969Z",
+  "passed": true,
+  "results": [
+    {
+      "name": "initialize",
+      "ok": true,
+      "status": 200,
+      "server": {
+        "name": "FinanceMCP",
+        "version": "4.11.2"
+      }
+    },
+    {
+      "name": "tools/list",
+      "ok": true,
+      "names": [
+        "ashare_data_status",
+        "ashare_daily_report",
+        "ashare_watchlist",
+        "ashare_stock_analysis",
+        "ashare_sector_rank",
+        "ashare_stock_history",
+        "ashare_financial_data",
+        "ashare_market_data",
+        "ashare_stock_basic"
+      ]
+    },
+    {
+      "name": "tools/call ashare_data_status",
+      "ok": true,
+      "status": 200,
+      "ms": 71,
+      "chars": 7693,
+      "head": "# A股数据状态 20261016 - 数据质量：**READY** - 日线 5567 条（前一交易日 5565），每日指标覆盖 1，复权因子覆盖 1 - 核心指数：000001.SH, 000300.SH, 000688.SH, 000"
+    },
+    {
+      "name": "tools/call ashare_daily_report",
+      "ok": true,
+      "status": 200,
+      "ms": 13,
+      "chars": 6803,
+      "head": "# A股日报 20261016（READY）  报告ID：`ASR-20261016-20261016163620-ddd0d0`｜生成：2026-10-17T00:36:20.909+08:00｜规则版本：report_schema=as"
+    },
+    {
+      "name": "tools/call ashare_daily_report:json",
+      "ok": true,
+      "status": 200,
+      "ms": 14,
+      "chars": 92642,
+      "head": "{   \"report_id\": \"ASR-20261016-20261016163620-ddd0d0\",   \"schema\": \"ashare-report-1.0.0\",   \"as_of_trade_date\": \"2026101"
+    },
+    {
+      "name": "tools/call ashare_watchlist",
+      "ok": true,
+      "status": 200,
+      "ms": 9,
+      "chars": 23005,
+      "head": "{   \"report_id\": \"ASR-20261016-20261016163620-ddd0d0\",   \"as_of_trade_date\": \"20261016\",   \"versions\": {     \"score\": \"s"
+    },
+    {
+      "name": "tools/call ashare_stock_analysis",
+      "ok": true,
+      "status": 200,
+      "ms": 123,
+      "chars": 4847,
+      "head": "{   \"ts_code\": \"600519.SH\",   \"name\": \"贵州茅台\",   \"industry\": \"白酒\",   \"as_of_trade_date\": \"20261016\",   \"indicator_version"
+    },
+    {
+      "name": "tools/call ashare_sector_rank",
+      "ok": true,
+      "status": 200,
+      "ms": 11,
+      "chars": 745,
+      "head": "# 行业强弱排名 20261016（报告 ASR-20261016-20261016163620-ddd0d0） 行业为 Tushare stock_basic 行业；强度 = 0.5·pr(20日中位收益) + 0.3·pr(5日中位收益"
+    },
+    {
+      "name": "tools/call ashare_stock_history",
+      "ok": true,
+      "status": 200,
+      "ms": 33,
+      "chars": 5235,
+      "head": "{\"ts_code\":\"600519.SH\",\"name\":\"贵州茅台\",\"list_date\":\"20010827\",\"delist_date\":null,\"list_status\":\"L\",\"query\":{\"start_date\":\""
+    },
+    {
+      "name": "tools/call ashare_financial_data",
+      "ok": true,
+      "status": 200,
+      "ms": 9,
+      "chars": 2979,
+      "head": "{\"ts_code\":\"600519.SH\",\"name\":\"贵州茅台\",\"as_of_date\":\"20261016\",\"query\":{\"start_period\":null,\"end_period\":null,\"limit\":4,\"i"
+    },
+    {
+      "name": "tools/call ashare_market_data",
+      "ok": true,
+      "status": 200,
+      "ms": 80,
+      "chars": 3113,
+      "head": "{\"query\":{\"start_date\":\"20261016\",\"end_date\":\"20261016\",\"indices\":[\"000001.SH\",\"399001.SZ\",\"399006.SZ\",\"000300.SH\",\"0009"
+    },
+    {
+      "name": "tools/call ashare_stock_basic",
+      "ok": true,
+      "status": 200,
+      "ms": 5,
+      "chars": 876,
+      "head": "{\"mode\":\"codes\",\"stocks\":[{\"ts_code\":\"600519.SH\",\"symbol\":\"600519\",\"name\":\"贵州茅台\",\"area\":\"贵州\",\"industry\":\"白酒\",\"market\":\"主"
+    },
+    {
+      "name": "report fields",
+      "ok": true,
+      "report_id": "ASR-20261016-20261016163620-ddd0d0",
+      "as_of": "20261016",
+      "status": "READY",
+      "members": 40
+    }
+  ]
+}
