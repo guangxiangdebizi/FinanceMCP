@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { ashareDataDir, logSync, upsertRows } from './db.js';
 import { fetchAll } from './fetch.js';
 import {
-  checkQuality, CORE_INDICES, DATED_DATASETS, GAP_CHECK_MAX_AGE_DAYS, gapCheckFresh, REQUIRED_INDICES, syncIndexRange, syncSuspend, syncTradeDate, tradeDaysBetween,
+  checkQuality, CORE_INDICES, DATED_DATASETS, GAP_CHECK_MAX_AGE_DAYS, gapCheckFresh, INVALID_BAR_KINDS, INVALID_BAR_SQL, REQUIRED_INDICES,
+  syncIndexRange, syncSuspend, syncTradeDate, tradeDaysBetween, type InvalidBarKind, type InvalidBarKinds,
 } from './ingest.js';
 
 /**
- * Cache audit (audit-1.1.0): a repeatable check of stored history that does
+ * Cache audit (audit-1.2.0): a repeatable check of stored history that does
  * not rely on whole-market row ratios alone. For each trade date:
  * - every stock listed on that date (current stock_basic) without a `daily`
  *   bar is classified, in this order, as suspended (suspend_d), pending
@@ -35,8 +36,18 @@ import {
  * - latest refresh incomplete/failed (suspend_d included), and suspension
  *   data not yet synced.
  * GAP = something to re-fetch; WARN = disclosed but not a gap; OK otherwise.
+ *
+ * audit-1.2.0 (phase B P0): the invalid-bar predicate is NULL-safe. SQLite
+ * comparisons with NULL are NULL, not true, so the earlier predicate silently
+ * passed rows with a NULL open/high/low (and `vol < 0` passed a NULL vol).
+ * The predicate now lives in ingest.ts as INVALID_BAR_SQL, the exact
+ * definition checkQuality() uses, so audit and quality gate cannot disagree;
+ * auditDay additionally reports invalid_bar_kinds with one count per
+ * category. `invalid_bars` / `invalid_bar_codes` keep their meaning (count of
+ * invalid rows, and up to 200 affected codes for display). No scoring rule,
+ * eligibility rule or score changed.
  */
-export const AUDIT_VERSION = 'audit-1.1.0';
+export const AUDIT_VERSION = 'audit-1.2.0';
 
 /**
  * A gap_check row records what Tushare answered at `checked_at`; an empty
@@ -67,6 +78,8 @@ export interface AuditDay {
   missing_optional_indices: string[];
   invalid_bars: number;
   invalid_bar_codes: string[];
+  /** Per-category counts; a row can match several categories, so the sum can exceed invalid_bars. */
+  invalid_bar_kinds: InvalidBarKinds;
   pct_chg_inconsistent: number;
   pre_close_conflicts: number;
   factor_revision_boundaries: string[];
@@ -106,8 +119,17 @@ function auditMissing(db: DatabaseSync, day: string, now = Date.now()) {
   return { suspended, pending, unexplained, upstreamMissing, expired };
 }
 
-const INVALID_BAR = `close IS NULL OR close <= 0 OR open <= 0 OR high < low OR close > high * 1.0001 OR close < low * 0.9999
-  OR open > high * 1.0001 OR open < low * 0.9999 OR vol < 0 OR amount < 0 OR (vol > 0 AND (amount IS NULL OR amount <= 0))`;
+const INVALID_BAR = INVALID_BAR_SQL;
+
+/** Per-category invalid-bar counts for one date (same predicate as INVALID_BAR). */
+function invalidBarKinds(db: DatabaseSync, day: string): InvalidBarKinds {
+  const select = Object.entries(INVALID_BAR_KINDS)
+    .map(([kind, expr]) => `SUM(CASE WHEN ${expr} THEN 1 ELSE 0 END) "${kind}"`).join(',\n      ');
+  const row = db.prepare(`SELECT
+      ${select}
+    FROM daily WHERE trade_date = ?`).get(day) as Record<string, number | null>;
+  return Object.fromEntries(Object.keys(INVALID_BAR_KINDS).map(k => [k, Number(row[k] ?? 0)])) as InvalidBarKinds;
+}
 
 export function auditDay(db: DatabaseSync, day: string, prev?: string): AuditDay {
   const issues: string[] = [];
@@ -136,12 +158,17 @@ export function auditDay(db: DatabaseSync, day: string, prev?: string): AuditDay
   if (missingCore.length) { issues.push(`核心指数缺失 ${missingCore.join(',')}`); gap = true; }
   if (missingOptional.length) issues.push(`非核心指数缺失 ${missingOptional.join(',')}`);
   const invalidCodes = (db.prepare(`SELECT ts_code FROM daily WHERE trade_date = ? AND (${INVALID_BAR}) ORDER BY ts_code`).all(day) as any[]).map(r => r.ts_code as string);
+  const invalidKinds = invalidBarKinds(db, day);
   const bad = db.prepare(`SELECT
       SUM(CASE WHEN pre_close > 0 AND ABS((close / pre_close - 1) * 100 - pct_chg) > 0.05 THEN 1 ELSE 0 END) pct
     FROM daily WHERE trade_date = ?`).get(day) as any;
   const invalid = invalidCodes.length;
   const pct = Number(bad.pct ?? 0);
-  if (invalid) { issues.push(`${invalid} 条行情 OHLC/成交量/成交额非法`); gap = true; }
+  if (invalid) {
+    const parts = (Object.entries(invalidKinds) as [InvalidBarKind, number][]).filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`);
+    issues.push(`${invalid} 条行情 OHLC/成交量/成交额非法（${parts.join(', ')}）`);
+    gap = true;
+  }
   if (pct) issues.push(`${pct} 条行情涨跌幅与昨收不一致`);
   let conflicts = 0;
   if (prev) {
@@ -194,6 +221,7 @@ export function auditDay(db: DatabaseSync, day: string, prev?: string): AuditDay
     missing_optional_indices: missingOptional,
     invalid_bars: invalid,
     invalid_bar_codes: invalidCodes.slice(0, 200),
+    invalid_bar_kinds: invalidKinds,
     pct_chg_inconsistent: pct,
     pre_close_conflicts: conflicts,
     factor_revision_boundaries: revisions,
@@ -296,6 +324,8 @@ export async function fillGaps(db: DatabaseSync, audit: AuditResult) {
   // Per-stock repairs are logged under their own dataset name so the date-level sync_log rows keep their meaning.
   const repairLog = (table: string, code: string, day: string, rows: number) =>
     logSync(db, `repair:${table}`, `${code}:${day}`, rows, rows ? 'ok' : 'empty', 'audit --fix per-stock repair', { refresh_status: 'REFRESH_OK', write_mode: rows ? 'merged' : 'none' });
+  // Repair scope is exactly one (ts_code, trade_date): the request carries both,
+  // and any upstream row for another stock or date is dropped before writing.
   const fetchStock = async (table: string, code: string, day: string) => {
     const ds = DATED_DATASETS.find(x => x.table === table)!;
     const rows = (await fetchAll(ds.api, { ts_code: code, start_date: day, end_date: day }, ds.fields)).filter(r => r.ts_code === code && r.trade_date === day);
@@ -319,6 +349,8 @@ export async function fillGaps(db: DatabaseSync, audit: AuditResult) {
     }
     if (d.daily && d.invalid_bars) {
       // invalid_bar_codes is a bounded display sample, never the repair worklist.
+      // The worklist re-queries with the same NULL-safe predicate auditDay used,
+      // and each entry is repaired as that stock and date only.
       const codes = (db.prepare(`SELECT ts_code FROM daily WHERE trade_date = ? AND (${INVALID_BAR}) ORDER BY ts_code`).all(d.trade_date) as any[]).map(r => r.ts_code);
       for (const code of codes) {
         const n = await fetchStock('daily', code, d.trade_date);

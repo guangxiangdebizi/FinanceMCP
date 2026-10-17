@@ -299,6 +299,46 @@ export async function syncFinaIndicator(db: DatabaseSync, asOf: string, periods 
 
 // ---------------------------------------------------------------- quality
 
+/**
+ * One invalid `daily` bar, as a NULL-safe SQL predicate (audit-1.2.0).
+ *
+ * SQLite comparisons with NULL yield NULL, not true, so a plain `open <= 0`
+ * never fires on a NULL open. Every field is therefore tested explicitly.
+ * The categories below are diagnostic (a row can match several); their union
+ * is the single definition shared by `auditDay`, `audit --fix` and
+ * `checkQuality`, so the quality gate can never disagree with the audit.
+ *
+ * Volume/amount policy:
+ * - a NULL open/high/low/close, vol or amount is invalid: it is missing
+ *   evidence, not a zero. Nothing is coerced to 0 anywhere;
+ * - non-positive prices, `high < low`, close/open outside [low, high] and
+ *   negative vol/amount are invalid;
+ * - `vol > 0` with a NULL or non-positive amount is invalid (trading volume
+ *   without turnover);
+ * - `vol = 0` with a NULL amount is invalid as well: a missing amount is not
+ *   evidence of a zero-turnover day, and a genuine zero-volume bar must still
+ *   report amount = 0. `vol = 0` with `amount = 0` is valid.
+ */
+export const INVALID_BAR_KINDS = {
+  null_open: 'open IS NULL',
+  null_high: 'high IS NULL',
+  null_low: 'low IS NULL',
+  null_close: 'close IS NULL',
+  null_vol: 'vol IS NULL',
+  null_amount: 'amount IS NULL',
+  nonpositive: 'open <= 0 OR high <= 0 OR low <= 0 OR close <= 0',
+  high_low: 'high < low',
+  close_out_of_band: 'close > high * 1.0001 OR close < low * 0.9999',
+  open_out_of_band: 'open > high * 1.0001 OR open < low * 0.9999',
+  negative_vol_amount: 'vol < 0 OR amount < 0',
+  missing_amount: 'vol > 0 AND (amount IS NULL OR amount <= 0)',
+} as const;
+export type InvalidBarKind = keyof typeof INVALID_BAR_KINDS;
+export type InvalidBarKinds = Record<InvalidBarKind, number>;
+
+/** Union of {@link INVALID_BAR_KINDS}; the one definition used by every quality check. */
+export const INVALID_BAR_SQL = `(${Object.values(INVALID_BAR_KINDS).map(expr => `(${expr})`).join(' OR ')})`;
+
 export type QualityStatus = 'READY' | 'DEGRADED' | 'NOT_READY';
 export interface QualityReport {
   trade_date: string;
@@ -401,7 +441,11 @@ export function checkQuality(db: DatabaseSync, date: string, persist = true): Qu
       SUM(CASE WHEN close IS NULL OR close <= 0 THEN 1 ELSE 0 END) bad_close,
       SUM(CASE WHEN high < low OR close > high * 1.0001 OR close < low * 0.9999 THEN 1 ELSE 0 END) ohlc_inconsistent,
       SUM(CASE WHEN vol > 0 AND (amount IS NULL OR amount <= 0) THEN 1 ELSE 0 END) zero_amount,
-      SUM(CASE WHEN ABS(pct_chg) > 31 THEN 1 ELSE 0 END) extreme_move
+      SUM(CASE WHEN ABS(pct_chg) > 31 THEN 1 ELSE 0 END) extreme_move,
+      SUM(CASE WHEN open IS NULL OR high IS NULL OR low IS NULL OR close IS NULL THEN 1 ELSE 0 END) null_ohlc,
+      SUM(CASE WHEN vol IS NULL THEN 1 ELSE 0 END) null_vol,
+      SUM(CASE WHEN amount IS NULL THEN 1 ELSE 0 END) null_amount,
+      SUM(CASE WHEN ${INVALID_BAR_SQL} THEN 1 ELSE 0 END) invalid_bar
     FROM daily WHERE trade_date = ?`).get(date) as Record<string, number>;
   for (const k of Object.keys(anomalies)) anomalies[k] = Number(anomalies[k] ?? 0);
 
@@ -416,6 +460,12 @@ export function checkQuality(db: DatabaseSync, date: string, persist = true): Qu
   const missingIdx = REQUIRED_INDICES.filter(c => !indices.includes(c));
   if (missingIdx.length) reasons.push(`核心指数缺失: ${missingIdx.join(',')}`);
   if (anomalies.bad_close > 0 || anomalies.ohlc_inconsistent > 5) reasons.push(`行情异常: 无效收盘价 ${anomalies.bad_close}，OHLC 不一致 ${anomalies.ohlc_inconsistent}`);
+  // Any missing or invalid bar blocks READY: a NULL price or turnover is missing
+  // evidence, not a clean day, whatever the coverage ratios say.
+  if (anomalies.null_ohlc > 0) reasons.push(`行情异常: ${anomalies.null_ohlc} 条行情 OHLC 存在空值（NULL open/high/low/close）`);
+  if (anomalies.null_vol > 0) reasons.push(`行情异常: ${anomalies.null_vol} 条行情成交量为空值（NULL vol）`);
+  if (anomalies.null_amount > 0) reasons.push(`行情异常: ${anomalies.null_amount} 条行情成交额为空值（NULL amount）`);
+  if (anomalies.invalid_bar > 0) reasons.push(`行情异常: ${anomalies.invalid_bar} 条行情 OHLC/成交量/成交额非法（与审计同一判定）`);
 
   if (counts.daily && coverage.stk_limit_vs_daily < 0.95) degraded.push(`涨跌停价覆盖率 ${coverage.stk_limit_vs_daily} < 0.95，涨跌停统计不完整`);
   const optionalMissing = Object.keys(CORE_INDICES).filter(c => !REQUIRED_INDICES.includes(c) && !indices.includes(c));

@@ -1,0 +1,478 @@
+{
+  "schema_version": "ohlc-audit-evidence-1.0.0",
+  "status": "PASS",
+  "started_at": "2026-10-17T17:29:06.728Z",
+  "command": "node deploy/ashare/verify-ohlc-audit.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/home/jcshi/ashare-research/build-e8cbe4a/ashare' '/home/jcshi/workspace/FM-p0/docs/ashare-samples/phaseb-ohlc-audit-real-cache.json'",
+  "node_version": "v24.16.0",
+  "snapshot": {
+    "path": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
+    "bytes": 1685577728,
+    "sha256_before": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+    "access": "SQLite mode=ro&immutable=1; query_only=ON",
+    "sha256_after": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+    "unchanged": true
+  },
+  "candidate": {
+    "modules": "/home/jcshi/workspace/FM-p0/build/ashare/",
+    "audit_version": "audit-1.2.0",
+    "score_version": "score-1.0.0"
+  },
+  "baseline": {
+    "modules": "/home/jcshi/ashare-research/build-e8cbe4a/ashare",
+    "score_version": "score-1.0.0"
+  },
+  "limitations": [
+    "The snapshot is the frozen 2026-10-16 cache; this proves the pre-fix V1 output is unchanged where the cache has no NULL/invalid bar, not that no upstream day ever produces one.",
+    "NULL detection itself is covered by test/ashare-ohlc-audit.test.mjs on a synthetic market."
+  ],
+  "audit": {
+    "days": [
+      {
+        "trade_date": "20260928",
+        "daily_rows": 5557,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 0,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 114
+      },
+      {
+        "trade_date": "20260929",
+        "daily_rows": 5559,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 2,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 89
+      },
+      {
+        "trade_date": "20260930",
+        "daily_rows": 5561,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 2,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 89
+      },
+      {
+        "trade_date": "20261008",
+        "daily_rows": 5557,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 0,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 98
+      },
+      {
+        "trade_date": "20261009",
+        "daily_rows": 5559,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 1,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 92
+      },
+      {
+        "trade_date": "20261012",
+        "daily_rows": 5561,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 0,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 90
+      },
+      {
+        "trade_date": "20261013",
+        "daily_rows": 5561,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 1,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 91
+      },
+      {
+        "trade_date": "20261014",
+        "daily_rows": 5563,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 0,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 97
+      },
+      {
+        "trade_date": "20261015",
+        "daily_rows": 5565,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 2,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 96
+      },
+      {
+        "trade_date": "20261016",
+        "daily_rows": 5567,
+        "audit_status": "OK",
+        "invalid_bars": 0,
+        "invalid_bar_kinds": {
+          "null_open": 0,
+          "null_high": 0,
+          "null_low": 0,
+          "null_close": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "nonpositive": 0,
+          "high_low": 0,
+          "close_out_of_band": 0,
+          "open_out_of_band": 0,
+          "negative_vol_amount": 0,
+          "missing_amount": 0
+        },
+        "quality_status": "READY",
+        "quality_anomalies": {
+          "bad_close": 0,
+          "ohlc_inconsistent": 0,
+          "zero_amount": 0,
+          "extreme_move": 1,
+          "null_ohlc": 0,
+          "null_vol": 0,
+          "null_amount": 0,
+          "invalid_bar": 0
+        },
+        "issues": [],
+        "reasons": [],
+        "ms": 90
+      }
+    ],
+    "null_counts": {
+      "null_open": 0,
+      "null_high": 0,
+      "null_low": 0,
+      "null_close": 0,
+      "null_vol": 0,
+      "null_amount": 0,
+      "nonpositive": 0,
+      "high_low": 0,
+      "close_out_of_band": 0,
+      "open_out_of_band": 0,
+      "negative_vol_amount": 0,
+      "missing_amount": 0
+    },
+    "invalid_bars": 0,
+    "statuses": {
+      "20260928": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20260929": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20260930": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261008": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261009": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261012": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261013": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261014": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261015": {
+        "audit": "OK",
+        "quality": "READY"
+      },
+      "20261016": {
+        "audit": "OK",
+        "quality": "READY"
+      }
+    },
+    "window": {
+      "start": "20260928",
+      "end": "20261016",
+      "trade_days": 10
+    },
+    "null_total": 0,
+    "sql_invalid_bars_in_window": 0
+  },
+  "parity": {
+    "dates": [
+      {
+        "trade_date": "20261015",
+        "scanned": {
+          "baseline": 5565,
+          "candidate": 5565
+        },
+        "eligible": {
+          "baseline": 1757,
+          "candidate": 1757
+        },
+        "baseline_ms": 9375,
+        "candidate_ms": 9038,
+        "differences": 0,
+        "null_quality_codes": 0
+      },
+      {
+        "trade_date": "20261016",
+        "scanned": {
+          "baseline": 5567,
+          "candidate": 5567
+        },
+        "eligible": {
+          "baseline": 1756,
+          "candidate": 1756
+        },
+        "baseline_ms": 8382,
+        "candidate_ms": 8871,
+        "differences": 0,
+        "null_quality_codes": 0
+      }
+    ],
+    "differences": [],
+    "compared_eligible": 3513,
+    "difference_count": 0,
+    "scan_identical": {
+      "20261015": true,
+      "20261016": true
+    }
+  },
+  "completed_at": "2026-10-17T17:30:23.279Z"
+}
