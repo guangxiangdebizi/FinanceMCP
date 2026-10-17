@@ -1,0 +1,267 @@
+{
+  "snapshot": {
+    "status": "ORIGINAL",
+    "snapshot_id": "FWD-20261016-01b5d0a42f65e11b",
+    "revises": null,
+    "trade_date": "20261016",
+    "data_cutoff": "20261016",
+    "report_id": "ASR-20261016-20261016163620-ddd0d0",
+    "report_status": "READY",
+    "quality_status": "READY",
+    "created_at": "2026-10-17T17:28:26.081Z",
+    "content_digest": "ce8a48cc9e67ad28bd01b8c47e06911dda1d8803acd82f281c0346b0cea2d950",
+    "universe": {
+      "scanned": 5567,
+      "eligible": 1756,
+      "ineligible": 3811,
+      "suspended_or_missing": 35,
+      "signal_counts": {
+        "trend_up": 85,
+        "rsi_oversold_rebound": 308,
+        "macd_bull_divergence": 99,
+        "breakout_20d": 37,
+        "boll_squeeze_breakout": 38,
+        "overheated": 9,
+        "macd_bear_divergence": 207,
+        "macd_golden_cross": 60,
+        "trend_breakdown": 76
+      },
+      "factor_rows": 1756,
+      "members_digest": "e886df318a96f502de00d21a9b6174ca55b8c77776bde8d666c5ff015d35c1d3",
+      "factors_digest": "8a17157f8eed9b58eafca7def3d91f78632854c7b46a354a3239d0aaba1b5fa5"
+    },
+    "v1_pool": {
+      "source": "formal_live_watchlist",
+      "count": 40
+    },
+    "v2_pool": {
+      "source": "research_v2_sequential",
+      "count": 40,
+      "previous_date": null
+    },
+    "pool_diff": {
+      "common": 29,
+      "v1_only": 11,
+      "v2_only": 11
+    },
+    "v1_parity": {
+      "ok": true,
+      "eligible": 1756,
+      "stock_score_rows": 1756
+    },
+    "changed_scores": 430,
+    "db": "/tmp/fwd-snapshot-dwB51w/forward-observations.sqlite",
+    "content_bytes": 108532,
+    "v1_v2": {
+      "changed_scores": 430,
+      "score_delta": {
+        "n": 430,
+        "mean": -3.75,
+        "median": -3.75,
+        "win_rate": 0,
+        "volatility": 1.5906725539392888e-15,
+        "min": -3.750000000000007,
+        "p05": -3.75,
+        "p25": -3.75,
+        "p75": -3.75,
+        "p95": -3.75,
+        "max": -3.749999999999993
+      },
+      "rank_correlation": {
+        "n": 1756,
+        "correlation": 0.9901750628465636
+      }
+    },
+    "versions": {
+      "engine": "engine-1.0.0",
+      "factor": "factor-1.0.0",
+      "indicator": "ind-1.0.0",
+      "signal": "sig-1.0.0",
+      "score_v1": "score-1.0.0",
+      "score_v2": "score-2.0.0",
+      "watchlist": "wl-1.0.0",
+      "evaluation": "eval-research-1.0.0",
+      "data": "data-1.1.0",
+      "snapshot": "fwd-snapshot-1.0.0"
+    },
+    "build_sha256": "49c86ed2fa63c8ad063ee2ebfc5216d11873eaaa9dba87456e6504e27c7ed0a9",
+    "future_returns": {
+      "status": "PENDING",
+      "horizon": 10,
+      "planned_exit_date": "20261030",
+      "as_of": "20261016",
+      "note": "持有期尚未结束或尚未评价；不计算任何假定未来收益。到期后使用 research-evaluate。"
+    },
+    "member_counts": [
+      {
+        "version": "score-1.0.0",
+        "n": 40
+      },
+      {
+        "version": "score-2.0.0",
+        "n": 40
+      }
+    ],
+    "factor_rows": 1756
+  },
+  "expected_sha256": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+  "started_at": "2026-10-17T17:28:12.761Z",
+  "checks": {
+    "source_sha256_matches_frozen_snapshot": {
+      "ok": true,
+      "actual": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1"
+    },
+    "snapshot_write_refused": {
+      "ok": true
+    },
+    "snapshot_original": {
+      "ok": true,
+      "status": "ORIGINAL",
+      "snapshot_id": "FWD-20261016-01b5d0a42f65e11b"
+    },
+    "snapshot_report_reference": {
+      "ok": true,
+      "report_id": "ASR-20261016-20261016163620-ddd0d0",
+      "expected": "ASR-20261016-20261016163620-ddd0d0"
+    },
+    "snapshot_quality_ready": {
+      "ok": true,
+      "quality_status": "READY"
+    },
+    "v1_parity_against_live_stock_score": {
+      "ok": true,
+      "eligible": 1756,
+      "stock_score_rows": 1756
+    },
+    "v1_pool_is_formal_live_watchlist": {
+      "ok": true,
+      "source": "formal_live_watchlist",
+      "count": 40
+    },
+    "v2_pool_is_research_sequential": {
+      "ok": true,
+      "source": "research_v2_sequential",
+      "count": 40,
+      "previous_date": null
+    },
+    "second_run_exists": {
+      "ok": true,
+      "status": "EXISTS",
+      "snapshot_id": "FWD-20261016-01b5d0a42f65e11b"
+    },
+    "snapshot_id_deterministic": {
+      "ok": true,
+      "stored": "FWD-20261016-01b5d0a42f65e11b",
+      "recomputed": "FWD-20261016-01b5d0a42f65e11b"
+    },
+    "stored_content_identical": {
+      "ok": true,
+      "stored": "ce8a48cc9e67ad28bd01b8c47e06911dda1d8803acd82f281c0346b0cea2d950",
+      "recomputed": "ce8a48cc9e67ad28bd01b8c47e06911dda1d8803acd82f281c0346b0cea2d950"
+    },
+    "single_snapshot_row_after_rerun": {
+      "ok": true,
+      "rows": 1
+    },
+    "evaluate_pending_before_horizon": {
+      "ok": true,
+      "planned_exit_date": "20261030",
+      "versions": [
+        {
+          "snapshot_id": "FWD-20261016-01b5d0a42f65e11b",
+          "version": "score-1.0.0",
+          "status": "PENDING",
+          "completed": 0,
+          "entered": 0,
+          "events": 40,
+          "net_return_mean": null
+        },
+        {
+          "snapshot_id": "FWD-20261016-01b5d0a42f65e11b",
+          "version": "score-2.0.0",
+          "status": "PENDING",
+          "completed": 0,
+          "entered": 0,
+          "events": 40,
+          "net_return_mean": null
+        }
+      ]
+    },
+    "future_trade_day_pending": {
+      "ok": true,
+      "status": "PENDING",
+      "date": "20261019",
+      "reason": "date_after_data_cutoff",
+      "today": "20261018",
+      "data_cutoff": "20261016"
+    },
+    "pending_writes_nothing": {
+      "ok": true,
+      "rows": [
+        1,
+        1
+      ],
+      "pool_state": [
+        40,
+        40
+      ]
+    },
+    "source_sha256_unchanged": {
+      "ok": true,
+      "before": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+      "after": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1"
+    },
+    "source_file_stat_unchanged": {
+      "ok": true,
+      "size": [
+        1685577728,
+        1685577728
+      ],
+      "mtime_ms": [
+        1792251491328.3816,
+        1792251491328.3816
+      ]
+    }
+  },
+  "snapshot_sha256_before": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+  "snapshot_seconds": 12,
+  "evaluate_as_of_cutoff": {
+    "status": "EVALUATED",
+    "as_of": "20261016",
+    "horizon": 10,
+    "matured": false,
+    "planned_exit_date": "20261030",
+    "versions": [
+      {
+        "snapshot_id": "FWD-20261016-01b5d0a42f65e11b",
+        "version": "score-1.0.0",
+        "status": "PENDING",
+        "completed": 0,
+        "entered": 0,
+        "events": 40,
+        "net_return_mean": null
+      },
+      {
+        "snapshot_id": "FWD-20261016-01b5d0a42f65e11b",
+        "version": "score-2.0.0",
+        "status": "PENDING",
+        "completed": 0,
+        "entered": 0,
+        "events": 40,
+        "net_return_mean": null
+      }
+    ]
+  },
+  "pending_20261019": {
+    "status": "PENDING",
+    "date": "20261019",
+    "reason": "date_after_data_cutoff",
+    "today": "20261018",
+    "data_cutoff": "20261016"
+  },
+  "snapshot_sha256_after": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+  "ok": true,
+  "finished_at": "2026-10-17T17:28:38.575Z",
+  "temp_snapshot_db": "/tmp/fwd-snapshot-dwB51w/forward-observations.sqlite",
+  "reproduce": "node deploy/ashare/verify-research-snapshot.mjs /home/jcshi/ashare-research/ashare-20261016.sqlite /home/jcshi/workspace/FM-snap/docs/ashare-samples/phaseb-forward-snapshot-real-cache.json"
+}

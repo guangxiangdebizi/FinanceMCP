@@ -15,6 +15,10 @@ const USAGE = `用法: finance-ashare <command> [options]
   acceptance [--days 3] [--end YYYYMMDD] [--allow-degraded]      连续真实交易日验收（两次定时运行、当日复查行情、最终 READY、MCP 一致、股票池连续）
   quality --date YYYYMMDD                                        重新执行数据质量检查
   audit [--start YYYYMMDD] [--end YYYYMMDD] [--fix]              历史缓存缺口审计（停牌/退市/真实缺口），--fix 只补齐缺失部分
+  research-snapshot --date YYYYMMDD [--db PATH] [--revise] [--horizon 10]
+                                                                 保存指定交易日的 V1/V2 前瞻研究快照（只读正式库，写入独立研究库）
+  research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
+                                                                 用已保存的快照评价持有期收益；未到期保持 PENDING
   migrate                                                        将旧版缓存主键布局迁移为按股票连续存储`;
 
 function arg(name: string): string | undefined {
@@ -35,6 +39,13 @@ async function main() {
   const { checkQuality, shanghaiToday } = await import('./ingest.js');
   const { syncRange } = await import('./sync.js');
   const command = process.argv[2];
+  // Research commands open the live cache read-only themselves and must not
+  // create or migrate a writable live connection.
+  if (command === 'research-snapshot' || command === 'research-evaluate') {
+    const { runCommand } = await import('./commands.js');
+    if (!(await runCommand(undefined as any, command, { arg, flag, ymd, print }))) process.exitCode = 2;
+    return;
+  }
   const db = openAshareDb();
   switch (command) {
     case 'sync': {

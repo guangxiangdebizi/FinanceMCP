@@ -150,6 +150,27 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       h.print({ before: { ...summary(before), path: beforePath }, actions_count: actions.length, actions: actions.slice(0, 100), after: { ...summary(after), path: afterPath }, seconds: Math.round((Date.now() - t0) / 1000) });
       return true;
     }
+    case 'research-snapshot': {
+      // Reads the live cache read-only and writes only to the separate snapshot database.
+      const { runResearchSnapshot } = await import('./snapshot.js');
+      h.print(runResearchSnapshot({
+        date: h.ymd(h.arg('date'), '--date'),
+        dbPath: h.arg('db'),
+        revise: h.flag('revise'),
+        horizon: h.arg('horizon') ? Number(h.arg('horizon')) : undefined,
+      }));
+      return true;
+    }
+    case 'research-evaluate': {
+      const { runResearchEvaluate } = await import('./snapshot.js');
+      h.print(runResearchEvaluate({
+        date: h.ymd(h.arg('date'), '--date'),
+        dbPath: h.arg('db'),
+        asOf: h.arg('as-of') ? h.ymd(h.arg('as-of'), '--as-of') : undefined,
+        horizon: h.arg('horizon') ? Number(h.arg('horizon')) : undefined,
+      }));
+      return true;
+    }
     case 'status': {
       const result = await runAshareTool('ashare_data_status', { date: h.arg('date') });
       process.stdout.write(result.content[0].text + '\n');
