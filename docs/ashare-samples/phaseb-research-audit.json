@@ -1,12 +1,12 @@
 {
   "schema_version": "phaseb-research-audit-1.0.0",
   "status": "PASS",
-  "started_at": "2026-10-17T18:04:07.873Z",
+  "started_at": "2026-10-17T18:28:09.169Z",
   "command": "node deploy/ashare/verify-research-summary.mjs",
   "run_id": "PHB-2853b1b630df4bcc98c4",
   "inputs": {
     "evidence": {
-      "path": "/home/jcshi/workspace/FM-eval/docs/ashare-samples/phaseb-research-summary.json",
+      "path": "/home/jcshi/workspace/FinanceMCP/docs/ashare-samples/phaseb-research-summary.json",
       "bytes": 162348,
       "sha256": "761ca85ba06baedb1f78fb976b713e0f8cdda292aef49b3ff9d53362ede48fea",
       "schema_version": "phaseb-research-evidence-1.0.0",
@@ -440,9 +440,9 @@
       ]
     ]
   },
-  "completed_at": "2026-10-17T18:07:19.293Z",
+  "completed_at": "2026-10-17T18:31:19.175Z",
   "timings_ms": {
-    "total": 191421
+    "total": 190006
   },
   "method": "Re-derived every documented Phase B statistic from the frozen experiment.result and the per-event table (read-only research DB) and compared it with the expected values transcribed from docs/ashare-phaseb-acceptance.md. Recomputed the common-comparable-event paired delta from the event table, verified the committed compact evidence is a faithful projection of the full result, and checked the research DB and market snapshot hashes are unchanged."
 }
