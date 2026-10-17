@@ -1,13 +1,13 @@
-# A 股数据服务（模块 A）：数据契约 data-1.0.0
+# A 股数据服务（模块 A）：数据契约 data-1.1.0
 
-> 适用分支 `feat/ashare-data-service-v1`（基于 `ashare-v1-fix2`）。与
+> Phase A 基线为 `feat/ashare-data-service-v1`；Phase B 分支 `feat/ashare-analysis-v2` 修订数据正确性契约。与
 > [`ashare-data-research-architecture.md`](ashare-data-research-architecture.md) 的模块划分一致：本文件只描述**数据获取、
 > 存储、质量与只读访问**；指标、信号、评分、股票池与历史检验属于模块 B（量化分析引擎），不在本契约内。
 > 验收证据见 [`ashare-acceptance.md`](ashare-acceptance.md) §11。
 
 ## 1. 数据来源与覆盖范围
 
-全部来自 Tushare Pro（服务端 `TUSHARE_TOKEN`，8000 积分），按交易日整市场批量获取，从不逐股请求。
+全部来自 Tushare Pro（服务端 `TUSHARE_TOKEN`，8000 积分），日常按交易日整市场批量获取；审计修补按缺陷范围逐股查询。
 
 | 数据集（表） | Tushare 接口 | 主键 | 获取方式 / 频率 | 当前覆盖（2026-10-16） |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@
 | `ocf_to_profit` | **%**（Tushare 原值为百分数：600519 最新为 115.11，即 115.11%） |
 | `eps`、`ocfps` | 元/股 |
 
-> 数据契约发现（留给阶段 B，本轮按规定不改评分）：`score-1.0.0` 的现金流项按 `ocf_to_profit ≥ 0.8` 判断，
+> 数据契约发现（正式 V1 保持原规则，研究 V2 修正为 80，见 [分析契约](ashare-analysis-v2.md)）：`score-1.0.0` 的现金流项按 `ocf_to_profit ≥ 0.8` 判断，
 > 把百分数当作比值，等价于“经营现金流相对利润 ≥ 0.8%”。结果是几乎所有现金流为正的公司都得满分。修订必须作为新的评分版本处理。
 
 ## 4. 复权方法
@@ -104,13 +104,13 @@
 6. 昨收与前一交易日复权收盘不一致（不同时间修订混入的迹象）；复权因子在两根 K 线间的变化足以让昨收变动至少 1 个价位（0.01 元），
    但昨收仍等于前收盘——因子精度噪声或上游修订只被部分日期采用（更小的变化是分红不足 1 个价位，不标记）；
 7. `sync_log` 记为 ok 但实际缓存条数不足（曾记录成功、后来缺失）；
-8. 最新刷新异常，停牌数据未同步。
+8. 最新刷新异常（包含 `suspend_d`），停牌数据未同步。停牌刷新失败保留此前成功快照，查询标注沿用旧缓存并降为 DEGRADED；成功刷新后恢复。
 
 `GAP` 为需要补齐，`WARN` 为披露但不是缺口。`--fix` 只处理审计发现的问题：
-- 整日快照本身有问题（整日无行情、OHLC 非法、`sync_log` 记为成功但缓存条数不足）→ 用已有增量同步整日 refresh（完整返回才替换，短返回不混入）；
+- 整日无行情 → 对四个数据集整日 refresh（完整返回才替换，短返回不混入）；单个数据集的 `sync_log` 记为成功但缓存条数不足 → 只刷新该数据集；单股 OHLC 非法 → 只修补该股票、日期的 daily，不改写其他股票的因子；
 - 单只股票缺行情或缺复权因子 → **按股票**请求该日数据并合并，其他股票的已存数据不被改写（真实数据上发现：整日 refresh 会把上游
   修订过的其他股票复权因子写入少数日期，造成同一股票新旧因子并存，因此改为逐股修补）；仍缺行情的股票再按代码查询 `suspend_d`，
-  查到停牌则写入，否则在 `gap_check` 记录“上游无数据”；
+  查到停牌则写入，否则在 `gap_check` 记录“上游无数据”和检查时间；该结论默认 90 天后过期，`audit --fix` 会重新查询；
 - 未同步停牌数据的日期补 `suspend_d`，缺失的指数补单日。
 逐股修补记入 `sync_log`/`sync_history`（数据集名 `repair:<表>`，键 `<代码>:<日期>`），不覆盖按日的同步记录。重算被修补日期的质量检查；
 不重下完整数据，不写股票池或报告。补齐前后两次审计都存入 `data_audit` 与
@@ -126,7 +126,7 @@
 
 - 财务：as-of 查询只使用 `ann_date ≤ as_of` 的记录；同一报告期多次公告取 as-of 前最新一条，其余作为 `revisions` 列出变动字段；
   `ann_date` 早于报告期末的记录（当前 1 条：603400.SH 20260630 报告期标注 20260422 公告，数值与 20260803 公告相同）视为上游异常，
-  **不参与** as-of 选择（引擎 `financialsAsOf` 与工具同一规则），列入 `anomalies`。修复前该记录使引擎在 20260422~20260802 期间
+  **不参与** as-of 选择（引擎 `financialsAsOf` 与工具同一规则）。常规查询仅列出报告期末及公告日都不晚于 as_of 的异常；其他异常只出现在缓存审计 `global.fina_ann_date_before_period_end`。修复前该记录使引擎在 20260422~20260802 期间
   提前看到尚未结束的报告期；20260430 实测只影响这一只股票，且其当日不在评分候选内，正式输出未变化。
 - 财务不是严格 Point-in-Time：Tushare 不保留修订版本，同一公告日的更正（`update_flag=1`）覆盖原值；
   北交所旧代码（43/83/87）下仍有一份 2023~2026 年的财务记录，与 92 代码的记录重复，工具按所查代码返回。
@@ -260,8 +260,7 @@ not_listed_days, pending_delisting_days, missing_days, suspend_data_missing_days
 ### 7.2 `ashare_financial_data`
 
 参数：`ts_code`（必填）、`as_of_date`（缺省最近交易日）、`start_period` / `end_period`（报告期末日）、`limit`（默认 8，最大 40）、
-`include_revisions`。返回 `periods[]{end_date, ann_date, values, announcements, revisions?}`、`units`、`hidden_after_as_of`
-（as-of 之后才公告的记录数，不返回其数值）、`anomalies[]`、`selection_rule`、`availability`、`source[]`。
+`include_revisions`。返回 `periods[]{end_date, ann_date, values, announcements, revisions?}`、`units`、`anomalies[]`、`selection_rule`、`availability`、`source[]`。data-1.1.0 删除 `hidden_after_as_of`；常规 as-of 查询不暴露之后公告的记录数或尚未结束的异常报告期。
 
 ### 7.3 `ashare_market_data`
 
@@ -278,7 +277,7 @@ flat, limit_up, limit_down, limit_price_coverage, limit_counts_complete, amount,
 
 ### 7.5 不在本轮实现
 
-`ashare_factor_snapshot`：涉及指标与标准化特征定义，属于阶段 B。本轮已提供它所需的行情、复权、财务与元数据访问函数。
+`ashare_factor_snapshot`（阶段 B 已实现，见 [分析契约](ashare-analysis-v2.md)）：1–20 只股票的原始/标准化因子、单位、准入、V1/V2 贡献、信号与质量；不改变本数据契约的定义。
 
 ## 8. 与量化分析引擎的边界
 

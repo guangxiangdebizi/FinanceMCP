@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import test from 'node:test';
+import { openAshareDb, upsertRows } from '../build/ashare/db.js';
+import { scanMarket } from '../build/ashare/analysis.js';
+import { seedMarket, weekdays, STOCKS } from './ashare-fixture.mjs';
+
+const sha = value => createHash('sha256').update(value).digest('hex');
+
+test('paired research runner persists both versions, keeps source bytes unchanged and reproduces results', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ashare-study-'));
+  const source = join(dir, 'snapshot.sqlite');
+  const output = join(dir, 'study');
+  mkdirSync(join(output, 'scans'), { recursive: true });
+  const db = openAshareDb(source);
+  const days = weekdays('20250901', 230);
+  seedMarket(db, days);
+  upsertRows(db, 'fina_indicator', ['ts_code','end_date','ann_date','roe','netprofit_yoy','ocf_to_profit','debt_to_assets','eps'], STOCKS.map((s, i) => ({
+    ts_code:s.ts_code,end_date:'20251231',ann_date:'20260130',roe:10,netprofit_yoy:12,ocf_to_profit:i%2?20:115.11,debt_to_assets:30,eps:1,
+  })));
+  const dates = ['20260331', '20260407', '20260414'];
+  for (const date of dates) writeFileSync(join(output, 'scans', `${date}.json`), JSON.stringify(scanMarket(db, date)));
+  db.close();
+  const before = sha(readFileSync(source));
+  writeFileSync(join(output, 'inputs.json'), JSON.stringify({ source, source_sha256:before,data_cutoff:days.at(-1),stride:5,warmup_trade_days:130,dates }));
+  const run = extra => spawnSync(process.execPath, ['deploy/ashare/run-research.mjs','--source',source,'--inputs',output,'--output',output,...extra], { cwd:process.cwd(),encoding:'utf8',timeout:120000 });
+  const a = run([]);
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(sha(readFileSync(source)), before, 'source market and live state bytes remain unchanged');
+  const summary1 = readFileSync(join(output,'summary.json'),'utf8');
+  const summary = JSON.parse(summary1);
+  assert.equal(summary.status, 'RESEARCH_ONLY');
+  assert.equal(summary.comparisons.length, 3);
+  assert.ok(summary.comparisons.every(d => d.changed_scores>0));
+  assert.equal(summary.future_observation.status, 'PENDING');
+  const research = new DatabaseSync(join(output,'research.sqlite'), {readOnly:true});
+  assert.deepEqual(research.prepare('SELECT DISTINCT version FROM score_version ORDER BY version').all().map(x=>x.version), ['score-1.0.0','score-2.0.0']);
+  assert.ok(research.prepare('SELECT COUNT(*) n FROM factor').get().n>0);
+  assert.ok(research.prepare('SELECT COUNT(*) n FROM event').get().n>0);
+  research.close();
+  const b = run([]);
+  assert.equal(b.status, 0, b.stderr);
+  assert.equal(readFileSync(join(output,'summary.json'),'utf8'), summary1, 'same inputs and code yield identical result and run_id');
+  assert.equal(sha(readFileSync(source)), before);
+  const changedPath = join(output, 'scans', `${dates[0]}.json`);
+  const changed = JSON.parse(readFileSync(changedPath, 'utf8'));
+  changed.rows[0].risk_flags.push('Input identity regression marker');
+  writeFileSync(changedPath, JSON.stringify(changed));
+  const c = run([]);
+  assert.equal(c.status, 0, c.stderr);
+  assert.notEqual(JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')).run_id, summary.run_id, 'changed scan content creates a separate experiment identity');
+  const invalid = run(['--horizon','0']);
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr,/horizon/);
+});

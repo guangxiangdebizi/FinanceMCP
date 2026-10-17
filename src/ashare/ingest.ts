@@ -16,6 +16,13 @@ export const CORE_INDICES: Record<string, string> = {
 /** Indices whose absence makes a trading day NOT_READY. */
 export const REQUIRED_INDICES = ['000001.SH', '399001.SZ', '000300.SH'];
 
+/** Empty upstream answers expire consistently in cache audits and data queries. */
+export const GAP_CHECK_MAX_AGE_DAYS = Number(process.env.ASHARE_GAP_CHECK_MAX_AGE_DAYS || 90);
+export function gapCheckFresh(checkedAt: string, now = Date.now()): boolean {
+  const age = now - Date.parse(checkedAt);
+  return Number.isFinite(age) && age >= 0 && age <= GAP_CHECK_MAX_AGE_DAYS * 86400_000;
+}
+
 const todayYmd = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10).replace(/-/g, '');
 
 export function addDays(ymd: string, days: number): string {
@@ -137,13 +144,15 @@ export interface DatasetSync {
  * not written at all (the previous snapshot is kept intact, never mixed with a
  * partial update); over an incomplete cache its rows are merged. A request that
  * throws is REFRESH_FAILED and changes nothing. The cache `status` (ok /
- * partial / empty) always describes what is stored afterwards.
+ * partial / empty) always describes what is stored afterwards. `only` limits
+ * the run to some datasets, so repairing one does not rewrite the others.
  */
-export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMode | boolean = 'skip_ok'): Promise<Record<string, DatasetSync>> {
+export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMode | boolean = 'skip_ok', only?: string[]): Promise<Record<string, DatasetSync>> {
   const refresh = mode === true || mode === 'refresh';
   const result: Record<string, DatasetSync> = {};
   const prev = previousTradeDay(db, date);
   for (const ds of DATED_DATASETS) {
+    if (only && !only.includes(ds.table)) continue;
     if (!refresh && syncedOk(db, ds.table, date)) {
       result[ds.table] = { rows: countFor(db, ds.table, date), fetched: false };
       continue;
@@ -189,7 +198,8 @@ export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMo
  */
 export async function syncSuspend(db: DatabaseSync, date: string, refresh = false): Promise<DatasetSync> {
   const before = countFor(db, 'suspend_d', date);
-  if (!refresh && syncedOk(db, 'suspend_d', date)) return { rows: before, fetched: false };
+  const latest = db.prepare("SELECT status, refresh_status FROM sync_log WHERE dataset = 'suspend_d' AND key = ?").get(date) as any;
+  if (!refresh && latest?.status === 'ok' && latest.refresh_status !== 'REFRESH_FAILED') return { rows: before, fetched: false };
   const hadOk = syncedOk(db, 'suspend_d', date);
   try {
     const rows = await fetchAll('suspend_d', { trade_date: date, suspend_type: 'S' }, 'ts_code,trade_date,suspend_timing', 6000);
@@ -348,7 +358,7 @@ export function snapshotInfo(db: DatabaseSync, date: string): SnapshotInfo {
   };
 }
 
-/** Latest recorded refresh of each dated dataset and core index for `date`. */
+/** Latest recorded refresh of each dated dataset, suspensions and core index for `date`. */
 export function latestRefresh(db: DatabaseSync, date: string): Record<string, RefreshInfo | null> {
   const info = (r: any): RefreshInfo | null => r ? {
     refresh_status: r.refresh_status ?? null, fetched_rows: r.rows, before_rows: r.before_rows ?? null, after_rows: r.after_rows ?? null,
@@ -356,6 +366,8 @@ export function latestRefresh(db: DatabaseSync, date: string): Record<string, Re
   } : null;
   const out: Record<string, RefreshInfo | null> = {};
   for (const ds of DATED_DATASETS) out[ds.table] = info(db.prepare('SELECT * FROM sync_log WHERE dataset = ? AND key = ?').get(ds.table, date));
+  // Non-core: a failed suspension refresh keeps the earlier snapshot but must not pass as READY.
+  out.suspend_d = info(db.prepare("SELECT * FROM sync_log WHERE dataset = 'suspend_d' AND key = ?").get(date));
   for (const code of Object.keys(CORE_INDICES)) {
     out[`index_daily:${code}`] = info(db.prepare("SELECT * FROM sync_log WHERE dataset = 'index_daily' AND key LIKE ? ORDER BY synced_at DESC LIMIT 1").get(`${code}:%-${date}`));
   }
@@ -418,7 +430,9 @@ export function checkQuality(db: DatabaseSync, date: string, persist = true): Qu
     if (r?.refresh_status === 'REFRESH_INCOMPLETE') {
       refreshIssues.push(`最新一次刷新 ${name} 不完整（返回 ${r.fetched_rows} 条，${r.write_mode === 'kept' ? `沿用上一次有效快照 ${r.after_rows} 条` : `缓存现有 ${r.after_rows ?? '-'} 条`}，${r.synced_at}）`);
     } else if (r?.refresh_status === 'REFRESH_FAILED') {
-      refreshIssues.push(`最新一次刷新 ${name} 请求失败（${(r.message.split('request failed: ')[1] ?? r.message).slice(0, 80)}；沿用已有缓存，${r.synced_at}）`);
+      const kept = name === 'suspend_d' && !(r.before_rows || db.prepare("SELECT 1 FROM sync_history WHERE dataset = 'suspend_d' AND key = ? AND status = 'ok'").get(date))
+        ? '此前无成功快照，停牌数据不可用' : '沿用已有缓存';
+      refreshIssues.push(`最新一次刷新 ${name} 请求失败（${(r.message.split('request failed: ')[1] ?? r.message).slice(0, 80)}；${kept}，${r.synced_at}）`);
     }
   }
   const status: QualityStatus = cacheStatus === 'NOT_READY' ? 'NOT_READY' : refreshIssues.length || cacheStatus === 'DEGRADED' ? 'DEGRADED' : 'READY';

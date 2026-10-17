@@ -3,9 +3,13 @@
 // Read-only apart from schema migration; still never point it at the live directory.
 // Usage: ASHARE_DATA_DIR=<copy dir> node deploy/ashare/verify-data-service.mjs > result.json
 import { resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 const dataDir = resolve(process.env.ASHARE_DATA_DIR || '');
 if (!process.env.ASHARE_DATA_DIR || /finance-mcp-ashare\/?$/.test(dataDir)) throw new Error('ASHARE_DATA_DIR must point at a copy of the cache');
+const copyPath = realpathSync(resolve(dataDir, 'ashare.sqlite'));
+if (process.env.ASHARE_DB_PATH && realpathSync(process.env.ASHARE_DB_PATH) !== copyPath) throw new Error('ASHARE_DB_PATH must match the cache copy');
+process.env.ASHARE_DB_PATH = copyPath;
 console.log = (...a) => { if (process.env.ASHARE_VERBOSE) console.error(...a); };
 const build = p => new URL(`../../build/ashare/${p}`, import.meta.url).href;
 const { openAshareDb, getAshareDb, closeAshareDb, resolveReportPath } = await import(build('db.js'));
@@ -107,13 +111,16 @@ out.samples = { ...S, ex_rights_date_600519: exDate };
   const asOf = '20260801';
   const f = await call('ashare_financial_data', { ts_code: S.multi_period_financials, as_of_date: asOf, limit: 12, include_revisions: true });
   const later = one('SELECT COUNT(*) n FROM fina_indicator WHERE ts_code = ? AND ann_date > ?', S.multi_period_financials, asOf).n;
-  pass('financials_as_of', f.periods.length >= 6 && f.periods.every(p => p.ann_date <= asOf && p.ann_date >= p.end_date) && f.hidden_after_as_of === later && later > 0,
-    { ts_code: S.multi_period_financials, as_of: asOf, periods: f.periods.map(p => ({ end_date: p.end_date, ann_date: p.ann_date, roe: p.values.roe, announcements: p.announcements })), hidden_after_as_of: f.hidden_after_as_of });
+  // data-1.1.0: later announcements exist in the cache but are neither returned nor counted.
+  pass('financials_as_of', f.periods.length >= 6 && f.periods.every(p => p.ann_date <= asOf && p.ann_date >= p.end_date) && !('hidden_after_as_of' in f) && later > 0,
+    { ts_code: S.multi_period_financials, as_of: asOf, periods: f.periods.map(p => ({ end_date: p.end_date, ann_date: p.ann_date, roe: p.values.roe, announcements: p.announcements })), later_in_cache_not_disclosed: later });
   const a = await call('ashare_financial_data', { ts_code: S.fina_anomaly, as_of_date: '20260501' });
   const aLate = await call('ashare_financial_data', { ts_code: S.fina_anomaly, as_of_date: '20260901' });
-  pass('financials_anomaly', !a.periods.some(p => p.end_date === '20260630') && a.anomalies.some(x => x.end_date === '20260630' && x.ann_date === '20260422')
+  // As of 0501 the 0630 period has not ended: not even the anomaly may mention it. As of 0901 it is disclosed.
+  pass('financials_anomaly', !a.periods.some(p => p.end_date === '20260630') && !JSON.stringify(a).includes('20260630')
+    && aLate.anomalies.some(x => x.end_date === '20260630' && x.ann_date === '20260422')
     && aLate.periods[0].end_date === '20260630' && aLate.periods[0].ann_date === '20260803',
-    { as_of_20260501_latest: a.periods[0] && { end_date: a.periods[0].end_date, ann_date: a.periods[0].ann_date }, anomalies: a.anomalies, as_of_20260901_latest: { end_date: aLate.periods[0].end_date, ann_date: aLate.periods[0].ann_date } });
+    { as_of_20260501_latest: a.periods[0] && { end_date: a.periods[0].end_date, ann_date: a.periods[0].ann_date }, anomalies_20260501: a.anomalies, anomalies_20260901: aLate.anomalies, as_of_20260901_latest: { end_date: aLate.periods[0].end_date, ann_date: aLate.periods[0].ann_date } });
 }
 
 // ---------------------------------------------------------------- 5. market data = what the live report used

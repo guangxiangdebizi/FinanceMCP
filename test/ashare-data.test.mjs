@@ -60,6 +60,14 @@ for (const d of DATES.slice(0, 121)) {
   put('adj_factor', ['ts_code', 'trade_date', 'adj_factor'], [{ ts_code: OLD, trade_date: d, adj_factor: 1 }]);
 }
 
+// The extra lifecycle samples have complete companion rows; individual missing-row tests inject their own defects.
+db.exec(`INSERT INTO daily_basic (ts_code, trade_date, turnover_rate)
+  SELECT d.ts_code, d.trade_date, 1 FROM daily d
+  LEFT JOIN daily_basic b ON b.ts_code = d.ts_code AND b.trade_date = d.trade_date WHERE b.ts_code IS NULL;
+  INSERT INTO stk_limit (ts_code, trade_date, up_limit, down_limit)
+  SELECT d.ts_code, d.trade_date, d.pre_close * 1.1, d.pre_close * 0.9 FROM daily d
+  LEFT JOIN stk_limit l ON l.ts_code = d.ts_code AND l.trade_date = d.trade_date WHERE l.ts_code IS NULL;`);
+
 // Suspended stock: STOCKS[5] has no bars on DATES[130..132], recorded in suspend_d; STOCKS[6] misses DATES[131] with no record.
 const SUSP = STOCKS[5].ts_code;
 const HOLE = STOCKS[6].ts_code;
@@ -173,15 +181,20 @@ test('financials: as-of announcement constraint, anomalies, nulls and revisions'
   const early = financialHistory(db, { ts_code: FIN, as_of_date: '20260401' });
   assert.deepEqual(early.periods.map(p => [p.end_date, p.ann_date]), [['20251231', '20260320']]);
   assert.equal(early.periods[0].values.roe, 10);
-  assert.equal(early.hidden_after_as_of, 4, 'later announcements are counted, not shown');
+  assert.equal('hidden_after_as_of' in early, false, 'later announcements are neither shown nor counted');
+  assert.deepEqual(early.anomalies, [], 'the 0630 period (ending after as_of) is not even mentioned');
+  assert.equal(JSON.stringify(early).includes('20260630'), false);
   const mid = financialHistory(db, { ts_code: FIN, as_of_date: '20260501', include_revisions: true });
   assert.deepEqual(mid.periods.map(p => p.end_date), ['20260331', '20251231'], 'the 0630 record announced on 0422 is not used');
   assert.equal(mid.periods[0].values.netprofit_yoy, null, 'null stays null');
   assert.equal(mid.periods[1].values.roe, 9.5, 'latest announcement on or before as_of wins');
   assert.deepEqual(mid.periods[1].revisions[0].changed_fields.sort(), ['eps', 'roe']);
   assert.equal(mid.periods[1].revisions[0].values.roe, 10);
-  assert.equal(mid.anomalies.length, 1);
-  assert.equal(mid.anomalies[0].issue, 'ann_date_before_period_end');
+  assert.equal(mid.anomalies.length, 0, 'period 0630 had not ended on 0501: no hint of it');
+  assert.equal(JSON.stringify(mid).includes('20260630'), false);
+  const after = financialHistory(db, { ts_code: FIN, as_of_date: '20260901' });
+  assert.equal(after.anomalies.length, 1, 'once both dates are past, the excluded record is disclosed');
+  assert.equal(after.anomalies[0].issue, 'ann_date_before_period_end');
   const late = financialHistory(db, { ts_code: FIN, as_of_date: '20260901', limit: 1 });
   assert.equal(late.periods[0].end_date, '20260630');
   assert.equal(late.periods[0].ann_date, '20260815');
@@ -275,22 +288,20 @@ test('audit: suspensions are not gaps, unexplained holes are, and --fix re-fetch
     const actions = await fillGaps(db, audit);
     assert.deepEqual([...new Set(actions.map(a => a.trade_date))], gaps);
     assert.ok(fetched.every(f => gaps.some(g => f.includes(`:${g}:`))), 'only gap dates were requested');
-    assert.deepEqual(fetched.filter(f => f.endsWith(':all')).sort(), ['adj_factor', 'daily', 'daily_basic', 'stk_limit'].map(a => `${a}:${DATES[120]}:all`),
-      'whole-market refresh only where the stored snapshot itself was short');
-    const tables = ['daily', 'daily_basic', 'adj_factor', 'stk_limit'];
+    assert.deepEqual(fetched.filter(f => f.endsWith(':all')).sort(), [`daily_basic:${DATES[120]}:all`],
+      'whole-market refresh only of the dataset whose stored snapshot was short');
     assert.deepEqual(fetched.filter(f => !f.endsWith(':all')).sort(), [
-      ...tables.map(t => `${t}:${DATES[131]}:${HOLE}`),
-      ...tables.map(t => `${t}:${DATES[135]}:${UPSTREAM_GAP}`), `suspend_d:${DATES[135]}:${UPSTREAM_GAP}`,
-      ...tables.map(t => `${t}:${DATES[136]}:${LATE_SUSP}`), `suspend_d:${DATES[136]}:${LATE_SUSP}`,
+      `daily:${DATES[131]}:${HOLE}`,
+      `daily:${DATES[135]}:${UPSTREAM_GAP}`, `suspend_d:${DATES[135]}:${UPSTREAM_GAP}`,
+      `daily:${DATES[136]}:${LATE_SUSP}`, `suspend_d:${DATES[136]}:${LATE_SUSP}`,
       `adj_factor:${DATES[145]}:${NOADJ}`,
-    ].sort(), 'single holes are repaired per stock');
+    ].sort(), 'single holes are repaired per stock, only the datasets that are missing');
   } finally {
     globalThis.fetch = originalFetch;
   }
   const after = auditCache(db, DATES[110], LAST);
-  // The whole-market refresh of DATES[120] did take the revised factor; the audit makes that mix visible.
-  assert.ok(after.days.find(d => d.trade_date === DATES[120]).factor_revision_boundaries.includes(STOCKS[20].ts_code));
-  assert.ok(after.days.find(d => d.trade_date === DATES[121]).factor_revision_boundaries.includes(STOCKS[20].ts_code));
+  // Only daily_basic was refreshed on DATES[120]: the revised factor upstream never reached the cache.
+  assert.equal(after.totals.factor_revision_boundaries, 0);
   const d135 = after.days.find(d => d.trade_date === DATES[135]);
   assert.equal(d135.status, 'WARN');
   assert.deepEqual(d135.upstream_missing_sample, [UPSTREAM_GAP]);
@@ -299,10 +310,10 @@ test('audit: suspensions are not gaps, unexplained holes are, and --fix re-fetch
   assert.equal(after.status === 'GAP', false, JSON.stringify(after.days.filter(d => d.status === 'GAP').map(d => d.issues)));
   assert.equal(db.prepare('SELECT COUNT(*) n FROM daily WHERE ts_code = ? AND trade_date = ?').get(HOLE, DATES[131]).n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM watchlist').get().n, watchBefore, 'no watchlist writes');
-  for (const d of [DATES[131], DATES[135], DATES[145]]) {
+  for (const d of [DATES[120], DATES[131], DATES[135], DATES[145]]) {
     assert.equal(db.prepare('SELECT adj_factor FROM adj_factor WHERE ts_code = ? AND trade_date = ?').get(STOCKS[20].ts_code, d).adj_factor, 1, 'stocks without a gap keep their stored values');
   }
-  assert.equal(db.prepare("SELECT COUNT(*) n FROM sync_log WHERE dataset LIKE 'repair:%'").get().n, 13, 'per-stock repairs are logged separately');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM sync_log WHERE dataset LIKE 'repair:%'").get().n, 4, 'per-stock repairs are logged separately');
   const path = saveAudit(db, after, { fixed_from: audit.audit_id });
   assert.ok(existsSync(join(dir, path)));
   assert.equal(db.prepare('SELECT status FROM data_audit WHERE audit_id = ?').get(after.audit_id).status, after.status);

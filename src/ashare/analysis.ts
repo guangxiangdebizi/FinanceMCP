@@ -6,6 +6,26 @@ import { recentTradeDays, addDays } from './ingest.js';
 import { Fundamentals, fundamentalRisk, fundamentalsAsOf } from './fundamentals.js';
 
 export const SCORE_VERSION = 'score-1.0.0';
+export const RESEARCH_SCORE_VERSION = 'score-2.0.0';
+export type ScoreVersion = typeof SCORE_VERSION | typeof RESEARCH_SCORE_VERSION;
+export type ScoreComponents = Record<'technical' | 'liquidity' | 'fundamental' | 'valuation' | 'sector', number>;
+
+export interface ScoreBreakdown {
+  /** Observed normalized factors; missing observations remain null. */
+  normalized: Record<string, number | null>;
+  /** Values actually used by the legacy-compatible formula, including defaults. */
+  scoring_factors: Record<string, number>;
+  imputations: Record<string, string>;
+  components: ScoreComponents;
+  contributions: ScoreComponents;
+  factor_contributions: Record<string, number>;
+}
+
+/** Only the cash percentage threshold differs between the two versions. */
+export function cashScore(value: number | null, version: ScoreVersion = SCORE_VERSION): number {
+  if (version !== SCORE_VERSION && version !== RESEARCH_SCORE_VERSION) throw new Error(`Unsupported score version: ${version}`);
+  return value == null ? 0.5 : value >= (version === SCORE_VERSION ? 0.8 : 80) ? 1 : value > 0 ? 0.5 : 0;
+}
 
 /**
  * Heuristic score rules (score-1.0.0). The score orders stocks for research
@@ -212,7 +232,10 @@ export function sectorRank(rows: StockRow[]): SectorRow[] {
   return list;
 }
 
-function scoreRows(rows: StockRow[], sectors: SectorRow[]): void {
+/** Deterministic scoring on an already-computed full-market universe. No persistence. */
+export function scoreRows(rows: StockRow[], sectors: SectorRow[], version: ScoreVersion = SCORE_VERSION): Map<string, ScoreBreakdown> {
+  if (version !== SCORE_VERSION && version !== RESEARCH_SCORE_VERSION) throw new Error(`Unsupported score version: ${version}`);
+  const breakdowns = new Map<string, ScoreBreakdown>();
   const eligible = rows.filter(r => r.eligible);
   const sectorPct = new Map(sectors.map(s => [s.industry, s.strength]));
   const pr60 = percentileRanks(eligible.map(r => r.state.ret60));
@@ -251,7 +274,7 @@ function scoreRows(rows: StockRow[], sectors: SectorRow[]): void {
     const f = r.fundamentals;
     let fundamental = 0.3;
     if (f) {
-      const cash = f.ocf_to_profit == null ? 0.5 : f.ocf_to_profit >= 0.8 ? 1 : f.ocf_to_profit > 0 ? 0.5 : 0;
+      const cash = cashScore(f.ocf_to_profit, version);
       const financial = ['银行', '证券', '保险', '多元金融'].includes(r.industry);
       const leverage = financial || f.debt_to_assets == null ? 0.5 : f.debt_to_assets < 60 ? 1 : f.debt_to_assets < 80 ? 0.5 : 0;
       const roe = f.roe == null ? 0.3 : prRoe[i];
@@ -265,10 +288,54 @@ function scoreRows(rows: StockRow[], sectors: SectorRow[]): void {
       valuation: prVal[i],
       sector: sectorPct.get(r.industry) ?? 0.5,
     };
+    const financial = ['银行', '证券', '保险', '多元金融'].includes(r.industry);
+    const observed = (value: number | null | undefined, normalized: number) => value != null && Number.isFinite(value) ? normalized : null;
+    const cash = f ? cashScore(f.ocf_to_profit, version) : 0.3;
+    const leverage = !f ? 0.3 : financial || f.debt_to_assets == null ? 0.5 : f.debt_to_assets < 60 ? 1 : f.debt_to_assets < 80 ? 0.5 : 0;
+    const scoringFactors = {
+      ret60: pr60[i], ret20: pr20[i], trend, rsi_fit: rsiFit, volatility_fit: volFit,
+      liquidity: prAmt[i], roe: f ? f.roe == null ? 0.3 : prRoe[i] : 0.3,
+      growth: f ? f.netprofit_yoy == null ? 0.3 : prGrowth[i] : 0.3,
+      cash, leverage, valuation: prVal[i], sector: components.sector,
+    };
+    const normalized = {
+      ...scoringFactors,
+      ret60: observed(s.ret60, pr60[i]), ret20: observed(s.ret20, pr20[i]),
+      trend: Number.isFinite(r.ma20) && Number.isFinite(r.ma60) ? trend : null,
+      rsi_fit: observed(s.rsi14, rsiFit), volatility_fit: observed(s.atr_pct, volFit),
+      liquidity: observed(r.amount20_yi, prAmt[i]), roe: observed(f?.roe, prRoe[i]),
+      growth: observed(f?.netprofit_yoy, prGrowth[i]), cash: observed(f?.ocf_to_profit, cash),
+      leverage: financial ? null : observed(f?.debt_to_assets, leverage),
+      valuation: r.pe_ttm != null && r.pe_ttm > 0 ? prVal[i] : null,
+      sector: sectorPct.has(r.industry) ? components.sector : null,
+    };
+    const imputations: Record<string, string> = {};
+    for (const [key, value] of Object.entries(normalized)) {
+      if (value === null) imputations[key] = !f && ['roe', 'growth', 'cash', 'leverage'].includes(key)
+        ? 'No available financial report: fundamental component defaults to 0.3'
+        : key === 'leverage' && financial ? 'Financial industry: leverage neutral at 0.5'
+        : `Missing or inapplicable observation: explicit scoring default ${scoringFactors[key as keyof typeof scoringFactors]}`;
+    }
+    breakdowns.set(r.ts_code, {
+      normalized, scoring_factors: scoringFactors, imputations, components,
+      contributions: {
+        technical: W.technical * technical, liquidity: W.liquidity * components.liquidity,
+        fundamental: W.fundamental * fundamental, valuation: W.valuation * components.valuation, sector: W.sector * components.sector,
+      },
+      factor_contributions: {
+        ret60: W.technical * 0.3 * pr60[i], ret20: W.technical * 0.2 * pr20[i],
+        trend: W.technical * 0.25 * trend, rsi_fit: W.technical * 0.15 * rsiFit,
+        volatility_fit: W.technical * 0.1 * volFit, liquidity: W.liquidity * prAmt[i],
+        roe: W.fundamental / 4 * scoringFactors.roe, growth: W.fundamental / 4 * scoringFactors.growth,
+        cash: W.fundamental / 4 * cash, leverage: W.fundamental / 4 * leverage,
+        valuation: W.valuation * components.valuation, sector: W.sector * components.sector,
+      },
+    });
     r.components = Object.fromEntries(Object.entries(components).map(([k, v]) => [k, Math.round(v * 1000) / 1000]));
     r.score = Math.round((W.technical * technical + W.liquidity * components.liquidity + W.fundamental * fundamental
       + W.valuation * components.valuation + W.sector * components.sector) * 100) / 100;
   });
   eligible.sort((a, b) => (b.score! - a.score!) || a.ts_code.localeCompare(b.ts_code));
   eligible.forEach((r, i) => { r.rank = i + 1; });
+  return breakdowns;
 }

@@ -9,6 +9,7 @@ import { detectSignals, SIGNAL_BY_ID, technicalState } from './signals.js';
 import { fundamentalRisk, fundamentalsAsOf } from './fundamentals.js';
 import { loadVerdicts } from './evidence.js';
 import { financialHistory, marketData, resolveCode, stockBasic, stockHistory } from './data.js';
+import { factorSnapshot } from './engine.js';
 
 export { ashareToolDefinitions, ASHARE_TOOL_NAMES } from './definitions.js';
 
@@ -310,6 +311,7 @@ export async function runAshareTool(name: string, args: Record<string, any>): Pr
     case 'ashare_watchlist': return watchlist(args);
     case 'ashare_stock_analysis': return stockAnalysis(args);
     case 'ashare_sector_rank': return sectorRankTool(args);
+    case 'ashare_factor_snapshot': return json(factorSnapshot(db(), args));
     case 'ashare_stock_history': return json(stockHistory(db(), args));
     case 'ashare_financial_data': return json(financialHistory(db(), args));
     case 'ashare_market_data': return json(marketData(db(), args));

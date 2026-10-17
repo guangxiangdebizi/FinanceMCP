@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { addDays, checkQuality, CORE_INDICES, latestTradeDay, recentTradeDays, shanghaiToday, tradeDaysBetween } from './ingest.js';
+import { addDays, checkQuality, CORE_INDICES, GAP_CHECK_MAX_AGE_DAYS, gapCheckFresh, latestTradeDay, recentTradeDays, shanghaiToday, tradeDaysBetween } from './ingest.js';
 
 /**
  * Data access layer (module A → consumers). The analysis engine and the MCP
@@ -8,7 +8,7 @@ import { addDays, checkQuality, CORE_INDICES, latestTradeDay, recentTradeDays, s
  * adjustment and announcement-date availability. Nothing here computes
  * indicators, signals or scores, and nothing here writes to the database.
  */
-export const DATA_CONTRACT_VERSION = 'data-1.0.0';
+export const DATA_CONTRACT_VERSION = 'data-1.1.0';
 
 export const LIMITS = {
   history_rows_default: 120,
@@ -46,7 +46,9 @@ export const DATA_CONTRACT = {
   missing: '缺失值一律为 null，不转换为 0；停牌、未上市/已退市与无法解释的数据缺口分别列出',
   availability: {
     market_data: 'trade_date = 行情所属交易日；Tushare 未提供逐条发布时间，first_synced_at / last_synced_at 为 FinanceMCP 实际获取时间',
-    financials: 'end_date = 报告期；ann_date = 公告日（历史可得性约束）；as_of 查询只返回 ann_date ≤ as_of 的记录。ann_date 早于报告期末的记录视为上游异常，不参与 as-of 选择',
+    financials: 'end_date = 报告期；ann_date = 公告日（历史可得性约束）；as_of 查询只返回 ann_date ≤ as_of 的记录，不返回、不计数 as_of 之后的公告或报告期。ann_date 早于报告期末的记录视为上游异常，不参与 as-of 选择；as-of 查询只提示报告期末与公告日都不晚于 as_of 的此类记录，其余异常只出现在缓存审计（finance-ashare audit 的 global.fina_ann_date_before_period_end）中',
+    suspensions: 'suspend_d 最新一次刷新失败时沿用此前成功快照（如有），相关查询标注 suspend_refresh_failed_days；从未成功同步的日期停牌状态未知',
+    gap_check: `上游缺失确认（upstream_missing_days）是 checked_at 时刻 Tushare 的回答，不代表数据永久不存在；超过 ${GAP_CHECK_MAX_AGE_DAYS} 天的确认列为 upstream_check_expired_days，由 audit --fix 复查`,
     not_point_in_time: [
       '财务数据：Tushare 不保留历史修订版本；同一公告日的更正记录（update_flag=1）覆盖原记录，原值不可恢复，因此不是严格 Point-in-Time 财务库',
       '行业分类、股票名称（含 ST 标记）、上市状态为当前 stock_basic 口径，不代表历史任意日期的状态',
@@ -184,11 +186,21 @@ export interface Coverage {
   not_listed_days: number;
   /** After the last bar of a stock with a delisting date: no longer quoted, not a gap. */
   pending_delisting_days: string[];
-  /** A per-stock Tushare check (cache audit) found neither a bar nor a suspension: an upstream gap. */
+  /** A per-stock Tushare check (cache audit) found neither a bar nor a suspension: an upstream gap as of `upstream_checked_at`. */
   upstream_missing_days: string[];
+  /** Earlier empty responses that need rechecking, classified separately from confirmed upstream gaps. */
+  upstream_check_expired_days: string[];
+  upstream_checked_at: Record<string, string>;
+  /** Days whose latest suspend_d refresh failed: suspensions come from an earlier snapshot, or are unknown. */
+  suspend_refresh_failed_days: string[];
   /** Listed, not suspended and no bar: a real gap (or suspension data not yet synced). */
   missing_days: string[];
   suspend_data_missing_days: number;
+}
+
+/** Trade days in [start, end] whose latest suspend_d refresh failed. */
+export function suspendRefreshFailed(db: DatabaseSync, start: string, end: string): string[] {
+  return (db.prepare("SELECT key FROM sync_log WHERE dataset = 'suspend_d' AND refresh_status = 'REFRESH_FAILED' AND key BETWEEN ? AND ? ORDER BY key").all(start, end) as any[]).map(r => r.key);
 }
 
 /**
@@ -202,8 +214,11 @@ export function stockCoverage(db: DatabaseSync, code: string, start: string, end
   const suspended = new Set((db.prepare('SELECT trade_date FROM suspend_d WHERE ts_code = ? AND trade_date BETWEEN ? AND ?').all(code, start, end) as any[]).map(r => r.trade_date));
   const synced = new Set((db.prepare("SELECT key FROM sync_log WHERE dataset = 'suspend_d' AND status = 'ok' AND key BETWEEN ? AND ?").all(start, end) as any[]).map(r => r.key));
   const span = db.prepare('SELECT MIN(trade_date) a, MAX(trade_date) z FROM daily WHERE ts_code = ?').get(code) as any;
-  const upstream = new Set((db.prepare('SELECT trade_date FROM gap_check WHERE ts_code = ? AND trade_date BETWEEN ? AND ? AND upstream_daily = 0 AND upstream_suspended = 0').all(code, start, end) as any[]).map(r => r.trade_date));
-  const out: Coverage = { trade_days: days.length, bars: 0, suspended_days: [], not_listed_days: 0, pending_delisting_days: [], upstream_missing_days: [], missing_days: [], suspend_data_missing_days: 0 };
+  const upstream = new Map((db.prepare('SELECT trade_date, checked_at FROM gap_check WHERE ts_code = ? AND trade_date BETWEEN ? AND ? AND upstream_daily = 0 AND upstream_suspended = 0').all(code, start, end) as any[]).map(r => [r.trade_date, r.checked_at]));
+  const out: Coverage = {
+    trade_days: days.length, bars: 0, suspended_days: [], not_listed_days: 0, pending_delisting_days: [], upstream_missing_days: [], upstream_check_expired_days: [], upstream_checked_at: {},
+    missing_days: [], suspend_data_missing_days: 0, suspend_refresh_failed_days: suspendRefreshFailed(db, start, end),
+  };
   for (const d of days) {
     if (barDates.has(d)) { out.bars++; continue; }
     // Without a stock_basic row (code change), the stock's own quote span stands in for the listing period.
@@ -212,7 +227,13 @@ export function stockCoverage(db: DatabaseSync, code: string, start: string, end
     if (suspended.has(d)) { out.suspended_days.push(d); continue; }
     // Same rule as the cache audit.
     if (basic?.delist_date && span?.z && d > span.z) { out.pending_delisting_days.push(d); continue; }
-    if (upstream.has(d)) { out.upstream_missing_days.push(d); continue; }
+    if (upstream.has(d)) {
+      const checkedAt = upstream.get(d);
+      out.upstream_checked_at[d] = checkedAt;
+      if (gapCheckFresh(checkedAt)) out.upstream_missing_days.push(d);
+      else out.upstream_check_expired_days.push(d);
+      continue;
+    }
     if (!synced.has(d)) out.suspend_data_missing_days++;
     out.missing_days.push(d);
   }
@@ -287,11 +308,16 @@ export function stockHistory(db: DatabaseSync, q: StockHistoryQuery) {
   const warnings: string[] = [];
   if (!basic) warnings.push(`${code} 不在当前 stock_basic 中（可能为代码变更或已从清单移除），名称、行业与上市日期不可得`);
   if (adjMissing.length) warnings.push(`${adjMissing.length} 个交易日缺少复权因子，复权价格为 null`);
-  if (coverage.upstream_missing_days.length) warnings.push(`${coverage.upstream_missing_days.length} 个交易日上游（Tushare）确认既无行情也无停牌记录`);
+  if (coverage.upstream_missing_days.length) warnings.push(`${coverage.upstream_missing_days.length} 个交易日上游（Tushare）在检查时（upstream_checked_at）确认既无行情也无停牌记录`);
+  if (coverage.upstream_check_expired_days.length) warnings.push(`${coverage.upstream_check_expired_days.length} 个交易日的上游缺失确认已过期或检查时间无效，需由 audit --fix 复查`);
+  if (coverage.suspend_refresh_failed_days.length) warnings.push(`${coverage.suspend_refresh_failed_days.length} 个交易日停牌数据最新一次刷新失败，停牌分类沿用旧缓存（或未知）: ${coverage.suspend_refresh_failed_days.slice(0, 5).join(',')}`);
   if (coverage.missing_days.length) warnings.push(`${coverage.missing_days.length} 个交易日在上市期内既无行情也无停牌记录${coverage.suspend_data_missing_days ? `（其中 ${coverage.suspend_data_missing_days} 天尚未同步停牌数据）` : ''}`);
   if (lastCached && end > lastCached) warnings.push(`end_date ${end} 晚于缓存最新交易日 ${lastCached}`);
   if (!rows.length) warnings.push('区间内无行情数据');
-  const q0 = rows.length ? checkQuality(db, rows.at(-1).trade_date, false) : null;
+  // Quality belongs to the covered query endpoint, even when this stock was suspended there.
+  const qualityDay = coverage.trade_days ? latestTradeDay(db, pageEnd) : undefined;
+  const q0 = qualityDay ? checkQuality(db, qualityDay, false) : null;
+  const qualityStatus = q0?.status === 'READY' && coverage.suspend_refresh_failed_days.length ? 'DEGRADED' : q0?.status;
 
   return {
     ts_code: code,
@@ -318,11 +344,14 @@ export function stockHistory(db: DatabaseSync, q: StockHistoryQuery) {
       not_listed_days: coverage.not_listed_days,
       pending_delisting_days: coverage.pending_delisting_days,
       upstream_missing_days: coverage.upstream_missing_days,
+      upstream_check_expired_days: coverage.upstream_check_expired_days,
+      upstream_checked_at: coverage.upstream_checked_at,
       missing_days: coverage.missing_days,
+      suspend_refresh_failed_days: coverage.suspend_refresh_failed_days,
       suspend_data_missing_days: coverage.suspend_data_missing_days,
       adj_factor_missing_days: adjMissing,
     },
-    data_quality: q0 ? { trade_date: q0.trade_date, status: q0.status, cache_status: q0.cache_status } : null,
+    data_quality: q0 ? { trade_date: q0.trade_date, status: qualityStatus, cache_status: q0.cache_status } : null,
     source: ['daily', 'adj_factor', ...(includeBasic ? ['daily_basic'] : [])].map(ds => provenance(db, ds, rows.at(-1)?.trade_date ?? end)),
     warnings,
     contract_version: DATA_CONTRACT_VERSION,
@@ -372,8 +401,10 @@ export interface FinancialQuery {
 /**
  * Financial indicator history of one stock as known on `as_of_date`: per
  * report period, the latest announcement on or before as_of (the same rule as
- * the analysis engine). Announcements after as_of are not returned, only
- * counted; records announced before their period end are listed as anomalies.
+ * the analysis engine). Nothing announced after as_of is returned or counted,
+ * and no report period ending after as_of is mentioned. Records announced
+ * before their period end are listed only when both dates are on or before
+ * as_of; every such record is in the cache audit (auditCache global).
  */
 export function financialHistory(db: DatabaseSync, q: FinancialQuery) {
   const code = resolveCode(db, q.ts_code);
@@ -388,13 +419,13 @@ export function financialHistory(db: DatabaseSync, q: FinancialQuery) {
   const withRevisions = q.include_revisions === true || q.include_revisions === 'true';
   const fields = Object.keys(FINANCIAL_FIELDS);
 
+  // Only what was in the cache's past on as_of is read at all: no later announcement or period.
   const all = db.prepare(`SELECT ts_code, end_date, ann_date, ${fields.join(', ')} FROM fina_indicator
-    WHERE ts_code = ? AND end_date BETWEEN ? AND ? ORDER BY end_date DESC, ann_date DESC`)
-    .all(code, startPeriod ?? '00000000', endPeriod ?? '99999999') as any[];
-  const anomalies = all.filter(r => r.ann_date < r.end_date && r.ann_date <= asOf)
+    WHERE ts_code = ? AND end_date BETWEEN ? AND ? AND ann_date <= ? AND end_date <= ? ORDER BY end_date DESC, ann_date DESC`)
+    .all(code, startPeriod ?? '00000000', endPeriod ?? '99999999', asOf, asOf) as any[];
+  const anomalies = all.filter(r => r.ann_date < r.end_date)
     .map(r => ({ end_date: r.end_date, ann_date: r.ann_date, issue: 'ann_date_before_period_end', handling: '公告日早于报告期末，视为上游异常，不参与 as-of 选择' }));
-  const known = all.filter(r => r.ann_date <= asOf && r.ann_date >= r.end_date);
-  const hidden = all.filter(r => r.ann_date > asOf).length;
+  const known = all.filter(r => r.ann_date >= r.end_date);
 
   const byPeriod = new Map<string, any[]>();
   for (const r of known) {
@@ -428,7 +459,6 @@ export function financialHistory(db: DatabaseSync, q: FinancialQuery) {
     truncated: byPeriod.size > limit,
     periods,
     units: Object.fromEntries(fields.map(f => [f, FINANCIAL_FIELDS[f]])),
-    hidden_after_as_of: hidden,
     anomalies,
     availability: {
       rule: DATA_CONTRACT.availability.financials,
@@ -503,6 +533,7 @@ export function marketData(db: DatabaseSync, q: MarketQuery) {
   const breadth = withBreadth ? breadthByDate(db, start, end) : new Map<string, BreadthRow>();
   const suspended = new Map((db.prepare('SELECT trade_date, COUNT(*) n FROM suspend_d WHERE trade_date BETWEEN ? AND ? GROUP BY trade_date').all(start, end) as any[]).map(r => [r.trade_date, r.n]));
   const suspendSynced = new Set((db.prepare("SELECT key FROM sync_log WHERE dataset = 'suspend_d' AND status = 'ok' AND key BETWEEN ? AND ?").all(start, end) as any[]).map(r => r.key));
+  const suspendFailed = new Set(suspendRefreshFailed(db, start, end));
   const listed = db.prepare("SELECT COUNT(*) n FROM stock_basic WHERE list_date <= ? AND (delist_date IS NULL OR delist_date = '' OR delist_date > ?)");
 
   const out = days.map(day => {
@@ -526,6 +557,7 @@ export function marketData(db: DatabaseSync, q: MarketQuery) {
           amount: b.amount, amount_yi: round(b.amount / 1e5),
           listed: (listed.get(day, day) as any).n,
           suspended: suspendSynced.has(day) ? (suspended.get(day) ?? 0) : null,
+          suspended_source: suspendFailed.has(day) ? (suspendSynced.has(day) ? 'stale_cache' : 'unavailable') : suspendSynced.has(day) ? 'cache' : 'not_synced',
         } : null,
       } : {}),
     };
@@ -538,7 +570,7 @@ export function marketData(db: DatabaseSync, q: MarketQuery) {
     definitions: {
       up_down: 'pct_chg > 0 / < 0 / = 0 的股票数（仅当日有成交行情的股票）',
       limit_up_down: '收盘价 ≥ 涨停价 − 0.001 / ≤ 跌停价 + 0.001；涨跌停价覆盖率 < 95% 时 limit_counts_complete=false',
-      suspended: 'Tushare suspend_d 当日停牌数；该日停牌数据未同步时为 null',
+      suspended: 'Tushare suspend_d 当日停牌数；该日停牌数据未同步时为 null。suspended_source: cache = 最新刷新成功；stale_cache = 最新刷新失败，沿用此前成功快照；unavailable = 刷新失败且无成功快照；not_synced = 尚未同步',
       listed: '当前 stock_basic 中按上市/退市日期在当日处于上市期的股票数（当前口径）',
     },
     units: { index_price: '点', vol: '手', amount: '千元', amount_yi: '亿元' },

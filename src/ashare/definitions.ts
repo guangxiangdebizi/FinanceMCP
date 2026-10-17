@@ -72,6 +72,21 @@ const DATA_NOTE = '数据查询工具：只读本地缓存，返回结构化 JSO
 
 ashareToolDefinitions.push(
   {
+    name: 'ashare_factor_snapshot',
+    description: 'A股只读研究因子快照（RESEARCH_ONLY）：原始/标准化因子、单位、准入与剔除原因、评分组件及逐因子贡献、排名、信号与失效条件、质量限制。单次 1–20 只，按完整市场候选集标准化后筛选返回；缺失保持 null，源 OHLC/成交额异常的技术观测置 null 并在质量中说明。支持正式 V1 与仅修正现金流百分数阈值的研究 V2，不改写正式日报/股票池。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: dateProp,
+        ts_codes: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string' }, description: '1–20 个股票代码，接受 600519.SH、600519 或完整名称' },
+        include_components: { type: 'boolean', description: '附带评分组件、逐因子贡献及缺失值评分默认值，默认 true' },
+        score_version: { type: 'string', enum: ['score-1.0.0', 'score-2.0.0'], description: '默认 score-1.0.0；V2 为研究候选，不替换正式评分' },
+      },
+      required: ['ts_codes'],
+    },
+    annotations: READ_ONLY,
+  },
+  {
     name: 'ashare_stock_history',
     description: `单只A股历史日线：原始 OHLC、昨收、涨跌幅、成交量（手）、成交额（千元）、复权因子及所选复权价格（none/qfq/hfq，前复权以 end_date 之前最后一个因子为基准，不使用之后的因子），可选每日估值指标；列出停牌日、上市期外日期与无法解释的缺口。每次最多 500 行，超出时返回 next_start_date 分页。${DATA_NOTE}`,
     inputSchema: {
@@ -90,7 +105,7 @@ ashareToolDefinitions.push(
   },
   {
     name: 'ashare_financial_data',
-    description: `单只A股财务指标历史（Tushare fina_indicator）：按报告期列出 as_of_date 当时已公告的最新数据（ann_date ≤ as_of_date），含公告日、单位、多次公告的修订字段、之后才公告的记录数与上游异常。空值保持 null。数据源不保留完整修订历史，不是严格 Point-in-Time 财务库。${DATA_NOTE}`,
+    description: `单只A股财务指标历史（Tushare fina_indicator）：按报告期列出 as_of_date 当时已公告的最新数据（ann_date ≤ as_of_date），含公告日、单位、多次公告的修订字段及截止日已知的上游异常；不披露截止日之后的记录数量或报告期信息。空值保持 null。数据源不保留完整修订历史，不是严格 Point-in-Time 财务库。${DATA_NOTE}`,
     inputSchema: {
       type: 'object',
       properties: {

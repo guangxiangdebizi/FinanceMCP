@@ -19,6 +19,7 @@
 | 第二轮正确性修复（1017：P0-1~3、P1-1~6，见 §9） | ✅ 提交 `55b2b09`（分支 `ashare-v1-fix`），`npm test` 76/76，真实缓存副本 5/5，已部署 |
 | 第三轮修复（1017-fix2：手动报告隔离、刷新状态分离，见 §10） | ✅ 提交 `661e130`（分支 `ashare-v1-fix2`），`npm test` 83/83，真实缓存副本 6/6，已部署 |
 | 阶段 A 数据服务（1017-data：数据访问契约、缓存审计、4 个数据工具，见 §11） | ✅ 提交 `4398808`（分支 `feat/ashare-data-service-v1`），`npm test` 94/94，真实缓存副本 12/12，已部署，公网 e2e 13/13 |
+| 阶段 B 数据修复与分析引擎 V2（1017-phaseB：B0~B5，见 [Phase B 验收](ashare-phaseb-acceptance.md)） | ✅ 分支 `feat/ashare-analysis-v2`，`npm test` 142/142，真实缓存 B0 全通过，V1 一致性 9/9 精确匹配，历史研究已记录；**未部署，V2 未启用** |
 | **连续 3 个真实交易日增量更新与报告验收** | ⏳ **PENDING**（2026-10-19/20/21 尚未发生；判定规则见 §8） |
 | **ChatGPT 网页版手动调用 / 已有定时任务验证** | ⏳ **PENDING，待账号侧操作**（本机无法登录 ChatGPT；步骤见 §8.3） |
 
@@ -402,7 +403,7 @@ node deploy/ashare/mcp-e2e.mjs https://share.shijingchang.cn/ashare/mcp 20261016
 - `src/ashare/audit.ts` + CLI `audit [--fix]`：缺口分类与一致性检查，`data_audit` 表与 `audits/*.json` 留存前后记录，`gap_check` 记录上游确认缺失。
 - `checkQuality` 新增 `snapshot`：各数据集当日缓存的写入时间与是否来自不同批次（`ashare_data_status` 显示，同时显示最近一次审计）。
 - 新 MCP 工具：`ashare_stock_history`、`ashare_financial_data`、`ashare_market_data`、`ashare_stock_basic`（参数校验、参数绑定、行数/区间/代码数上限、
-  `next_start_date`/`next_offset` 分页、稳定排序、明确错误）。`ashare_factor_snapshot` 未实现（阶段 B）。
+  `next_start_date`/`next_offset` 分页、稳定排序、明确错误）。`ashare_factor_snapshot` 在阶段 B 实现（见 [Phase B 验收](ashare-phaseb-acceptance.md)）。
 
 ### 11.3 测试（A7）
 

@@ -34,7 +34,8 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "test:cache": "npm run build && node --test test/cache-gateway.test.mjs",
     "test:ashare": "npm run build && node --test test/ashare-*.test.mjs",
-    "ashare": "node build/ashare/cli.js"
+    "ashare": "node build/ashare/cli.js",
+    "ashare:research": "node deploy/ashare/run-research.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
