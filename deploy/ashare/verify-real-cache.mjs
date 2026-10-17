@@ -14,7 +14,7 @@ console.log = (...a) => { if (process.env.ASHARE_VERBOSE) console.error(...a); }
 
 const build = p => new URL(`../../build/ashare/${p}`, import.meta.url).href;
 const { openAshareDb, openResearchDb, closeAshareDb } = await import(build('db.js'));
-const { checkQuality, recentTradeDays } = await import(build('ingest.js'));
+const { checkQuality, recentTradeDays, syncTradeDate } = await import(build('ingest.js'));
 const { syncRange } = await import(build('sync.js'));
 const { latestReportMeta } = await import(build('report.js'));
 const { evaluateWatchlist, loadVerdicts } = await import(build('evidence.js'));
@@ -100,14 +100,55 @@ const h = (args, sink) => ({ arg: n => args[n], flag: n => args[n] === true, ymd
 const sink = [];
 await runCommand(db, 'replay', h({ start: '20261012', end: DAY }, sink));
 await runCommand(db, 'report', h({ date: '20261014' }, sink));
+await runCommand(db, 'report', h({ date: DAY }, sink));        // the latest live date itself
+await runCommand(db, 'report', h({ date: '20261019' }, sink)); // a date with no data yet
+closeAshareDb();
+const servedAfterReports = JSON.parse((await runAshareTool('ashare_daily_report', { date: DAY, format: 'json' })).content[0].text);
+closeAshareDb();
 const afterIso = liveSnapshot();
 const research = openResearchDb();
 const researchReports = research.prepare('SELECT run_mode, COUNT(*) n FROM main.report GROUP BY run_mode').all();
 research.close();
 pass('replay_isolation', JSON.stringify(before) === JSON.stringify(afterIso) && latestReportMeta(db).report_id === served.report_id
-  && sink[0].space === 'research' && sink[1].space === 'research',
+  && sink.every(x => x.space === 'research') && servedAfterReports.report_id === served.report_id && servedAfterReports.watchlist.count === 40,
   { before, after: afterIso, replay: sink[0].reports.map(r => ({ trade_date: r.trade_date, status: r.status, count: r.watchlist_count })),
-    manual: { space: sink[1].space, report_id: sink[1].report_id }, research_reports: researchReports, latest_after: latestReportMeta(db).report_id });
+    manual: sink.slice(1).map(x => ({ space: x.space, trade_date: x.trade_date, status: x.status, report_id: x.report_id, path: x.path })),
+    mcp_after_reports: { report_id: servedAfterReports.report_id, run_mode: servedAfterReports.run_mode, watchlist: servedAfterReports.watchlist.count }, research_reports: researchReports, latest_after: latestReportMeta(db).report_id });
+
+// 4b. Refresh anomalies on real data: real Tushare answers, with a short answer or an error injected.
+const realFetch = globalThis.fetch;
+const inject = mode => {
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.api_name === 'daily' && mode === 'error') return { ok: true, json: async () => ({ code: 40001, msg: '参数异常：注入的上游错误' }) };
+    const res = await realFetch(url, init);
+    if (body.api_name !== 'daily' || mode !== 'short') return res;
+    const json = await res.json();
+    json.data.items = json.data.items.slice(0, 3000);
+    return { ok: true, json: async () => json };
+  };
+};
+const counts0 = counts();
+const step = async mode => {
+  inject(mode);
+  try {
+    const r = (await syncTradeDate(db, DAY, 'refresh')).daily;
+    const qq = checkQuality(db, DAY, false);
+    return { daily: { refresh_status: r.refresh_status, write: r.write, fetched_rows: r.fetched_rows, rows: r.rows }, cache_status: qq.cache_status, status: qq.status,
+      refresh_reasons: qq.reasons.filter(x => /刷新/.test(x)), counts: counts() };
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+};
+const short = await step('short');
+const failed = await step('error');
+const recovered = await step('none');
+const unchanged = c => JSON.stringify(c) === JSON.stringify(counts0);
+pass('refresh_anomalies', short.daily.refresh_status === 'REFRESH_INCOMPLETE' && short.daily.write === 'kept' && short.status === 'DEGRADED' && short.cache_status === 'READY' && unchanged(short.counts)
+  && failed.daily.refresh_status === 'REFRESH_FAILED' && failed.status === 'DEGRADED' && unchanged(failed.counts)
+  && recovered.daily.refresh_status === 'REFRESH_OK' && recovered.status === 'READY' && unchanged(recovered.counts),
+  { short, failed, recovered,
+    history: db.prepare("SELECT synced_at, rows, status, refresh_status, before_rows, after_rows, write_mode FROM sync_history WHERE dataset = 'daily' AND key = ? ORDER BY synced_at").all(DAY) });
 
 // 5. As-of invariance on real data.
 const E = '20261009';

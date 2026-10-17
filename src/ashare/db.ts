@@ -173,6 +173,27 @@ function ensureReportRunMode(db: DatabaseSync): void {
   });
 }
 
+/**
+ * Refresh bookkeeping. `status` in sync_log/sync_history describes the stored
+ * cache (ok / partial / empty); `refresh_status` describes the Tushare request
+ * of that attempt (REFRESH_OK / REFRESH_INCOMPLETE / REFRESH_FAILED), so a bad
+ * refresh over a good cache is visible instead of hidden by the row count.
+ */
+const SYNC_COLUMNS = ['refresh_status TEXT', 'before_rows INTEGER', 'after_rows INTEGER', 'write_mode TEXT'];
+
+function ensureSyncColumns(db: DatabaseSync): void {
+  for (const table of ['sync_log', 'sync_history']) {
+    const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(c => c.name);
+    for (const def of SYNC_COLUMNS) if (!cols.includes(def.split(' ')[0])) db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`);
+  }
+}
+
+/** Whether the live schema has every column the read-only MCP connection queries. */
+function schemaCurrent(db: DatabaseSync): boolean {
+  const has = (table: string, col: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).some(c => c.name === col);
+  return has('report', 'run_mode') && has('sync_log', 'refresh_status') && has('sync_history', 'write_mode');
+}
+
 const PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;';
 
 let shared: DatabaseSync | undefined;
@@ -186,6 +207,7 @@ export function openAshareDb(path = ashareDbPath()): DatabaseSync {
   db.exec(PRAGMAS);
   db.exec(MARKET_SCHEMA + STATE_SCHEMA);
   ensureReportRunMode(db);
+  ensureSyncColumns(db);
   if (STOCK_FIRST_TABLES.some(t => isDateFirst(db, t))) {
     console.error('[ashare] 缓存使用旧主键布局，请运行 `finance-ashare migrate` 以提升扫描性能');
   } else {
@@ -219,16 +241,19 @@ export function isResearchDb(db: DatabaseSync): boolean {
 }
 
 /**
- * Process-wide connection used by the MCP tools. It is opened read-only, so
- * no tool call can modify the cache; the schema is prepared by a short
- * read-write open first.
+ * Process-wide connection used by the MCP tools. It is always read-only: the
+ * schema is created and migrated by the CLI (the container runs `migrate`
+ * before starting the server), never by a tool call.
  */
 export function getAshareDb(): DatabaseSync {
   if (!shared) {
-    const path = ashareDbPath();
-    openAshareDb(path).close();
-    shared = new DatabaseSync(path, { readOnly: true });
-    shared.exec('PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;');
+    const db = new DatabaseSync(ashareDbPath(), { readOnly: true });
+    db.exec('PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;');
+    if (!schemaCurrent(db)) {
+      db.close();
+      throw new Error('A股缓存结构版本过旧，请先运行 `finance-ashare migrate`');
+    }
+    shared = db;
   }
   return shared;
 }
@@ -279,11 +304,21 @@ export function replaceDate(db: DatabaseSync, table: string, columns: string[], 
   return rows.length;
 }
 
+export type RefreshStatus = 'REFRESH_OK' | 'REFRESH_INCOMPLETE' | 'REFRESH_FAILED';
+
+export interface SyncDetail {
+  refresh_status?: RefreshStatus;
+  before_rows?: number;
+  after_rows?: number;
+  write_mode?: string;
+}
+
 /** sync_log keeps the latest outcome per key; sync_history keeps every attempt for audit. */
-export function logSync(db: DatabaseSync, dataset: string, key: string, rows: number, status: string, message = ''): void {
+export function logSync(db: DatabaseSync, dataset: string, key: string, rows: number, status: string, message = '', detail: SyncDetail = {}): void {
   const at = new Date().toISOString();
-  db.prepare('INSERT OR REPLACE INTO sync_log (dataset, key, rows, status, message, synced_at) VALUES (?,?,?,?,?,?)')
-    .run(dataset, key, rows, status, message.slice(0, 500), at);
-  db.prepare('INSERT INTO sync_history (dataset, key, rows, status, message, synced_at) VALUES (?,?,?,?,?,?)')
-    .run(dataset, key, rows, status, message.slice(0, 500), at);
+  const values = [dataset, key, rows, status, message.slice(0, 500), at,
+    detail.refresh_status ?? null, detail.before_rows ?? null, detail.after_rows ?? null, detail.write_mode ?? null];
+  const cols = '(dataset, key, rows, status, message, synced_at, refresh_status, before_rows, after_rows, write_mode) VALUES (?,?,?,?,?,?,?,?,?,?)';
+  db.prepare(`INSERT OR REPLACE INTO sync_log ${cols}`).run(...values);
+  db.prepare(`INSERT INTO sync_history ${cols}`).run(...values);
 }

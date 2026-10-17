@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { fetchAll } from './fetch.js';
-import { logSync, replaceDate, upsertRows } from './db.js';
+import { logSync, RefreshStatus, replaceDate, upsertRows } from './db.js';
+export type { RefreshStatus };
 
 export const CORE_INDICES: Record<string, string> = {
   '000001.SH': '上证指数',
@@ -106,25 +107,37 @@ function countFor(db: DatabaseSync, table: string, date: string): number {
 export type SyncMode = 'skip_ok' | 'refresh';
 
 export interface DatasetSync {
+  /** Rows stored for the date after this run. */
   rows: number;
   /** Whether Tushare was actually queried in this run. */
   fetched: boolean;
+  /** Stored cache state: ok / partial / empty. */
   status?: string;
-  /** replaced = the date's rows were swapped for the new snapshot; merged = upserted, nothing deleted. */
-  write?: 'replaced' | 'merged';
+  /** Outcome of this run's Tushare request, independent of what the cache already held. */
+  refresh_status?: RefreshStatus;
+  fetched_rows?: number;
+  before_rows?: number;
+  /** replaced = the date was swapped for the new snapshot; merged = upserted; kept = previous complete snapshot left as is; none = request failed. */
+  write?: 'replaced' | 'merged' | 'kept' | 'none';
+  error?: string;
 }
 
 /**
  * Download one whole-market trading day per dataset (one paginated request
- * per dataset, never per stock). A dataset is `partial` when its row count
- * falls well short of the previous day, so a later run fetches it again.
+ * per dataset, never per stock).
  *
  * `refresh` re-queries Tushare even when the date is already `ok`: the daily
  * pipeline uses it for the as-of day, whose data can still be completed or
- * revised between the 18:40 and 21:10 runs. A complete response (≥ 97% of the
- * previous day and of what is stored) replaces the date as a whole: revised
- * values win and withdrawn rows disappear. A materially shorter response is
- * only merged, so a truncated answer never shrinks good data.
+ * revised between the 18:40 and 21:10 runs.
+ *
+ * Two things are recorded separately. The refresh is REFRESH_OK only when the
+ * answer is complete (≥ 97% of the previous day and of what is stored); the
+ * date is then replaced as a whole, so revised values win and withdrawn rows
+ * disappear. A short answer is REFRESH_INCOMPLETE: over a complete cache it is
+ * not written at all (the previous snapshot is kept intact, never mixed with a
+ * partial update); over an incomplete cache its rows are merged. A request that
+ * throws is REFRESH_FAILED and changes nothing. The cache `status` (ok /
+ * partial / empty) always describes what is stored afterwards.
  */
 export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMode | boolean = 'skip_ok'): Promise<Record<string, DatasetSync>> {
   const refresh = mode === true || mode === 'refresh';
@@ -135,22 +148,34 @@ export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMo
       result[ds.table] = { rows: countFor(db, ds.table, date), fetched: false };
       continue;
     }
-    const rows = await fetchAll(ds.api, { trade_date: date }, ds.fields, 6000);
     const before = countFor(db, ds.table, date);
     const prevCount = prev ? countFor(db, ds.table, prev) : 0;
-    const complete = rows.length > 0 && (prevCount === 0 || rows.length >= prevCount * 0.97);
+    const enough = (n: number) => n > 0 && (prevCount === 0 || n >= prevCount * 0.97);
+    const cacheStatus = (n: number) => (enough(n) ? 'ok' : n ? 'partial' : 'empty');
+    const notes = [refresh ? 'refresh' : '', prevCount ? `prev ${prev}=${prevCount}` : ''];
+    let rows: Record<string, any>[];
+    try {
+      rows = await fetchAll(ds.api, { trade_date: date }, ds.fields, 6000);
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+      const status = cacheStatus(before);
+      logSync(db, ds.table, date, 0, status, [...notes, 'request failed: ' + message].filter(Boolean).join('; '),
+        { refresh_status: 'REFRESH_FAILED', before_rows: before, after_rows: before, write_mode: 'none' });
+      result[ds.table] = { rows: before, fetched: true, status, refresh_status: 'REFRESH_FAILED', fetched_rows: 0, before_rows: before, write: 'none', error: message.slice(0, 200) };
+      continue;
+    }
+    // A few withdrawn rows must still disappear, so this is not a strict `>= before`.
+    const complete = enough(rows.length) && rows.length >= before * 0.97;
     const columns = ds.fields.split(',');
-    // Replace unless the answer is materially smaller than what is stored (a truncated response);
-    // a few withdrawn rows must still disappear, so this is not a strict `>= before`.
-    const write = complete && rows.length >= before * 0.97 ? 'replaced' : 'merged';
+    const write = complete ? 'replaced' : enough(before) ? 'kept' : 'merged';
     if (write === 'replaced') replaceDate(db, ds.table, columns, date, rows);
-    else upsertRows(db, ds.table, columns, rows);
+    else if (write === 'merged') upsertRows(db, ds.table, columns, rows);
     const after = countFor(db, ds.table, date);
-    // Status describes what is stored: a short refresh response over complete data stays `ok`.
-    const status = after > 0 && (prevCount === 0 || after >= prevCount * 0.97) ? 'ok' : after ? 'partial' : 'empty';
-    logSync(db, ds.table, date, rows.length, status,
-      [refresh ? 'refresh' : '', `${write} ${before}->${after}`, prevCount ? `prev ${prev}=${prevCount}` : ''].filter(Boolean).join('; '));
-    result[ds.table] = { rows: after, fetched: true, status, write };
+    const status = cacheStatus(after);
+    const refreshStatus: RefreshStatus = complete ? 'REFRESH_OK' : 'REFRESH_INCOMPLETE';
+    logSync(db, ds.table, date, rows.length, status, [`${write} ${before}->${after}`, ...notes].filter(Boolean).join('; '),
+      { refresh_status: refreshStatus, before_rows: before, after_rows: after, write_mode: write });
+    result[ds.table] = { rows: after, fetched: true, status, refresh_status: refreshStatus, fetched_rows: rows.length, before_rows: before, write };
   }
   return result;
 }
@@ -175,10 +200,18 @@ export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart
     }
     let count = 0;
     for (const [start, stop] of ranges) {
-      const rows = await fetchAll('index_daily', { ts_code: code, start_date: start, end_date: stop }, fields, 8000);
-      upsertRows(db, 'index_daily', fields.split(','), rows);
-      logSync(db, 'index_daily', `${code}:${start}-${stop}`, rows.length, 'ok');
-      count += rows.length;
+      const key = `${code}:${start}-${stop}`;
+      try {
+        const rows = await fetchAll('index_daily', { ts_code: code, start_date: start, end_date: stop }, fields, 8000);
+        upsertRows(db, 'index_daily', fields.split(','), rows);
+        // A range ending at the as-of day is complete only if that day's bar came back.
+        const complete = stop === end ? rows.some(r => r.trade_date === end) : rows.length > 0;
+        logSync(db, 'index_daily', key, rows.length, complete ? 'ok' : 'partial', '',
+          { refresh_status: complete ? 'REFRESH_OK' : 'REFRESH_INCOMPLETE', write_mode: 'merged' });
+        count += rows.length;
+      } catch (error: any) {
+        logSync(db, 'index_daily', key, 0, 'failed', 'request failed: ' + String(error?.message ?? error), { refresh_status: 'REFRESH_FAILED', write_mode: 'none' });
+      }
     }
     result[code] = count;
   }
@@ -235,7 +268,35 @@ export interface QualityReport {
   coverage: Record<string, number>;
   anomalies: Record<string, number>;
   indices_present: string[];
+  /** Quality of the stored cache alone, before the latest refresh outcome is considered. */
+  cache_status: QualityStatus;
+  /** Latest Tushare refresh per dataset for this date (null = never recorded). */
+  refresh: Record<string, RefreshInfo | null>;
   checked_at: string;
+}
+
+export interface RefreshInfo {
+  refresh_status: RefreshStatus | null;
+  fetched_rows: number;
+  before_rows: number | null;
+  after_rows: number | null;
+  write_mode: string | null;
+  synced_at: string;
+  message: string;
+}
+
+/** Latest recorded refresh of each dated dataset and core index for `date`. */
+export function latestRefresh(db: DatabaseSync, date: string): Record<string, RefreshInfo | null> {
+  const info = (r: any): RefreshInfo | null => r ? {
+    refresh_status: r.refresh_status ?? null, fetched_rows: r.rows, before_rows: r.before_rows ?? null, after_rows: r.after_rows ?? null,
+    write_mode: r.write_mode ?? null, synced_at: r.synced_at, message: r.message ?? '',
+  } : null;
+  const out: Record<string, RefreshInfo | null> = {};
+  for (const ds of DATED_DATASETS) out[ds.table] = info(db.prepare('SELECT * FROM sync_log WHERE dataset = ? AND key = ?').get(ds.table, date));
+  for (const code of Object.keys(CORE_INDICES)) {
+    out[`index_daily:${code}`] = info(db.prepare("SELECT * FROM sync_log WHERE dataset = 'index_daily' AND key LIKE ? ORDER BY synced_at DESC LIMIT 1").get(`${code}:%-${date}`));
+  }
+  return out;
 }
 
 export function checkQuality(db: DatabaseSync, date: string, persist = true): QualityReport {
@@ -285,15 +346,29 @@ export function checkQuality(db: DatabaseSync, date: string, persist = true): Qu
   const optionalMissing = Object.keys(CORE_INDICES).filter(c => !REQUIRED_INDICES.includes(c) && !indices.includes(c));
   if (optionalMissing.length) degraded.push(`非核心指数缺失: ${optionalMissing.join(',')}`);
 
-  const status: QualityStatus = reasons.length ? 'NOT_READY' : degraded.length ? 'DEGRADED' : 'READY';
+  const cacheStatus: QualityStatus = reasons.length ? 'NOT_READY' : degraded.length ? 'DEGRADED' : 'READY';
+  // A good cache does not make a bad refresh good: if the latest request for this date was short
+  // or failed, the report keeps the previous snapshot but cannot be an unqualified READY.
+  const refresh = latestRefresh(db, date);
+  const refreshIssues: string[] = [];
+  for (const [name, r] of Object.entries(refresh)) {
+    if (r?.refresh_status === 'REFRESH_INCOMPLETE') {
+      refreshIssues.push(`最新一次刷新 ${name} 不完整（返回 ${r.fetched_rows} 条，${r.write_mode === 'kept' ? `沿用上一次有效快照 ${r.after_rows} 条` : `缓存现有 ${r.after_rows ?? '-'} 条`}，${r.synced_at}）`);
+    } else if (r?.refresh_status === 'REFRESH_FAILED') {
+      refreshIssues.push(`最新一次刷新 ${name} 请求失败（${(r.message.split('request failed: ')[1] ?? r.message).slice(0, 80)}；沿用已有缓存，${r.synced_at}）`);
+    }
+  }
+  const status: QualityStatus = cacheStatus === 'NOT_READY' ? 'NOT_READY' : refreshIssues.length || cacheStatus === 'DEGRADED' ? 'DEGRADED' : 'READY';
   const report: QualityReport = {
     trade_date: date,
     status,
-    reasons: [...reasons, ...degraded],
+    reasons: [...reasons, ...degraded, ...refreshIssues],
     counts,
     coverage,
     anomalies,
     indices_present: indices,
+    cache_status: cacheStatus,
+    refresh,
     checked_at: new Date().toISOString(),
   };
   if (persist) db.prepare('INSERT OR REPLACE INTO quality_check (trade_date, status, detail, checked_at) VALUES (?,?,?,?)')

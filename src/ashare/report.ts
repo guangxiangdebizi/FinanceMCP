@@ -156,9 +156,10 @@ function persist(db: DatabaseSync, report: any): ReportMeta {
 /**
  * The report served for a date (or, without a date, the most recent one).
  * Ordered by trade date first, so a report generated later for an older date
- * never becomes "latest"; within a date, live/manual reports win over replays,
- * then the most recently generated one. `asOf` limits the search to trade
- * dates on or before it.
+ * never becomes "latest"; within a date the live pipeline report wins, then
+ * manual reports (left in older live databases), then rows without a run_mode,
+ * then replays, and only then the generation time. `asOf` limits the search
+ * to trade dates on or before it.
  */
 export function latestReportMeta(db: DatabaseSync, date?: string, readyOnly = false, asOf?: string): ReportMeta | undefined {
   const cond: string[] = [];
@@ -167,7 +168,9 @@ export function latestReportMeta(db: DatabaseSync, date?: string, readyOnly = fa
   if (asOf) { cond.push('trade_date <= ?'); params.push(asOf); }
   if (readyOnly) cond.push("status != 'NOT_READY'");
   return db.prepare(`SELECT * FROM report ${cond.length ? `WHERE ${cond.join(' AND ')}` : ''}
-    ORDER BY trade_date DESC, COALESCE(run_mode, '') = 'replay', generated_at DESC LIMIT 1`).get(...params) as ReportMeta | undefined;
+    ORDER BY trade_date DESC,
+      CASE run_mode WHEN 'live' THEN 0 WHEN 'manual' THEN 1 WHEN 'replay' THEN 3 ELSE 2 END,
+      generated_at DESC LIMIT 1`).get(...params) as ReportMeta | undefined;
 }
 
 export function loadReport(meta: ReportMeta): any {
@@ -184,6 +187,9 @@ export function loadReport(meta: ReportMeta): any {
 export type RunMode = 'live' | 'replay' | 'manual';
 
 export function generateReport(db: DatabaseSync, date: string, mode: RunMode = 'manual'): { meta: ReportMeta; report: any } {
+  // Live watchlists, scores and latest.json are written only by the daily pipeline.
+  if (!isResearchDb(db) && mode !== 'live') throw new Error(`${mode} 报告只能写入研究库（openResearchDb），正式库只接受 daily 流水线的 live 报告`);
+  if (isResearchDb(db) && mode === 'live') throw new Error('研究库不能生成 live 报告');
   const quality: QualityReport = checkQuality(db, date);
   const generatedAt = nowCst();
   const base = {

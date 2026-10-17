@@ -141,7 +141,8 @@ test('P0-1: an incomplete first response is completed later; a short refresh nev
 
     response = day(D1, 40); // transient short answer on a later refresh
     const third = await syncTradeDate(db, D1, 'refresh');
-    assert.equal(third.daily.write, 'merged');
+    assert.equal(third.daily.write, 'kept');
+    assert.equal(third.daily.refresh_status, 'REFRESH_INCOMPLETE');
     assert.equal(third.daily.rows, 100);
     assert.equal(third.daily.status, 'ok');
   } finally {
@@ -207,6 +208,36 @@ test('P0-2: replay and back-dated reports never touch live watchlists or reports
   LIVE_DAYS.push(next);
 });
 
+test('fix2 P0-1: report for the latest live date, an older date and an unseen date all stay in research', async () => {
+  const last = LIVE_DAYS.at(-1);
+  const servedBefore = (await runAshareTool('ashare_daily_report', { date: last, format: 'json' })).content[0].text;
+  const before = snapshot(live);
+  for (const date of [last, LIVE_DAYS[0], DATES[140]]) {
+    const run = helpers({ date });
+    await runCommand(live, 'report', run.h);
+    assert.equal(run.out[0].space, 'research', date);
+    assert.equal(run.out[0].run_mode, 'manual');
+    assert.match(run.out[0].path, /research[\\/]reports/);
+  }
+  assert.deepEqual(snapshot(live), before, 'live watchlist, changes, scores, reports and latest.json unchanged');
+  assert.equal(latestReportMeta(live, last).run_mode, 'live');
+  closeAshareDb();
+  const servedAfter = (await runAshareTool('ashare_daily_report', { date: last, format: 'json' })).content[0].text;
+  assert.equal(JSON.parse(servedAfter).report_id, JSON.parse(servedBefore).report_id, 'MCP still serves the live report');
+  closeAshareDb();
+  // Only the daily pipeline may write live state.
+  assert.throws(() => generateReport(live, last, 'manual'), /研究库/);
+  assert.throws(() => generateReport(live, last, 'replay'), /研究库/);
+  // The next live day still continues from the last live list.
+  const all = weekdays('20260105', 152);
+  addMarketDays(live, [all.at(-1)], all);
+  const { report } = generateReport(live, all.at(-1), 'live');
+  assert.equal(report.watchlist.previous_date, last);
+  const prevCount = live.prepare('SELECT COUNT(*) n FROM watchlist WHERE trade_date = ?').get(last).n;
+  assert.equal(report.watchlist.count, prevCount + report.watchlist.added.length - report.watchlist.removed.length);
+  LIVE_DAYS.push(all.at(-1));
+});
+
 test('P1-1: the latest report is ordered by trade date and prefers live over replay', () => {
   const db = openAshareDb(':memory:');
   const ins = db.prepare('INSERT INTO report (report_id, trade_date, status, generated_at, path, run_mode) VALUES (?,?,?,?,?,?)');
@@ -214,6 +245,10 @@ test('P1-1: the latest report is ordered by trade date and prefers live over rep
   ins.run('replay-15', '20261015', 'READY', '2026-10-17T00:33:00+08:00', 'x', 'replay');
   ins.run('replay-16', '20261016', 'READY', '2026-10-17T00:40:00+08:00', 'x', 'replay');
   ins.run('legacy-14', '20261014', 'READY', '2026-10-18T00:00:00+08:00', 'x', null);
+  // A manual report left in an older live database, generated after the live one, does not win.
+  ins.run('manual-16', '20261016', 'READY', '2026-10-17T09:00:00+08:00', 'x', 'manual');
+  ins.run('manual-14', '20261014', 'READY', '2026-10-17T09:00:00+08:00', 'x', 'manual');
+  assert.equal(latestReportMeta(db, '20261014').report_id, 'manual-14', 'manual ranks above rows without run_mode');
   assert.equal(latestReportMeta(db).report_id, 'live-16');
   assert.equal(latestReportMeta(db, '20261016').report_id, 'live-16');
   assert.equal(latestReportMeta(db, undefined, true, '20261015').report_id, 'replay-15');
@@ -230,7 +265,7 @@ test('P0-3: pool evaluation and evidence are strictly as of the report date', ()
   assert.ok(asOf.per_date.every(d => all.indexOf(d.trade_date) + 2 <= all.indexOf(end)), 'only windows realised by `end`');
 
   // New market data after `end` must not change the as-of figures.
-  addMarketDays(live, all.slice(151), all);
+  addMarketDays(live, all.slice(152), all);
   assert.deepEqual(evaluateWatchlist(live, start, end, 2, 10), asOf);
 
   // Evidence computed through a later date is not shown as known to an earlier report.
@@ -272,7 +307,7 @@ test('P1-3: a stock with missing adjustment factors gets no score and no signals
 
 // ---------------------------------------------------------------- acceptance
 
-function fakeLiveDay(db, date, runs, { fetches = 2 } = {}) {
+function fakeLiveDay(db, date, runs, { fetches = 2, refreshStatus = 'REFRESH_OK' } = {}) {
   const d = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
   mkdirSync(join(dir, 'reports', date), { recursive: true });
   runs.forEach(([time, status, mode = 'live'], i) => {
@@ -287,8 +322,8 @@ function fakeLiveDay(db, date, runs, { fetches = 2 } = {}) {
       .run(id, date, status, `${d}T${time}:00.000+08:00`, path, mode);
   });
   for (let i = 0; i < fetches; i++) {
-    db.prepare("INSERT INTO sync_history (dataset, key, rows, status, message, synced_at) VALUES ('daily', ?, 5500, 'ok', 'refresh', ?)")
-      .run(date, `${d}T${i ? '13:10' : '10:40'}:30.000Z`);
+    db.prepare("INSERT INTO sync_history (dataset, key, rows, status, message, synced_at, refresh_status) VALUES ('daily', ?, 5500, 'ok', 'refresh', ?, ?)")
+      .run(date, `${d}T${i ? '13:10' : '10:40'}:30.000Z`, refreshStatus);
   }
 }
 
@@ -299,7 +334,11 @@ test('P1-2: acceptance distinguishes READY, DEGRADED, missing runs and missing r
   fakeLiveDay(db, '20261020', [['18:41', 'READY'], ['21:11', 'DEGRADED']]);
   fakeLiveDay(db, '20261021', [['21:11', 'READY']], { fetches: 1 });
   fakeLiveDay(db, '20261022', [['18:41', 'READY'], ['21:11', 'READY'], ['23:59', 'READY', 'replay']]);
-  const now = new Date('2026-10-23T02:00:00Z');
+  upsertRows(db, 'trade_cal', ['cal_date', 'is_open'], [{ cal_date: '20261023', is_open: 1 }]);
+  // Two requests that both came back short (or failed) are not a re-check.
+  fakeLiveDay(db, '20261023', [['18:41', 'DEGRADED'], ['21:11', 'DEGRADED']], { refreshStatus: 'REFRESH_INCOMPLETE' });
+  const now = new Date('2026-10-24T02:00:00Z');
+  assert.ok(acceptanceDay(db, '20261023', { now, allowDegraded: true }).failed.includes('data_rechecked'));
 
   const ok = acceptanceDay(db, '20261019', { now });
   assert.deepEqual(ok.failed.filter(f => f !== 'watchlist_continuous'), []);
@@ -323,7 +362,7 @@ test('P1-2: a fully passing live day on real pipeline output', () => {
   const date = LIVE_DAYS.at(-1);
   const d = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
   for (const t of ['10:41', '13:11']) {
-    live.prepare("INSERT INTO sync_history (dataset, key, rows, status, message, synced_at) VALUES ('daily', ?, 60, 'ok', 'refresh', ?)").run(date, `${d}T${t}:00.000Z`);
+    live.prepare("INSERT INTO sync_history (dataset, key, rows, status, message, synced_at, refresh_status) VALUES ('daily', ?, 60, 'ok', 'refresh', ?, 'REFRESH_OK')").run(date, `${d}T${t}:00.000Z`);
   }
   const ids = [generateReport(live, date, 'live').meta.report_id, generateReport(live, date, 'live').meta.report_id];
   // generated_at is "now"; judge same-day against the clock the reports were written with.

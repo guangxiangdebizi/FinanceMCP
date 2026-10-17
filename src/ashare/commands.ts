@@ -56,9 +56,9 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
     case 'daily': {
       const date = h.arg('date') ? h.ymd(h.arg('date'), '--date') : shanghaiToday();
       // The live pipeline only moves forward: rebuilding an older day would break the
-      // continuity of every later watchlist. Use `report --research` or `replay` instead.
+      // continuity of every later watchlist. Use `report` or `replay` (research database) instead.
       const last = lastLiveDate(db);
-      if (last && last > date) throw new Error(`正式股票池已到 ${last}，daily 不能回写更早的 ${date}；历史日期请用 report --date ${date}（自动进入研究库）或 replay`);
+      if (last && last > date) throw new Error(`正式股票池已到 ${last}，daily 不能回写更早的 ${date}；历史日期请用 report --date ${date}（研究库）或 replay`);
       await syncTradeCal(db, addDays(date, -30), addDays(date, 30));
       if (!isTradeDay(db, date)) {
         h.print({ trade_date: date, skipped: true, reason: '非交易日' });
@@ -81,15 +81,11 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       return true;
     }
     case 'report': {
-      // A date before the latest live watchlist goes to the research database, so the
-      // live list for that date (and the continuity of later dates) is never rewritten.
+      // Manual reports always go to the research database: only `daily` writes live
+      // reports and watchlists, even for the latest live date itself.
       const date = h.ymd(h.arg('date'), '--date');
-      const last = lastLiveDate(db);
-      const research = h.flag('research') || (last !== undefined && date < last);
-      const summary = research
-        ? withResearchDb(rdb => { const { meta, report } = generateReport(rdb, date, 'manual'); return reportSummary(meta, report); })
-        : (() => { const { meta, report } = generateReport(db, date, 'manual'); return reportSummary(meta, report); })();
-      h.print({ space: research ? 'research' : 'live', ...(research ? { research_db: ashareResearchDbPath(), live_latest: last } : {}), ...summary });
+      const summary = withResearchDb(rdb => { const { meta, report } = generateReport(rdb, date, 'manual'); return reportSummary(meta, report); });
+      h.print({ space: 'research', research_db: ashareResearchDbPath(), live_latest: lastLiveDate(db) ?? null, ...summary });
       return true;
     }
     case 'replay': {

@@ -10,6 +10,9 @@ services:
     image: finance-mcp-ashare:local
     container_name: finance-mcp-ashare
     restart: unless-stopped
+    # Schema creation/migration happens here, once, with a writable connection; the MCP
+    # server itself only ever opens the cache read-only.
+    command: ["sh", "-c", "node build/ashare/cli.js migrate && exec node build/httpServer.js"]
     # Same uid as the host data directory owner so the SQLite cache is writable.
     user: "${ASHARE_UID:-1003}:${ASHARE_GID:-1003}"
     env_file:

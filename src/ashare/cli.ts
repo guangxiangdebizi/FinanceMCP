@@ -7,7 +7,7 @@ const USAGE = `用法: finance-ashare <command> [options]
 
   sync --start YYYYMMDD [--end YYYYMMDD] [--force] [--no-fina]   批量同步区间内的交易日数据
   daily [--date YYYYMMDD]                                        定时任务入口：同步 → 分析 → 发布当日报告
-  report --date YYYYMMDD [--research]                            仅基于本地缓存生成指定交易日报告；早于正式最新日期时写入研究库
+  report --date YYYYMMDD                                         仅基于本地缓存生成指定交易日报告（始终写入研究库，不改动正式数据）
   replay --start YYYYMMDD --end YYYYMMDD                         历史日期重放（研究库 research.sqlite，不改动正式数据）
   evidence [--start YYYYMMDD] [--end YYYYMMDD]                   计算信号历史效果统计（样本内）
   pool-eval --start YYYYMMDD --end YYYYMMDD [--horizon 5] [--research]  股票池历史实际表现（截至 end，研究记录）

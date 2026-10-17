@@ -7,8 +7,9 @@ import { latestReportMeta, loadReport, ReportMeta } from './report.js';
  * of these hold:
  * - scheduled_runs: at least two live pipeline reports were generated on the
  *   trading day itself (Beijing time), i.e. both timer runs fired and finished;
- * - data_rechecked: Tushare `daily` was fetched at least twice that day, so the
- *   later run re-checked the day's quotes instead of trusting the first result;
+ * - data_rechecked: Tushare `daily` was fetched at least twice that day with a
+ *   complete answer (refresh_status REFRESH_OK), so the later run re-checked
+ *   the day's quotes; failed or short requests do not count;
  * - final_status: the last live report is READY. DEGRADED (a non-core gap such
  *   as stk_limit coverage or a missing non-core index) passes only with
  *   `allowDegraded`, and is then reported as PASS_DEGRADED, never as PASS;
@@ -17,13 +18,17 @@ import { latestReportMeta, loadReport, ReportMeta } from './report.js';
  * - watchlist_continuous: the final list links to the previous trading day's
  *   list and its size equals previous + added − removed.
  * A day that is today before the second run (21:10 CST) is PENDING.
+ *
+ * This is pipeline evidence from the database. It does not prove the runs were
+ * started by the systemd timer; that is checked separately from the journal
+ * (deploy/ashare/check-schedule.sh).
  */
 export interface AcceptanceDay {
   trade_date: string;
   result: 'PASS' | 'PASS_DEGRADED' | 'FAIL' | 'PENDING';
   failed: string[];
   live_runs: { report_id: string; status: string; generated_at: string; same_day: boolean }[];
-  daily_fetches: { synced_at: string; rows: number; status: string; message: string }[];
+  daily_fetches: { synced_at: string; rows: number; status: string; refresh_status: string | null; message: string }[];
   final: { report_id: string; status: string; generated_at: string; reasons: string[] } | null;
   mcp_report_id: string | null;
   watchlist: { previous_date: string | null; expected_previous: string | null; count: number | null; previous_count: number | null; added: number; removed: number } | null;
@@ -40,8 +45,8 @@ export function acceptanceDay(db: DatabaseSync, day: string, opts: { allowDegrad
     report_id: x.meta.report_id, status: x.meta.status, generated_at: x.report.generated_at,
     same_day: cstDate(x.report.generated_at) === day,
   }));
-  const fetches = (db.prepare("SELECT synced_at, rows, status, message FROM sync_history WHERE dataset = 'daily' AND key = ? ORDER BY synced_at").all(day) as any[])
-    .map(r => ({ synced_at: r.synced_at, rows: r.rows, status: r.status, message: r.message }));
+  const fetches = (db.prepare("SELECT synced_at, rows, status, refresh_status, message FROM sync_history WHERE dataset = 'daily' AND key = ? ORDER BY synced_at").all(day) as any[])
+    .map(r => ({ synced_at: r.synced_at, rows: r.rows, status: r.status, refresh_status: r.refresh_status ?? null, message: r.message }));
   const final = live.at(-1);
   const served = latestReportMeta(db, day);
 
@@ -63,7 +68,7 @@ export function acceptanceDay(db: DatabaseSync, day: string, opts: { allowDegrad
 
   const failed: string[] = [];
   if (runs.filter(r => r.same_day).length < 2) failed.push('scheduled_runs');
-  if (fetches.filter(f => cstDate(f.synced_at) === day).length < 2) failed.push('data_rechecked');
+  if (fetches.filter(f => cstDate(f.synced_at) === day && f.refresh_status === 'REFRESH_OK').length < 2) failed.push('data_rechecked');
   const status = final?.meta.status;
   if (status !== 'READY' && !(status === 'DEGRADED' && opts.allowDegraded)) failed.push('final_status');
   if (!final || served?.report_id !== final.meta.report_id) failed.push('mcp_consistent');

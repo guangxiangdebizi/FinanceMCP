@@ -90,7 +90,7 @@ test('missing core data produces a NOT_READY report without watchlist or signals
   const q = checkQuality(db, '20261016');
   assert.equal(q.status, 'NOT_READY');
   assert.ok(q.reasons.some(r => /日线缺失/.test(r)));
-  const { meta, report } = generateReport(db, '20261016', 'manual');
+  const { meta, report } = generateReport(db, '20261016', 'live');
   assert.equal(report.status, 'NOT_READY');
   assert.equal(report.watchlist, undefined);
   assert.equal(report.signals, undefined);
