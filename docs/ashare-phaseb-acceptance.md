@@ -10,9 +10,9 @@
 |---|---|
 | 正式评分/信号/股票池/证据版本 | 未变：`score-1.0.0`、`sig-1.0.0`、`wl-1.0.0`、`evi-1.0.0` |
 | `daily` 流水线 | 仍调用原 `scanMarket()` / `updateWatchlist()` / `generateReport()`，使用 V1 |
-| 新增研究入口 | `analyzeMarket()`、`ashare_factor_snapshot`、`run-research.mjs`，结果标 `RESEARCH_ONLY` |
-| 正式数据库历史 | 未改写；研究结果只写独立 `research.sqlite` |
-| 生产部署 | 未部署 V2；本轮不切换 |
+| 新增研究入口 | `analyzeMarket()`、`ashare_factor_snapshot`、`run-research.mjs`、`research-snapshot` / `research-evaluate`，结果标 `RESEARCH_ONLY` |
+| 正式数据库历史 | 未改写；研究结果只写独立 `research.sqlite` 与 `research/forward-observations.sqlite` |
+| 生产部署 | 未部署 V2；本轮不切换（生产未改动证据见 §8） |
 
 ## 2. B0 数据层缺陷（已修复并验证）
 
@@ -31,6 +31,26 @@
 - 修补前后 `daily`、`daily_basic`、`adj_factor`、`stk_limit` 逐行差异为 0；`watchlist`、`watchlist_change`、`report`、`stock_score`、`signal_evidence` 差异为 0。
 - 1812 次 as-of 财务查询无未来元数据泄漏；停牌刷新失败时 10 行停牌记录保留，状态 `READY → DEGRADED → READY`。
 - 原始快照 sha256 前后不变。
+
+### 2.1 P0：OHLC NULL 漏检（audit-1.2.0）
+
+原 `audit-1.1.0` 的非法 K 线判定直接写 `open <= 0`、`vol < 0` 等比较。SQLite 中与 `NULL` 比较得到 `NULL` 而不是 `true`，因此 `open/high/low/vol/amount` 为 `NULL` 的行可以同时通过审计和 `checkQuality()`，在覆盖率正常时得到 `READY`。
+
+修复（不改变任何评分、准入、信号或权重）：
+
+- 判定只定义一次：`src/ashare/ingest.ts` 的 `INVALID_BAR_KINDS` / `INVALID_BAR_SQL`，显式检查 `open IS NULL OR high IS NULL OR low IS NULL OR close IS NULL`，并保留非正价格、`high < low`、收盘/开盘越界、负成交量/成交额、`vol > 0` 但成交额缺失的检查；`auditDay`、`audit --fix` 修补清单与 `checkQuality()` 共用同一表达式，三者不可能互相矛盾。
+- 成交量/成交额语义明确：`NULL` 是缺失证据，任何地方都不转换为 0；`vol = 0` 且 `amount = 0` 合法，`vol = 0` 且 `amount IS NULL` 非法。
+- `auditDay` 新增 `invalid_bar_kinds` 逐类计数（可同时命中多类），`invalid_bars` / `invalid_bar_codes` 含义不变；`AUDIT_VERSION` 升至 `audit-1.2.0`。
+- `checkQuality()` 新增 `anomalies.null_ohlc / null_vol / null_amount / invalid_bar`，任一项大于 0 即 `NOT_READY`，与覆盖率无关；干净缓存的判定与修复前完全一致。
+- `audit --fix` 仍只按 `(ts_code, trade_date)` 修补 `daily`，不扩大范围、不改写其他股票或数据集。
+
+反例测试 `test/ashare-ohlc-audit.test.mjs`（9 项）：分别把 open、high、low、close 置 `NULL`，以及 `high < low` 非法关系，逐项验证审计 `GAP` + 精确股票定位、质量 `NOT_READY`、`--fix` 只请求该股票该日期（模拟 Tushare 调用日志断言）、修补后恢复 `OK/READY`、以及该股票技术观测为 `null`、信号被抑制而 V1 分数/排名与其他股票完全不变。另有“覆盖率全部正常但存在 NULL OHLC 仍为 NOT_READY”、成交量/成交额策略一致性、以及超过 200 只显示样本的修补清单完整性。
+
+真实缓存验证（`deploy/ashare/verify-ohlc-audit.mjs`，证据 `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json`，`PASS`）：
+
+- 冻结快照 sha256 前后不变（`ac31a9eb…4dd1`），以 `mode=ro&immutable=1` + `query_only=ON` 只读打开。
+- 最近 10 个交易日：`invalid_bars = 0`，全部 `invalid_bar_kinds` 为 0，审计 `OK`、质量 `READY`；对全部 3,642,948 行独立复核，12 类非法条件命中数均为 0。
+- V1 一致性：与 `fc24fef` 基线构建对比 20261015/20261016 两个交易日，`scanMarket` 全市场逐行 JSON 相同、`analyzeMarket` V1 逐股评分/排名/组件/贡献相同，共 3,513 个可评分股票日 **0 差异**；两版扫描与信号计数一致。
 
 ## 3. B1/B2 分析契约与因子快照
 
@@ -69,6 +89,23 @@
 每次调用都会扫描并归一化全市场（当日 3,933 只有估值观测、约 5.5k 只扫描），再筛选请求股票，因此耗时与请求只数基本无关（20 只与 1 只相差 < 3%），响应体积随只数线性增长。CPU ≈ 墙钟说明是单线程计算受限。三次重复响应 SHA256 一致，前后快照 SHA256 不变，写入被拒绝。
 
 判定：**对研究型交互接口可接受**——最差中位 8.5 s，远低于 15 s 阈值，且不随请求规模恶化；未发现影响实际使用的问题，因此按任务要求**不新增缓存系统、不重构扫描引擎**。公网部署仍待正式流水线安全验收后决定。单次调用约 1.2 GB 峰值 RSS 需要在容器内存限制中留出余量（见 §7）。
+
+### 3.3 真正的前瞻研究快照（`research-snapshot` / `research-evaluate`）
+
+`src/ashare/snapshot.ts` 新增两个命令，从真实交易日开始独立记录 V1/V2 研究结果；完整说明见 [前瞻研究快照](ashare-research-snapshot.md)。
+
+- `finance-ashare research-snapshot --date YYYYMMDD [--db PATH] [--revise] [--horizon 10]`：正式库以只读连接打开，结果写入独立的 `<ASHARE_DATA_DIR>/research/forward-observations.sqlite`。执行条件按顺序检查：交易日历、数据截止日（`MAX(daily.trade_date)`）、上海今天、当日行数、`checkQuality` 非 `NOT_READY`、存在 `run_mode='live'` 的正式报告；任一不满足返回 `NOT_TRADE_DAY` / `PENDING` / `NOT_READY` 且**不写入任何内容**。禁止用后续数据伪装当日快照。
+- 计算：V1 = `scanMarket()`（`score-1.0.0`），V2 = 同一可评分集合克隆上的 `scoreRows(..., 'score-2.0.0')`；V1 分数/排名必须与正式 `stock_score` 当日行逐只相等，否则中止且不写库。
+- 保存：交易日、实际创建时间、正式 `report_id`、完整质量报告与缺失原因、逐数据集 `written_at`/`spread_minutes`/`mixed` 与同步时间、各版本号、`build_sha256`、费用/持有期参数、每只可评分股票的原始因子与两版分数/排名/组件/归一化因子/逐因子贡献/默认值说明、两版股票池成员（含快照时信号）、池差异、逐股评分差异、`future_returns` 状态。
+- 两个池明确区分：V1 池 = 正式 live `watchlist`（`pool_source=formal_live_watchlist`）；V2 池 = 按未修改 `wl-1.0.0` 规则从上一份 V2 研究池逐日推进的独立池（`pool_source=research_v2_sequential`）。
+- 不可变：同一交易日已有快照时只返回 `EXISTS`（含重算 ID 与内容是否一致），绝不覆盖；`--revise` 追加 `REVISED` 行并指向原始 `snapshot_id`，原始行逐字节不变。
+- `research-evaluate --date YYYYMMDD [--as-of YYYYMMDD]`：用保存的成员与当时信号、同一 `evaluateEvents()` 与同一 `as_of` 评价两版；持有期未结束返回 `PENDING`，完成数 0、收益 `null`，不生成任何假定未来收益；结果只追加到 `snapshot_evaluation`。
+
+反例测试 `test/ashare-snapshot.test.mjs`（9 项）：非交易日、超出缓存、无正式报告均不写库；成功写入后正式库文件字节与 `report/watchlist/stock_score` 内容不变；相同输入重跑返回 `EXISTS` 且内容一致；`--revise` 保留原始行；未到期 `PENDING` 且补足未来 K 线后两版出现完成观察；V2 池从存储状态推进；`horizon < 2` 与非法日期在写入前报错。
+
+真实缓存验证（`deploy/ashare/verify-research-snapshot.mjs`，证据 `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`，17/17 PASS）：源文件 sha256、大小、mtime 前后不变；20261016 快照引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，V1 与正式 `stock_score` 的 1,756 只逐只一致；V2 评分变化 430 只、全部 −3.75、排名相关 0.990175，与历史实验一致；重复运行 `EXISTS` 且只有一行快照；`research-evaluate --as-of 20261016` 计划退出日 20261030、两版 `PENDING`；20261019 返回 `PENDING (date_after_data_cutoff)` 且快照/池状态行数不变。
+
+本轮不新增 systemd timer；接入正式日频流程的步骤见 `docs/ashare-research-snapshot.md` §11，在 2026-10-19~21 验收完成前不应启用。
 
 ## 4. B3 评分版本
 
@@ -237,8 +274,12 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 
 | 证据 | 结果 |
 |---|---|
-| `npm test` | 通过（见交付报告；A 股子集 110/110） |
-| `node --test test/ashare-*.test.mjs` | 110/110 通过（基线 96 + 新增 14） |
+| `npm test` | 174/174 通过，0 失败，0 跳过 |
+| `node --test test/ashare-*.test.mjs` | 128/128 通过（基线 96 + P0 9 + 前瞻快照 9 + 研究接口 7 + 证据自洽 7） |
+| P0 NULL OHLC 反例 | `test/ashare-ohlc-audit.test.mjs` 9/9 通过（见 §2.1） |
+| P0 真实缓存一致性 | `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json` PASS，3,513 个股票日 0 差异（见 §2.1） |
+| 前瞻快照反例 | `test/ashare-snapshot.test.mjs` 9/9 通过（见 §3.3） |
+| 前瞻快照真实缓存 | `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json` 17/17 PASS（见 §3.3） |
 | 独立复核三项审查问题 | PASS（NULL OHLC 掩码、未退出区间、`horizon<2`）及执行器整合 PASS（`/tmp/phaseb-fix-verification.txt`） |
 | V1 一致性（`docs/ashare-samples/phaseb-v1-parity.json`） | PASS：9 个日期全部精确匹配，源快照与基线构建哈希不变 |
 | 真实因子证据 | 11/11 通过（见 §3） |
@@ -259,8 +300,23 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 4. 生产容器镜像升级到含 10 个工具的本分支前，需重新跑容器内迁移与公网 e2e。
 5. 是否切换正式评分版本由后续验收决定；本轮不切换。
 6. 若将 `ashare_factor_snapshot` 公网开放，容器内存需覆盖单次约 1.2 GB 峰值 RSS（§3.2）；未新增缓存层。
+7. 前瞻快照命令已就绪，但尚未接入日频流程；接入前需完成 10-19~21 验收，并按 `docs/ashare-research-snapshot.md` §11 在 live 报告发布后追加执行。
 
-## 8. 已知限制
+## 8. 生产未改动证据
+
+`deploy/ashare/verify-production-untouched.mjs` 只读记录正式环境，基线在改动前采集、结束前复查，结果 `docs/ashare-samples/phaseb-production-untouched.json`（`PASS`，8/8）：
+
+| 检查 | 结果 |
+|---|---|
+| 正式 `ashare.sqlite` 文件 sha256 / 大小 | 未变（`0f071b4f…6d19`，1,685,577,728 B） |
+| 容器 `finance-mcp-ashare` 身份 / 镜像 / 启动时间 / 重启次数 | 未变（镜像 `sha256:7c4b8d90…970e`，`Up`，重启 0） |
+| 容器内 `/app/build/ashare` 文件清单 | 未变（无 `snapshot.js`，即未部署本轮代码） |
+| `report` / `watchlist` / `watchlist_change` / `stock_score` / `quality_check` / `signal_evidence` / `data_audit` 行数 | 未变（75 / 2847 / 366 / 138195 / 673 / 108 / 3） |
+| 本机 A 股 systemd unit / timer | 均为 0（不存在，本轮也未新增） |
+
+本轮未修改生产容器、systemd timer、Caddy 或 ChatGPT 定时任务；研究计算全部在冻结快照副本或只读连接上完成。
+
+## 9. 已知限制
 
 - 行业、名称、ST 状态为当前 `stock_basic` 口径，非历史时点；代码变更未合并。
 - 财务无完整修订历史，不是严格 Point-in-Time；北交所旧代码财务记录重复。
