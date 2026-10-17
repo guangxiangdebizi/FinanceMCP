@@ -1,6 +1,6 @@
 # Phase B 验收记录（研究版，RESEARCH_ONLY）
 
-分支 `feat/ashare-analysis-v2`，基线 `e8cbe4a`。执行日期 2026-10-17。真实数据来自 Tushare Pro 正式缓存的一致性快照
+分支 `feat/ashare-analysis-v2`，基线 `e8cbe4a`；本轮封版修复在 `fix/ashare-phaseb-freeze`（基线 `fc24fef`）。执行日期 2026-10-17。真实数据来自 Tushare Pro 正式缓存的一致性快照
 `~/ashare-research/ashare-20261016.sqlite`（1.69 GB，sha256 `ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1`），
 未写入正式库、未部署、未修改 systemd timer 或 ChatGPT 任务。
 
@@ -41,6 +41,35 @@
 - 真实快照证据（`docs/ashare-samples/phaseb-factor-real-cache.json`，11/11 通过）：MCP 结果与内部引擎深度相等、重复请求字节相同、20 只上限生效、停牌无行情股票返回显式 `null` 且 `eligible=false`、源文件 sha256 不变、写操作被拒。约 41 KB、单次约 9 秒（含全市场归一化）。
   该快照本身无非法 OHLC/NULL 成交额，因此真实验证证明掩码已接线且在干净数据上不误伤；脏数据行为由 `test/ashare-engine.test.mjs` 的 13 个反例覆盖。
 
+### 3.1 ChatGPT 研究层接口检查
+
+正式工具集仍为 **十个只读工具**（原九个 + `ashare_factor_snapshot`），定义顺序与名称未变（`src/ashare/definitions.ts`，测试断言完整列表）。`ashare_factor_snapshot` 保持 `RESEARCH_ONLY`：不写正式库、不发布报告、不更新股票池，且其导入路径不包含 `evaluation.ts`（唯一会读取未来价格的模块）。
+
+`test/ashare-research-interface.test.mjs` 覆盖以下契约：
+
+| 契约 | 断言 |
+|---|---|
+| 评分版本可见 | 响应顶层 `score_version` 等于请求版本；同一请求分别用 `score-1.0.0` / `score-2.0.0` 返回不同版本标识 |
+| 版本可追溯 | `trade_date`、`engine_version`、`factor_version`、`indicator_version`、`signal_version`、逐行 `factor_version`、`policy`、`units` 全部返回 |
+| 三层分离 | `raw`（源单位）、`normalized`（0–1 或 null）、`scoring_factors`（公式代入值）、`components` / `contributions` / `factor_contributions`（加权贡献）分别返回；逐因子贡献与组件贡献之和均还原总分（误差 < 0.011） |
+| 缺失不置零 | 观测缺失保持 `null`，对应 `scoring_factors` 给出显式默认值并在 `imputations` 说明；`quality.missing_factors` 与 `raw` 的 null 一致 |
+| 确定性 | 相同请求两次返回字节完全相同；MCP 入口与内部 `analyzeMarket()` 的 JSON 字节相同 |
+| 无回测副作用 | 调用前后 `daily`/`stock_score`/`watchlist`/`watchlist_change`/`report` 行数不变、`total_changes()` 不变、缓存文件大小不变；只读连接下写入被拒绝 |
+
+### 3.2 真实缓存性能复测
+
+`deploy/ashare/verify-factor-performance.mjs` 在冻结真实快照（sha256 `ac31a9eb…4dd1`，1.69 GB）上对 2026-10-16 分别请求 1/5/20 只股票，各预热 1 次、测量 3 次取中位；证据 `docs/ashare-samples/phaseb-factor-performance.json`：
+
+| 股票数 | 墙钟中位 | CPU 中位（user+sys） | 响应体积 | 进程峰值 RSS | 20/1 墙钟比 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 8,505 ms | 8,596 ms | 8,929 B | 1,162 MB | — |
+| 5 | 8,274 ms | 8,359 ms | 15,249 B | 1,165 MB | — |
+| 20 | 8,291 ms | 8,383 ms | 43,324 B | 1,166 MB | 0.975 |
+
+每次调用都会扫描并归一化全市场（当日 3,933 只有估值观测、约 5.5k 只扫描），再筛选请求股票，因此耗时与请求只数基本无关（20 只与 1 只相差 < 3%），响应体积随只数线性增长。CPU ≈ 墙钟说明是单线程计算受限。三次重复响应 SHA256 一致，前后快照 SHA256 不变，写入被拒绝。
+
+判定：**对研究型交互接口可接受**——最差中位 8.5 s，远低于 15 s 阈值，且不随请求规模恶化；未发现影响实际使用的问题，因此按任务要求**不新增缓存系统、不重构扫描引擎**。公网部署仍待正式流水线安全验收后决定。单次调用约 1.2 GB 峰值 RSS 需要在容器内存限制中留出余量（见 §7）。
+
 ## 4. B3 评分版本
 
 `score-2.0.0` 只把现金流满分阈值从百分数 `0.8` 修正为 `80`，其余公式、权重、准入、技术/流动性/估值/行业规则不变。反例：115.11% → 1/1，20% → 1/0.5，−10% → 0/0，缺失 → 0.5/0.5，负 ROE 两版均剔除，非正 EPS 标注但不改分。
@@ -67,19 +96,75 @@
 - 成本：默认买入 3 bps、卖出 8 bps、每边不利滑点 5 bps，显式参数。
 - 基准：信号日全市场等权、沪深 300 价格指数、当前行业等权，均按相同实际区间计算，标明为无费用端点观察；完整/部分覆盖分开报告。
 - 统计：事件数、入场数、完成数、未完成数、均值、中位数、胜率、分位、样本波动、按日期观察序列、不重叠敏感性；不给出独立样本 t 值或年化 Sharpe。不重叠敏感性使用全部已入场持仓区间，未知退出按 `asOf` 截断。
-- 固定切分：规则形成 ≤ 2026-03-31；2026-04-01 ~ 2026-10-16 为历史模拟验证（非未接触样本）；真正未来观察从 2026-10-19 起为 **PENDING**。
 - 复现：111 个采样交易日（84 形成 / 27 模拟），同一冻结扫描、同一评价函数、V1/V2 独立池状态；`run_id` 绑定市场快照、基线构建、每个扫描输入、实现源码与运行时构建的 SHA256。相同输入重跑结果与 `run_id` 一致；修改扫描会产生新 `run_id`。
 
-### 结果（日期等权，已扣费，10 日持有，部分覆盖子集超额）
+### 5.1 三个时间区间（互不替代）
+
+| 区间 | 起止 | 性质 | 当前状态 |
+|---|---|---|---|
+| 历史形成区间 | 2024-07 ~ **2026-03-31** | 评分/股票池规则在此区间内形成并被反复查看 | 已完整计算，收益在切分点截断 |
+| 回溯模拟验证区间 | **2026-04-01 ~ 2026-10-16** | 同一冻结数据快照上的历史模拟；数据已存在、结果已部分被观察过 | 已计算，**不是未接触的样本外**，不得称为 out-of-sample |
+| 真正前瞻观察区间 | **2026-10-19 起**的实际交易日 | 冻结规则后逐日新增、不可回填的观察 | **PENDING**，尚无数据 |
+
+`20260331` 只是历史回溯的切分点，不是“策略冻结后开始验证”的时点：V2 于 2026-10-17 才形成，2026-04-01 至 2026-10-16 的数据在规则形成前就已存在并被查看。任何把该区间表述为“样本外验证”的措辞都是错误的，本文档与本分支其他文档已统一改为“回溯模拟验证区间”。
+
+### 5.2 统计口径（解释结果前必须读）
+
+1. **已完成事件的收益是条件观察值**。均值/中位数/胜率只对已确认买入且已确认退出的 `completed` 事件计算；这些事件不等于全部信号事件，也不代表所有事件都能成交。
+2. **未完成、未入场事件保留在完整分母中**。事件数 = 完成 + 未完成（已入场未退出）+ 未入场；任何收益指标旁边都必须同时给出完成率与无法退出比例，不能只报均值。
+3. **V1/V2 的完成事件集合不完全相同**，因此两版均值之差不是严格配对的策略收益差。§5.5 给出了共同可比较事件的配对敏感性，用于说明差异来源。
+4. **基准超额是条件于已定价子集的**。全市场与行业基准在事件层面均为部分覆盖：完整覆盖事件与部分覆盖事件分别统计（`excess_complete_coverage` / `excess_including_priced_subsets`），缺失成员数单列；不得把部分覆盖均值称为无偏全市场收益。
+5. 持有期重叠、同一股票重复出现与跨股相关仍然存在；不给出独立样本 t 值、年化 Sharpe 或统计显著性结论。
+
+### 5.3 结果（日期等权，已扣费，10 日持有，部分覆盖子集超额）
 
 | 版本 | 区间 | 池日期 | 完成观察 | 净收益均值 | 净收益中位 | 胜率 | 全市场超额 | 沪深300 超额 | 行业超额 | 不重叠日期 | 不重叠全市场超额 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | V1 | 形成 | 84 | 2895 | +1.168% | −0.372% | 48.0% | −0.486% | +0.521% | −0.321% | 36 | −0.597% |
 | V1 | 模拟 | 27 | 770 | −0.359% | −2.003% | 41.6% | −0.092% | +0.072% | +0.609% | 12 | +0.509% |
-| V2 | 形成 | 84 | 2847 | +0.910% | −0.380% | — | −0.760% | +0.249% | −0.550% | 36 | −0.999% |
+| V2 | 形成 | 84 | 2847 | +0.910% | −0.380% | 48.2% | −0.760% | +0.249% | −0.550% | 36 | −0.999% |
 | V2 | 模拟 | 27 | 773 | −0.319% | −1.828% | 41.9% | −0.283% | −0.119% | +0.406% | 12 | +0.305% |
 
-分母（模拟区间，V1/V2）：事件 863/876，入场 831/841，完成 770/773，未完成 61/68，未入场 32/35。全部 111 个采样日数据质量为 READY。
+净收益均值/中位/胜率是**事件级**统计；超额列是**按日期等权**的观察序列均值（`by_date.excess`），两者口径不同，不可互相替代。逐日期序列见证据文件 `evaluation.<version>.<segment>.summary.by_date`。
+
+### 5.4 分母与完成率（与上表配套，不可省略）
+
+| 版本 | 区间 | 事件 | 入场 | 完成 | 已入场未完成 | 其中确认无法退出 | 未入场 | 完成率（/事件） | 完成率（/入场） | 未完成比例（/入场） | 无法退出比例（/入场） | 未入场比例（/事件） |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| V1 | 形成 | 3008 | 2965 | 2895 | 70 | 1 | 43 | 96.2% | 97.6% | 2.4% | 0.03% | 1.4% |
+| V1 | 模拟 | 863 | 831 | 770 | 61 | 0 | 32 | 89.2% | 92.7% | 7.3% | 0.00% | 3.7% |
+| V2 | 形成 | 2953 | 2914 | 2847 | 67 | 1 | 39 | 96.4% | 97.7% | 2.3% | 0.03% | 1.3% |
+| V2 | 模拟 | 876 | 841 | 773 | 68 | 0 | 35 | 88.2% | 91.9% | 8.1% | 0.00% | 4.0% |
+
+“已入场未完成”绝大多数是持有期尚未结束的 `pending`（`horizon_after_as_of`）事件，不是亏损未平仓：V1 形成 70 = 69 pending + 1 `unexited`（`exit_delay_exhausted`），V1 模拟 61 全部 pending，V2 形成 67 = 66 pending + 1 unexited，V2 模拟 68 全部 pending。“未入场”包含开盘涨停/停牌导致无法买入（`entry_blocked`：V1 5/2、V2 3/1）与数据截止日附近信号尚无 t+1 开盘（`entry_after_as_of`：V1 38/30、V2 36/34）。事件/入场/完成等计数与 `docs/ashare-samples/phaseb-research-audit.json` 的逐项校验一致。
+
+### 5.5 共同可比较事件敏感性（描述性，不是策略收益差）
+
+对同一日期、同一股票同时出现在 V1 与 V2 采样池的事件（同一评价函数、同一数据截止日）计算配对净收益差：
+
+| 区间 | V1 池事件 | V2 池事件 | 共同事件 | 双方均完成 | 配对差均值/中位 | 非零配对差 | 仅 V1 完成均值 | 仅 V2 完成均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 形成 | 3008 | 2953 | 2302 | 2207 | 0 / 0 | 0 | +1.067%（688 个） | −0.092%（640 个） |
+| 模拟 | 863 | 876 | 654 | 579 | 0 / 0 | 0 | +1.181%（191 个） | +1.316%（194 个） |
+
+配对差在构造上恒为 0：同一事件在冻结价格下由同一 `evaluateEvents()` 计算，评分版本只影响股票池成员，不影响任何事件的买卖价。因此**两版历史均值之差完全来自池成员差异，而不是收益计算差异**；上表右两列显示差异主要来自各自独有的完成事件。该分析仅为描述性敏感性检查，不用于调参，也不能当作 V1/V2 的策略收益差。
+
+### 5.6 参数未调整声明
+
+本轮**没有因为 V2 在历史模拟中表现较差而修改任何参数**：评分权重、现金流阈值、V2 阈值、股票池准入/退出规则、信号定义、评价语义与数据截止规则均与 `fc24fef` 一致（`implementation_sha256` 见证据文件）。V2 的历史结果原样保留。
+
+### 5.7 基准覆盖状态（未隐藏）
+
+| 区间 | 基准 | 完整覆盖事件 | 部分覆盖事件 | 缺失（无法配对） | 成员数（可定价/全部） |
+|---|---|---:|---:|---:|---|
+| 形成 | 全市场等权 | 0 | 2895 | 0 | 15,603,783 / 15,670,122 |
+| 形成 | 沪深300 | 2895 | 0 | 0 | 2,895 / 2,895 |
+| 形成 | 行业等权 | 2087 | 808 | 0 | 346,692 / 347,885 |
+| 模拟 | 全市场等权 | 0 | 770 | 0 | 4,241,028 / 4,258,118 |
+| 模拟 | 沪深300 | 770 | 0 | 0 | 770 / 770 |
+| 模拟 | 行业等权 | 560 | 210 | 0 | 100,149 / 100,448 |
+
+全市场基准按定义永远包含无法定价成员（停牌、退市、无复权因子），因此完整覆盖事件恒为 0，只有“部分覆盖”均值可用；这不是数据缺陷，而是必须披露的覆盖状态。V2 的对应表见证据文件 `evaluation['score-2.0.0']`，口径相同。
 
 结论（研究性，不是投资建议）：
 
@@ -87,16 +172,80 @@
 2. 两个版本相对全市场等权均无稳定正超额；相对沪深 300 在形成段为正、模拟段接近零，样本短且高度重叠，不构成显著结论。
 3. 因子相关性与收益相关性均较弱（模拟段 `score` 与净收益相关约 0.04），说明评分是启发式排序，不是收益预测。
 4. 采样池与正式每日股票池不是同一对象，不能直接外推正式池绩效。
+5. 模拟区间完成率低于形成区间（V1 92.7% vs 97.6%），因为数据截止日附近的持有期尚未结束；这些事件留在分母中，不按零收益或假设收益处理。
+
+### 5.8 统计核实记录
+
+`deploy/ashare/verify-research-summary.mjs` 从冻结研究库（或完整 `summary.json`）重新推导上述每一个数字并逐项比对，输出 `docs/ashare-samples/phaseb-research-audit.json`（103 项检查，PASS）：
+
+- 采样日期：形成 84 / 模拟 27 / 合计 111，stride 5，warmup 130，horizon 10，asOf `20261016`，split `20260331`，每个日期都有扫描输入 SHA256。
+- 分母：V1 模拟 863/831/770/61/32；V2 模拟 876/841/773/68/35；V1 形成完成 2895，V2 形成完成 2847；状态计数之和等于事件数，完成数等于 `statuses.completed`。
+- 重叠敏感性：不重叠形成 36 个日期、模拟 12 个日期，及文档中的不重叠全市场超额。
+- 基准覆盖：完整/部分/缺失/成员数逐项可加。
+- 共同事件配对差：从 `event` 表重新计算，确认恒为 0，并给出成员构成。
+
+任何一项不符，脚本以非零状态退出；因此文档数字与代码输出不会静默漂移。
+
+### 5.9 研究证据与复现
+
+**仓库内保留**（`docs/ashare-samples/phaseb-research-summary.json`，约 158 KB，原 2.3 MB / 80,160 行）：
+
+| 内容 | 字段 |
+|---|---|
+| 协议与版本 | `run_id`、`status`、`data_cutoff`、`split`、`split_interpretation`、`stride`、`warmup_trade_days`、`options`、`versions`、`score_policy`、`weights`、`pool_rules`、`units`、`limitations` |
+| 数据身份 | `source_sha256`（冻结市场快照）、`baseline_build_sha256`、`runtime_build_sha256`、`implementation_sha256`、`input_scan_sha256`（111 个日期逐日扫描哈希） |
+| 采样日期 | `selection_dates`（111 个） |
+| 逐日比较指标 | `comparisons`（列式 111 行：扫描数、可评分数、两版评分均值/中位、评分差、排名相关、行业 HHI、池成员计数） |
+| 评价汇总 | `evaluation.<version>.<segment>.summary`：分母与状态、收益分布、基准完整/部分覆盖、逐日观察序列（列式）、不重叠敏感性、相关性（每因子对收益/超额的 n 与 r） |
+| 数据质量 | `quality_by_date`（列式 111 行：状态、四数据集计数、覆盖率、异常计数） |
+| 敏感性 | `paired_sensitivity`（共同可比较事件配对差与成员构成，见 §5.5） |
+| 必要样本 | `sample`（数据截止日的完整原始比较记录与质量记录，用于核对列式字段的原始格式） |
+| 复现命令 | `reproducible_commands` |
+
+**仓库外保留**（不可重新生成前的完整证据，位于研究输出目录，不进入 Git）：
+
+| 文件 | 大小 | SHA256 |
+|---|---|---|
+| `/home/jcshi/ashare-research/phaseb/summary.json`（完整实验输出，80,160 行） | 2,344,579 B | `ef72c793447f7578316121c2f1937c5876b796651da22b5d5c733e8323be0bdc` |
+| `/home/jcshi/ashare-research/phaseb/research.sqlite`（冻结研究库） | 10,191,745,024 B | `e680ba8a4af54c54aed22ee9e3ad1e1a7b9673ed9ca2daa4f8fed2d8d3475279` |
+| `/home/jcshi/ashare-research/ashare-20261016.sqlite`（冻结市场快照） | 1,685,577,728 B | `ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1` |
+| `/home/jcshi/ashare-research/phaseb/scans/`（111 个输入扫描） | 约 612 MB | 逐日哈希见 `input_scan_sha256` |
+
+完整结果可从研究库原样重发（只读校验已通过：`experiment.result` 与 `summary.json` 内容完全相等；研究库内该 JSON 的 SHA256 为 `7068f4f331c2661f7266daf061fba243e17e539ee8ebbb3bee58466ceb71206d`）。仓库文件是它的**无损投影**：只做列式重排、6 位小数舍入与重复限制列表去重，不重算任何评分、收益或统计；`verify-research-summary.mjs --summary <仓库文件> --full-summary <完整文件> --research-db <研究库>` 会逐字段确认投影一致（103 项检查）。
+
+复现步骤：
+
+```sh
+npm ci && npm run build
+
+# 1) 从研究库重发完整 summary（只读；不重算，不写库）
+node -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/home/jcshi/ashare-research/phaseb/research.sqlite',{readOnly:true});process.stdout.write(db.prepare(\"SELECT result FROM experiment WHERE run_id='PHB-2853b1b630df4bcc98c4'\").get().result)" > /tmp/full-summary.json
+
+# 2) 从零重跑实验（需要冻结快照 + e8cbe4a 编译的 baseline build + 已采集 scans）
+node deploy/ashare/harvest-research.mjs --source <frozen-ashare.sqlite> --build <baseline-build> --output <research-dir> --workers 2
+node deploy/ashare/run-research.mjs --source <frozen-ashare.sqlite> --inputs <research-dir> --output <research-dir>
+
+# 3) 重发仓库精简证据并重新审计
+node deploy/ashare/compact-research-summary.mjs /home/jcshi/ashare-research/phaseb/summary.json docs/ashare-samples/phaseb-research-summary.json --source-label /home/jcshi/ashare-research/phaseb/summary.json
+node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/phaseb-research-summary.json --research-db /home/jcshi/ashare-research/phaseb/research.sqlite --run-id PHB-2853b1b630df4bcc98c4 --snapshot /home/jcshi/ashare-research/ashare-20261016.sqlite --output docs/ashare-samples/phaseb-research-audit.json
+```
+
+`test/ashare-research-evidence.test.mjs` 在每次测试中校验仓库文件的 `run_id`、源哈希、111 个日期、111 行比较/质量记录、形成/模拟切分与 300 KB 上限，因此精简文件无法在无人察觉时漂移。
+
 
 ## 6. 测试与一致性证据
 
 | 证据 | 结果 |
 |---|---|
-| `npm test` | 142/142 通过，0 失败，0 跳过 |
-| `node --test test/ashare-*.test.mjs` | 96/96 通过 |
+| `npm test` | 通过（见交付报告；A 股子集 110/110） |
+| `node --test test/ashare-*.test.mjs` | 110/110 通过（基线 96 + 新增 14） |
 | 独立复核三项审查问题 | PASS（NULL OHLC 掩码、未退出区间、`horizon<2`）及执行器整合 PASS（`/tmp/phaseb-fix-verification.txt`） |
 | V1 一致性（`docs/ashare-samples/phaseb-v1-parity.json`） | PASS：9 个日期全部精确匹配，源快照与基线构建哈希不变 |
 | 真实因子证据 | 11/11 通过（见 §3） |
+| 研究接口契约 | `test/ashare-research-interface.test.mjs` 7/7 通过（见 §3.1） |
+| 研究统计核实 | `docs/ashare-samples/phaseb-research-audit.json` 103 项检查 PASS（见 §5.8） |
+| 证据文件自洽 | `test/ashare-research-evidence.test.mjs` 7/7 通过（见 §5.9） |
+| 真实缓存性能 | `docs/ashare-samples/phaseb-factor-performance.json` 11 项检查 PASS（见 §3.2） |
 | 真实缓存 B0 | 全部检查通过（见 §2） |
 | 研究可复现 | 相同输入重跑 `run_id` 与结果一致；扫描内容变化生成新 `run_id` |
 
@@ -109,6 +258,7 @@
 3. 从 2026-10-19 起积累真正的未来观察样本，再评估 V2；当前结果仅为历史模拟。
 4. 生产容器镜像升级到含 10 个工具的本分支前，需重新跑容器内迁移与公网 e2e。
 5. 是否切换正式评分版本由后续验收决定；本轮不切换。
+6. 若将 `ashare_factor_snapshot` 公网开放，容器内存需覆盖单次约 1.2 GB 峰值 RSS（§3.2）；未新增缓存层。
 
 ## 8. 已知限制
 

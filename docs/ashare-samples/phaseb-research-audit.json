@@ -1,0 +1,448 @@
+{
+  "schema_version": "phaseb-research-audit-1.0.0",
+  "status": "PASS",
+  "started_at": "2026-10-17T18:04:07.873Z",
+  "command": "node deploy/ashare/verify-research-summary.mjs",
+  "run_id": "PHB-2853b1b630df4bcc98c4",
+  "inputs": {
+    "evidence": {
+      "path": "/home/jcshi/workspace/FM-eval/docs/ashare-samples/phaseb-research-summary.json",
+      "bytes": 162348,
+      "sha256": "761ca85ba06baedb1f78fb976b713e0f8cdda292aef49b3ff9d53362ede48fea",
+      "schema_version": "phaseb-research-evidence-1.0.0",
+      "run_id": "PHB-2853b1b630df4bcc98c4"
+    },
+    "research_db": {
+      "path": "/home/jcshi/ashare-research/phaseb/research.sqlite",
+      "bytes": 10191745024,
+      "sha256_before": "e680ba8a4af54c54aed22ee9e3ad1e1a7b9673ed9ca2daa4f8fed2d8d3475279",
+      "run_id": "PHB-2853b1b630df4bcc98c4",
+      "created_at": "2026-10-17T16:26:51.282Z",
+      "result_bytes": 1300328,
+      "result_sha256": "7068f4f331c2661f7266daf061fba243e17e539ee8ebbb3bee58466ceb71206d",
+      "sha256_after": "e680ba8a4af54c54aed22ee9e3ad1e1a7b9673ed9ca2daa4f8fed2d8d3475279"
+    },
+    "snapshot": {
+      "path": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
+      "bytes": 1685577728,
+      "sha256": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1"
+    }
+  },
+  "checks": {
+    "run_id": true,
+    "data_cutoff": true,
+    "source_sha256": true,
+    "split": true,
+    "stride": true,
+    "warmup_trade_days": true,
+    "horizon": true,
+    "versions": true,
+    "total_sampled_dates": true,
+    "formation_sampled_dates": true,
+    "simulation_sampled_dates": true,
+    "selection_dates_sorted_unique": true,
+    "selection_dates_include_split_and_cutoff": true,
+    "input_scan_sha256_per_date": true,
+    "score-1.0.0:formation:completed": true,
+    "score-1.0.0:formation:net_mean": true,
+    "score-1.0.0:formation:net_median": true,
+    "score-1.0.0:formation:win_rate": true,
+    "score-1.0.0:formation:non_overlap_dates": true,
+    "score-1.0.0:formation:non_overlap_market_excess": true,
+    "score-1.0.0:formation:denominators_add_up": true,
+    "score-1.0.0:formation:statuses_sum_to_events": true,
+    "score-1.0.0:formation:completed_equals_status": true,
+    "score-1.0.0:formation:by_date_matches_dates": true,
+    "score-1.0.0:formation:benchmark_coverage_reported": true,
+    "score-1.0.0:historical_simulation:events": true,
+    "score-1.0.0:historical_simulation:entered": true,
+    "score-1.0.0:historical_simulation:completed": true,
+    "score-1.0.0:historical_simulation:unresolved_after_entry": true,
+    "score-1.0.0:historical_simulation:not_entered": true,
+    "score-1.0.0:historical_simulation:net_mean": true,
+    "score-1.0.0:historical_simulation:net_median": true,
+    "score-1.0.0:historical_simulation:win_rate": true,
+    "score-1.0.0:historical_simulation:non_overlap_dates": true,
+    "score-1.0.0:historical_simulation:non_overlap_market_excess": true,
+    "score-1.0.0:historical_simulation:denominators_add_up": true,
+    "score-1.0.0:historical_simulation:statuses_sum_to_events": true,
+    "score-1.0.0:historical_simulation:completed_equals_status": true,
+    "score-1.0.0:historical_simulation:by_date_matches_dates": true,
+    "score-1.0.0:historical_simulation:benchmark_coverage_reported": true,
+    "score-2.0.0:formation:completed": true,
+    "score-2.0.0:formation:net_mean": true,
+    "score-2.0.0:formation:net_median": true,
+    "score-2.0.0:formation:win_rate": true,
+    "score-2.0.0:formation:non_overlap_dates": true,
+    "score-2.0.0:formation:non_overlap_market_excess": true,
+    "score-2.0.0:formation:denominators_add_up": true,
+    "score-2.0.0:formation:statuses_sum_to_events": true,
+    "score-2.0.0:formation:completed_equals_status": true,
+    "score-2.0.0:formation:by_date_matches_dates": true,
+    "score-2.0.0:formation:benchmark_coverage_reported": true,
+    "score-2.0.0:historical_simulation:events": true,
+    "score-2.0.0:historical_simulation:entered": true,
+    "score-2.0.0:historical_simulation:completed": true,
+    "score-2.0.0:historical_simulation:unresolved_after_entry": true,
+    "score-2.0.0:historical_simulation:not_entered": true,
+    "score-2.0.0:historical_simulation:net_mean": true,
+    "score-2.0.0:historical_simulation:net_median": true,
+    "score-2.0.0:historical_simulation:win_rate": true,
+    "score-2.0.0:historical_simulation:non_overlap_dates": true,
+    "score-2.0.0:historical_simulation:non_overlap_market_excess": true,
+    "score-2.0.0:historical_simulation:denominators_add_up": true,
+    "score-2.0.0:historical_simulation:statuses_sum_to_events": true,
+    "score-2.0.0:historical_simulation:completed_equals_status": true,
+    "score-2.0.0:historical_simulation:by_date_matches_dates": true,
+    "score-2.0.0:historical_simulation:benchmark_coverage_reported": true,
+    "overlap:score-1.0.0:formation:retained": true,
+    "overlap:score-1.0.0:formation:cohort_count": true,
+    "overlap:score-1.0.0:formation:all_cohorts": true,
+    "overlap:score-1.0.0:formation:retained_dates_subset": true,
+    "overlap:score-1.0.0:historical_simulation:retained": true,
+    "overlap:score-1.0.0:historical_simulation:cohort_count": true,
+    "overlap:score-1.0.0:historical_simulation:all_cohorts": true,
+    "overlap:score-1.0.0:historical_simulation:retained_dates_subset": true,
+    "overlap:score-2.0.0:formation:retained": true,
+    "overlap:score-2.0.0:formation:cohort_count": true,
+    "overlap:score-2.0.0:formation:all_cohorts": true,
+    "overlap:score-2.0.0:formation:retained_dates_subset": true,
+    "overlap:score-2.0.0:historical_simulation:retained": true,
+    "overlap:score-2.0.0:historical_simulation:cohort_count": true,
+    "overlap:score-2.0.0:historical_simulation:all_cohorts": true,
+    "overlap:score-2.0.0:historical_simulation:retained_dates_subset": true,
+    "paired:formation:counts_consistent": true,
+    "paired:formation:identical_evaluation": true,
+    "paired:formation:pairs_present": true,
+    "paired:historical_simulation:counts_consistent": true,
+    "paired:historical_simulation:identical_evaluation": true,
+    "paired:historical_simulation:pairs_present": true,
+    "evidence:run_id_matches_full": true,
+    "evidence:full_sha256_matches": true,
+    "evidence:dates_match_full": true,
+    "evidence:comparisons_rows_match": true,
+    "evidence:quality_rows_match": true,
+    "evidence:projection:comparison_columns": true,
+    "evidence:projection:evaluation_projection": true,
+    "evidence:projection:by_date_series": true,
+    "evidence:projection:quality_table": true,
+    "evidence:projection:input_scan_sha256": true,
+    "evidence:projection:implementation_sha256": true,
+    "evidence:projection:versions": true,
+    "evidence:size_under_limit": true,
+    "research_db_unchanged": true,
+    "snapshot_sha256": true
+  },
+  "failures": [],
+  "evidence": {
+    "dates": {
+      "formation": 84,
+      "simulation": 27,
+      "first": "20240717",
+      "last": "20261016"
+    },
+    "table": {
+      "score-1.0.0": {
+        "formation": {
+          "events": 3008,
+          "entered": 2965,
+          "completed": 2895,
+          "unresolved_after_entry": 70,
+          "not_entered": 43,
+          "net_mean": 0.011682594,
+          "net_median": -0.003718919,
+          "win_rate": 0.480483592,
+          "non_overlap_dates": 36,
+          "non_overlap_market_excess": -0.005973641
+        },
+        "historical_simulation": {
+          "events": 863,
+          "entered": 831,
+          "completed": 770,
+          "unresolved_after_entry": 61,
+          "not_entered": 32,
+          "net_mean": -0.003585795,
+          "net_median": -0.020029034,
+          "win_rate": 0.415584416,
+          "non_overlap_dates": 12,
+          "non_overlap_market_excess": 0.005085392
+        }
+      },
+      "score-2.0.0": {
+        "formation": {
+          "events": 2953,
+          "entered": 2914,
+          "completed": 2847,
+          "unresolved_after_entry": 67,
+          "not_entered": 39,
+          "net_mean": 0.009095797,
+          "net_median": -0.003799859,
+          "win_rate": 0.481910783,
+          "non_overlap_dates": 36,
+          "non_overlap_market_excess": -0.009990202
+        },
+        "historical_simulation": {
+          "events": 876,
+          "entered": 841,
+          "completed": 773,
+          "unresolved_after_entry": 68,
+          "not_entered": 35,
+          "net_mean": -0.003187651,
+          "net_median": -0.018283446,
+          "win_rate": 0.419146184,
+          "non_overlap_dates": 12,
+          "non_overlap_market_excess": 0.003053479
+        }
+      }
+    },
+    "overlap": {
+      "score-1.0.0:formation": {
+        "as_of": "20260331",
+        "overlapping_cohort_pairs": 97,
+        "retained": 36,
+        "excluded_no_entry_dates": [
+          "20260331"
+        ],
+        "all_cohorts": 84,
+        "non_overlapping_cohorts": 36,
+        "retained_dates": [
+          "20240717",
+          "20240807",
+          "20240821",
+          "20240904",
+          "20240920",
+          "20241011",
+          "20241025",
+          "20241108",
+          "20241122",
+          "20241206",
+          "20241227",
+          "20250113",
+          "20250211",
+          "20250225",
+          "20250311",
+          "20250325",
+          "20250409",
+          "20250430",
+          "20250519",
+          "20250603",
+          "20250617",
+          "20250701",
+          "20250715",
+          "20250729",
+          "20250812",
+          "20250826",
+          "20250909",
+          "20250923",
+          "20251015",
+          "20251029",
+          "20251112",
+          "20251126",
+          "20251210",
+          "20251224",
+          "20260109",
+          "20260123"
+        ]
+      },
+      "score-1.0.0:historical_simulation": {
+        "as_of": "20261016",
+        "overlapping_cohort_pairs": 32,
+        "retained": 12,
+        "excluded_no_entry_dates": [
+          "20261016"
+        ],
+        "all_cohorts": 27,
+        "non_overlapping_cohorts": 12,
+        "retained_dates": [
+          "20260407",
+          "20260421",
+          "20260508",
+          "20260522",
+          "20260605",
+          "20260622",
+          "20260713",
+          "20260727",
+          "20260810",
+          "20260824",
+          "20260907",
+          "20260921"
+        ]
+      },
+      "score-2.0.0:formation": {
+        "as_of": "20260331",
+        "overlapping_cohort_pairs": 96,
+        "retained": 36,
+        "excluded_no_entry_dates": [
+          "20260331"
+        ],
+        "all_cohorts": 84,
+        "non_overlapping_cohorts": 36,
+        "retained_dates": [
+          "20240717",
+          "20240807",
+          "20240821",
+          "20240904",
+          "20240920",
+          "20241011",
+          "20241025",
+          "20241108",
+          "20241122",
+          "20241206",
+          "20241220",
+          "20250113",
+          "20250127",
+          "20250218",
+          "20250311",
+          "20250325",
+          "20250409",
+          "20250430",
+          "20250519",
+          "20250603",
+          "20250617",
+          "20250701",
+          "20250715",
+          "20250729",
+          "20250812",
+          "20250826",
+          "20250909",
+          "20250923",
+          "20251015",
+          "20251029",
+          "20251112",
+          "20251126",
+          "20251210",
+          "20251224",
+          "20260109",
+          "20260123"
+        ]
+      },
+      "score-2.0.0:historical_simulation": {
+        "as_of": "20261016",
+        "overlapping_cohort_pairs": 30,
+        "retained": 12,
+        "excluded_no_entry_dates": [
+          "20261016"
+        ],
+        "all_cohorts": 27,
+        "non_overlapping_cohorts": 12,
+        "retained_dates": [
+          "20260407",
+          "20260421",
+          "20260508",
+          "20260522",
+          "20260605",
+          "20260622",
+          "20260713",
+          "20260727",
+          "20260810",
+          "20260824",
+          "20260907",
+          "20260921"
+        ]
+      }
+    },
+    "paired_sensitivity": {
+      "formation": {
+        "label": "DESCRIPTIVE_SENSITIVITY_ONLY: not a strategy return difference and not used to tune parameters",
+        "common_pool_events": 2302,
+        "v1_pool_events": 3008,
+        "v2_pool_events": 2953,
+        "v1_only_events": 706,
+        "v2_only_events": 651,
+        "common_completed_pairs": 2207,
+        "paired_delta": {
+          "n": 2207,
+          "mean": 0,
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "nonzero": 0
+        },
+        "completed_net_return": {
+          "common_v1": 0.011998911,
+          "v1_only": 0.010667897,
+          "v2_only": -0.000915411
+        },
+        "v1_only_completed": 688,
+        "v2_only_completed": 640,
+        "interpretation": "The paired delta is expected to be exactly zero because the evaluation function reads the same frozen prices for the same event under both versions. Differences between the two versions therefore come only from different pool membership, not from different return computation."
+      },
+      "historical_simulation": {
+        "label": "DESCRIPTIVE_SENSITIVITY_ONLY: not a strategy return difference and not used to tune parameters",
+        "common_pool_events": 654,
+        "v1_pool_events": 863,
+        "v2_pool_events": 876,
+        "v1_only_events": 209,
+        "v2_only_events": 222,
+        "common_completed_pairs": 579,
+        "paired_delta": {
+          "n": 579,
+          "mean": 0,
+          "median": 0,
+          "min": 0,
+          "max": 0,
+          "nonzero": 0
+        },
+        "completed_net_return": {
+          "common_v1": -0.008665152,
+          "v1_only": 0.011811836,
+          "v2_only": 0.013160147
+        },
+        "v1_only_completed": 191,
+        "v2_only_completed": 194,
+        "interpretation": "The paired delta is expected to be exactly zero because the evaluation function reads the same frozen prices for the same event under both versions. Differences between the two versions therefore come only from different pool membership, not from different return computation."
+      }
+    },
+    "event_rows": 7700,
+    "projection": [
+      [
+        "comparison_columns",
+        true,
+        {
+          "mismatch": null
+        }
+      ],
+      [
+        "evaluation_projection",
+        true,
+        {
+          "mismatch": null
+        }
+      ],
+      [
+        "by_date_series",
+        true,
+        {
+          "mismatch": null
+        }
+      ],
+      [
+        "quality_table",
+        true,
+        {
+          "mismatch": null
+        }
+      ],
+      [
+        "input_scan_sha256",
+        true,
+        {}
+      ],
+      [
+        "implementation_sha256",
+        true,
+        {}
+      ],
+      [
+        "versions",
+        true,
+        {}
+      ]
+    ]
+  },
+  "completed_at": "2026-10-17T18:07:19.293Z",
+  "timings_ms": {
+    "total": 191421
+  },
+  "method": "Re-derived every documented Phase B statistic from the frozen experiment.result and the per-event table (read-only research DB) and compared it with the expected values transcribed from docs/ashare-phaseb-acceptance.md. Recomputed the common-comparable-event paired delta from the event table, verified the committed compact evidence is a faithful projection of the full result, and checked the research DB and market snapshot hashes are unchanged."
+}
