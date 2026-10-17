@@ -282,6 +282,7 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | 前瞻快照真实缓存 | `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json` 17/17 PASS（见 §3.3） |
 | 独立复核三项审查问题 | PASS（NULL OHLC 掩码、未退出区间、`horizon<2`）及执行器整合 PASS（`/tmp/phaseb-fix-verification.txt`） |
 | V1 一致性（`docs/ashare-samples/phaseb-v1-parity.json`） | PASS：9 个日期全部精确匹配，源快照与基线构建哈希不变 |
+| V1 一致性（封版复测，`docs/ashare-samples/phaseb-v1-parity-freeze.json`） | PASS：基线 `fc24fef` 构建 vs 封版构建，9 个日期全市场逐字段精确匹配，0 差异；6 个连续股票池日期输出与持久化状态哈希相同 |
 | 真实因子证据 | 11/11 通过（见 §3） |
 | 研究接口契约 | `test/ashare-research-interface.test.mjs` 7/7 通过（见 §3.1） |
 | 研究统计核实 | `docs/ashare-samples/phaseb-research-audit.json` 103 项检查 PASS（见 §5.8） |
@@ -290,7 +291,7 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | 真实缓存 B0 | 全部检查通过（见 §2） |
 | 研究可复现 | 相同输入重跑 `run_id` 与结果一致；扫描内容变化生成新 `run_id` |
 
-构建树 sha256 `77897886…32b0`（与一致性、因子证据所用构建一致）。
+构建树 sha256：封版构建 `680448b9…6aac`（含 audit-1.2.0 与 snapshot.ts）；历史实验与因子证据所用 `77897886…32b0` 为 `fc24fef` 基线构建，二者评分模块源码相同，逐字段一致性见上表。
 
 ## 7. 后续生产切换前仍需完成
 
