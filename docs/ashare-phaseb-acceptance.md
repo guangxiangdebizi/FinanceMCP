@@ -49,7 +49,8 @@
 真实缓存验证（`deploy/ashare/verify-ohlc-audit.mjs`，证据 `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json`，`PASS`）：
 
 - 冻结快照 sha256 前后不变（`ac31a9eb…4dd1`），以 `mode=ro&immutable=1` + `query_only=ON` 只读打开。
-- 最近 10 个交易日：`invalid_bars = 0`，全部 `invalid_bar_kinds` 为 0，审计 `OK`、质量 `READY`；对全部 3,642,948 行独立复核，12 类非法条件命中数均为 0。
+- 最近 10 个交易日：`invalid_bars = 0`，全部 `invalid_bar_kinds` 为 0，审计 `OK`、质量 `READY`。
+- **全库复核**：对 `daily` 全部 3,642,948 行（20240102~20261016）执行同一 NULL-safe 判定，命中 0 行，即正式缓存不存在 OHLC/成交量/成交额 NULL 或非法 K 线；因此修复后真实数据上的评分与报告必须保持不变（下方一致性已验证）。
 - V1 一致性：与 `fc24fef` 基线构建对比 20261015/20261016 两个交易日，`scanMarket` 全市场逐行 JSON 相同、`analyzeMarket` V1 逐股评分/排名/组件/贡献相同，共 3,513 个可评分股票日 **0 差异**；两版扫描与信号计数一致。
 
 ## 3. B1/B2 分析契约与因子快照

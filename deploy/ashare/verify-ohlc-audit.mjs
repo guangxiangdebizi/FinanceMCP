@@ -117,6 +117,19 @@ export async function verifyOhlcAudit({ snapshot, baselineBuild, output, days = 
     if (nullTotal !== 0) fail('NULL OHLC/vol/amount found in the audit window');
     if (result.audit.invalid_bars !== 0) fail('invalid bars found in the audit window');
 
+    // 1b. Whole cache, every stored day: the NULL-safe predicate must not find a
+    //     single invalid or NULL bar anywhere. This is a single indexed scan of
+    //     `daily`; it proves the clean-data claim for the full history, not just
+    //     the recent audit window.
+    const whole = db.prepare(`SELECT COUNT(*) n FROM daily WHERE ${INVALID_BAR_SQL}`).get().n;
+    result.audit.whole_cache = {
+      daily_rows: db.prepare('SELECT COUNT(*) n FROM daily').get().n,
+      invalid_bars: whole,
+      first_date: db.prepare('SELECT MIN(trade_date) d FROM daily').get().d,
+      last_date: db.prepare('SELECT MAX(trade_date) d FROM daily').get().d,
+    };
+    if (whole !== 0) fail(`${whole} invalid/NULL bars found in the whole cache`);
+
     // 2. V1 parity against the Phase B baseline build (fc24fef), on the most
     //    recent dates: scanMarket for every row and analyzeMarket V1 rows.
     const parityDates = recentTradeDays(db, end, dates);
