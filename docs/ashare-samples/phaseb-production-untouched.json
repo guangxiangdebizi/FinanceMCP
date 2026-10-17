@@ -1,0 +1,51 @@
+{
+  "status": "PASS",
+  "checks": {
+    "live_db_bytes_unchanged": true,
+    "live_db_size_unchanged": true,
+    "container_identity_unchanged": true,
+    "image_unchanged": true,
+    "table_row_counts_unchanged": true,
+    "no_ashare_systemd_units": true,
+    "no_ashare_systemd_timers": true,
+    "container_build_unchanged": true
+  },
+  "baseline": {
+    "captured_at": "2026-10-17T17:18:47.341Z",
+    "live_db_sha256": "0f071b4f73a8de45dd74ba60a420df75f5b02b7c1f269cd35fcfde3071756d19",
+    "container": "67af9eda414d57f7045a6bcd1f6b26de55759d54d0148fff5b0eef77b90eea51|sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|2026-10-17T13:59:25.611496291Z|0|running",
+    "tables": {
+      "report": 75,
+      "watchlist": 2847,
+      "watchlist_change": 366,
+      "stock_score": 138195,
+      "quality_check": 673,
+      "signal_evidence": 108,
+      "data_audit": 3
+    }
+  },
+  "observed": {
+    "captured_at": "2026-10-17T17:48:24.953Z",
+    "live_dir": "/home/jcshi/.local/share/finance-mcp-ashare",
+    "live_db": {
+      "path": "/home/jcshi/.local/share/finance-mcp-ashare/ashare.sqlite",
+      "size": 1685577728,
+      "sha256": "0f071b4f73a8de45dd74ba60a420df75f5b02b7c1f269cd35fcfde3071756d19"
+    },
+    "container": "67af9eda414d57f7045a6bcd1f6b26de55759d54d0148fff5b0eef77b90eea51|sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|2026-10-17T13:59:25.611496291Z|0|running",
+    "image": "sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|2026-10-17T13:59:12.964616828Z",
+    "tables": {
+      "report": 75,
+      "watchlist": 2847,
+      "watchlist_change": 366,
+      "stock_score": 138195,
+      "quality_check": 673,
+      "signal_evidence": 108,
+      "data_audit": 3
+    },
+    "ashare_systemd_units": [],
+    "ashare_systemd_timers": [],
+    "container_build_files": "acceptance.js analysis.js audit.js bars.js cli.js commands.js data.js db.js definitions.js evidence.js fetch.js fundamentals.js indicators.js ingest.js market.js report.js signals.js sync.js tools.js watchlist.js"
+  },
+  "note": "Read-only evidence. The container is inspected, the SQLite file is only hashed, and row counts are queried with a read-only connection. No deploy, restart, timer or ChatGPT task was changed in this round."
+}
