@@ -25,7 +25,7 @@
     }
   },
   "observed": {
-    "captured_at": "2026-10-17T17:48:24.953Z",
+    "captured_at": "2026-10-17T18:22:41.512Z",
     "live_dir": "/home/jcshi/.local/share/finance-mcp-ashare",
     "live_db": {
       "path": "/home/jcshi/.local/share/finance-mcp-ashare/ashare.sqlite",
