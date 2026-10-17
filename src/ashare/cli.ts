@@ -14,6 +14,7 @@ const USAGE = `用法: finance-ashare <command> [options]
   status [--date YYYYMMDD]                                       数据完整性状态
   acceptance [--days 3] [--end YYYYMMDD] [--allow-degraded]      连续真实交易日验收（两次定时运行、当日复查行情、最终 READY、MCP 一致、股票池连续）
   quality --date YYYYMMDD                                        重新执行数据质量检查
+  audit [--start YYYYMMDD] [--end YYYYMMDD] [--fix]              历史缓存缺口审计（停牌/退市/真实缺口），--fix 只补齐缺失部分
   migrate                                                        将旧版缓存主键布局迁移为按股票连续存储`;
 
 function arg(name: string): string | undefined {

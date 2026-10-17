@@ -73,6 +73,20 @@ CREATE TABLE IF NOT EXISTS sync_history (
   synced_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sync_history_key ON sync_history(key, dataset);
+CREATE TABLE IF NOT EXISTS suspend_d (
+  ts_code TEXT NOT NULL, trade_date TEXT NOT NULL, suspend_timing TEXT,
+  PRIMARY KEY (trade_date, ts_code)
+) WITHOUT ROWID;
+-- Per-stock upstream check of a gap that a whole-market refresh could not close.
+CREATE TABLE IF NOT EXISTS gap_check (
+  ts_code TEXT NOT NULL, trade_date TEXT NOT NULL, checked_at TEXT NOT NULL,
+  upstream_daily INTEGER NOT NULL, upstream_suspended INTEGER NOT NULL,
+  PRIMARY KEY (ts_code, trade_date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS data_audit (
+  audit_id TEXT PRIMARY KEY, created_at TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+  status TEXT NOT NULL, summary TEXT NOT NULL, path TEXT
+);
 CREATE TABLE IF NOT EXISTS signal_evidence (
   computed_at TEXT NOT NULL, signal TEXT NOT NULL, regime TEXT NOT NULL, horizon INTEGER NOT NULL,
   n INTEGER NOT NULL, days INTEGER NOT NULL, mean_excess REAL, hit_rate REAL, t_stat REAL,
@@ -191,7 +205,9 @@ function ensureSyncColumns(db: DatabaseSync): void {
 /** Whether the live schema has every column the read-only MCP connection queries. */
 function schemaCurrent(db: DatabaseSync): boolean {
   const has = (table: string, col: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).some(c => c.name === col);
-  return has('report', 'run_mode') && has('sync_log', 'refresh_status') && has('sync_history', 'write_mode');
+  const table = (name: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  return has('report', 'run_mode') && has('sync_log', 'refresh_status') && has('sync_history', 'write_mode')
+    && table('suspend_d') && table('data_audit') && table('gap_check');
 }
 
 const PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;';

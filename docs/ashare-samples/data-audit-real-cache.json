@@ -1,0 +1,748 @@
+{
+ "analysis_regression_old_vs_new": {
+  "old": "ashare-v1-fix2 c0420a4",
+  "new": "feat/ashare-data-service-v1",
+  "dates": {
+   "20250102": {
+    "status": "READY",
+    "scores": 1660,
+    "watchlist": 40,
+    "identical_sections": [
+     "status",
+     "scores",
+     "watchlist",
+     "market",
+     "sectors",
+     "signals"
+    ],
+    "different_sections": []
+   },
+   "20260430": {
+    "status": "READY",
+    "scores": 2112,
+    "watchlist": 40,
+    "identical_sections": [
+     "status",
+     "scores",
+     "watchlist",
+     "market",
+     "sectors",
+     "signals"
+    ],
+    "different_sections": []
+   },
+   "20261016": {
+    "status": "READY",
+    "scores": 1756,
+    "watchlist": 40,
+    "identical_sections": [
+     "status",
+     "scores",
+     "watchlist",
+     "market",
+     "sectors",
+     "signals"
+    ],
+    "different_sections": []
+   }
+  }
+ },
+ "suspend_backfill": {
+  "calls": 686,
+  "retries": 0,
+  "rows": 16561
+ },
+ "audit_before_fix": {
+  "audit_id": "AUD-20240102-20261016-20261017135047-9f23",
+  "status": "GAP",
+  "counts": {
+   "OK": 640,
+   "WARN": 4,
+   "GAP": 29
+  },
+  "totals": {
+   "suspended_stock_days": 8700,
+   "pending_delisting_stock_days": 38,
+   "upstream_missing_stock_days": 0,
+   "unexplained_missing_stock_days": 29,
+   "days_without_suspend_data": 0,
+   "missing_adj_factor": 0,
+   "missing_daily_basic": 0,
+   "missing_stk_limit": 0,
+   "invalid_bars": 0,
+   "pct_chg_inconsistent": 0,
+   "pre_close_conflicts": 1,
+   "factor_revision_boundaries": 1677
+  },
+  "gap_days": [
+   {
+    "trade_date": "20241022",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920964.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241023",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920964.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241024",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920964.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241025",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920964.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241126",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241127",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241128",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241129",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241202",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241203",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241204",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241205",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241206",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20241209",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920174.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250526",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250527",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250528",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250529",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250530",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250603",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250604",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250605",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250606",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250609",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920808.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250916",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920961.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250917",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920961.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250918",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920961.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250919",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920961.BJ"
+    ]
+   },
+   {
+    "trade_date": "20250922",
+    "issues": [
+     "1 只上市股票无行情且无停牌记录"
+    ],
+    "unexplained_sample": [
+     "920961.BJ"
+    ]
+   }
+  ]
+ },
+ "fix_actions": [
+  {
+   "trade_date": "20241022",
+   "action": "repair_stock 920964.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241023",
+   "action": "repair_stock 920964.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241024",
+   "action": "repair_stock 920964.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241025",
+   "action": "repair_stock 920964.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241126",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241127",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241128",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241129",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241202",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241203",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241204",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241205",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241206",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20241209",
+   "action": "repair_stock 920174.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250526",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250527",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250528",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250529",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250530",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250603",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250604",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250605",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250606",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250609",
+   "action": "repair_stock 920808.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250916",
+   "action": "repair_stock 920961.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250917",
+   "action": "repair_stock 920961.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250918",
+   "action": "repair_stock 920961.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250919",
+   "action": "repair_stock 920961.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  },
+  {
+   "trade_date": "20250922",
+   "action": "repair_stock 920961.BJ",
+   "result": {
+    "daily": 0,
+    "daily_basic": 0,
+    "adj_factor": 1,
+    "stk_limit": 1,
+    "suspended": 0
+   }
+  }
+ ],
+ "audit_after_fix": {
+  "audit_id": "AUD-20240102-20261016-20261017135244-1ded",
+  "status": "WARN",
+  "counts": {
+   "OK": 640,
+   "WARN": 33,
+   "GAP": 0
+  },
+  "totals": {
+   "suspended_stock_days": 8700,
+   "pending_delisting_stock_days": 38,
+   "upstream_missing_stock_days": 29,
+   "unexplained_missing_stock_days": 0,
+   "days_without_suspend_data": 0,
+   "missing_adj_factor": 0,
+   "missing_daily_basic": 0,
+   "missing_stk_limit": 0,
+   "invalid_bars": 0,
+   "pct_chg_inconsistent": 0,
+   "pre_close_conflicts": 1,
+   "factor_revision_boundaries": 1677
+  }
+ },
+ "audit_final": {
+  "audit_id": "AUD-20240102-20261016-20261017135654-3fee",
+  "status": "WARN",
+  "counts": {
+   "OK": 640,
+   "WARN": 33,
+   "GAP": 0
+  },
+  "totals": {
+   "suspended_stock_days": 8700,
+   "pending_delisting_stock_days": 38,
+   "upstream_missing_stock_days": 29,
+   "unexplained_missing_stock_days": 0,
+   "days_without_suspend_data": 0,
+   "missing_adj_factor": 0,
+   "missing_daily_basic": 0,
+   "missing_stk_limit": 0,
+   "invalid_bars": 0,
+   "pct_chg_inconsistent": 0,
+   "pre_close_conflicts": 1,
+   "factor_revision_boundaries": 325
+  },
+  "warn_issue_kinds": [
+   "#股票复权因子变化与昨收不一致（昨收等于前收盘，因子变化却超过 1 个价位；因子精度或上游修订）: 001226.SZ,001309.SZ,002920.SZ,300750.SZ,300760.SZ",
+   "#昨收与前一交易日复权收盘不一致（可能混入了不同时间的修订）",
+   "#股票复权因子变化与昨收不一致（昨收等于前收盘，因子变化却超过 1 个价位；因子精度或上游修订）: 000818.SZ,000999.SZ,001234.SZ,001269.SZ,001283.SZ",
+   "#股票复权因子变化与昨收不一致（昨收等于前收盘，因子变化却超过 1 个价位；因子精度或上游修订）: 000818.SZ,001301.SZ,001319.SZ,001324.SZ,002870.SZ",
+   "#上市股票上游确认无行情且无停牌记录（非本地缓存缺口）",
+   "#股票复权因子变化与昨收不一致（昨收等于前收盘，因子变化却超过 1 个价位；因子精度或上游修订）: 689009.SH"
+  ],
+  "global": {
+   "codes_with_quotes_but_not_in_stock_basic": [
+    {
+     "ts_code": "300114.SZ",
+     "bars": 268,
+     "first": "20240102",
+     "last": "20250214"
+    }
+   ],
+   "fina_ann_date_before_period_end": [
+    {
+     "ts_code": "603400.SH",
+     "end_date": "20260630",
+     "ann_date": "20260422"
+    }
+   ]
+  }
+ },
+ "tables_vs_backup": [
+  "daily|3642948|3642948|0",
+  "adj_factor|3663225|3663225|0",
+  "daily_basic|3642948|3642948|0",
+  "stk_limit|3702157|3702157|0",
+  "index_daily|7520|7496",
+  "fina|69187|69187",
+  "watchlist|2847|2847|0",
+  "report|75|75",
+  "stock_score|138195|138195",
+  "suspend_d|9171|673",
+  "gap_check|29|0",
+  "repair_logs|116",
+  "quality|READY|673"
+ ]
+}

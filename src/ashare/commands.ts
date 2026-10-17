@@ -7,6 +7,7 @@ import { computeEvidence, evaluateWatchlist, loadVerdicts } from './evidence.js'
 import { runAshareTool } from './tools.js';
 import { ashareResearchDbPath, openResearchDb } from './db.js';
 import { acceptance } from './acceptance.js';
+import { auditCache, fillGaps, saveAudit } from './audit.js';
 
 export interface CliHelpers {
   arg(name: string): string | undefined;
@@ -123,6 +124,30 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       const days = Number(h.arg('days') || 3);
       const end = h.arg('end') ? h.ymd(h.arg('end'), '--end') : latestTradeDay(db, shanghaiToday())!;
       h.print(acceptance(db, end, days, { allowDegraded: h.flag('allow-degraded') }));
+      return true;
+    }
+    case 'audit': {
+      // Data-module check of stored history; --fix re-fetches only what is missing.
+      const end = h.arg('end') ? h.ymd(h.arg('end'), '--end') : latestTradeDay(db, shanghaiToday())!;
+      const start = h.arg('start') ? h.ymd(h.arg('start'), '--start') : evidenceStart(db, end);
+      const t0 = Date.now();
+      const before = auditCache(db, start, end);
+      const summary = (a: typeof before) => ({
+        audit_id: a.audit_id, status: a.status, trade_days: a.trade_days, counts: a.counts, totals: a.totals,
+        gap_days: a.days.filter(d => d.status === 'GAP').map(d => ({ trade_date: d.trade_date, issues: d.issues, unexplained_sample: d.unexplained_sample })),
+        warn_issue_kinds: [...new Set(a.days.filter(d => d.status === 'WARN').flatMap(d => d.issues.map(i => i.replace(/^\d+ ?(只|条)?/, '#'))))].slice(0, 20),
+        global: a.global,
+      });
+      if (!h.flag('fix')) {
+        const path = saveAudit(db, before);
+        h.print({ ...summary(before), path, seconds: Math.round((Date.now() - t0) / 1000) });
+        return true;
+      }
+      const actions = await fillGaps(db, before);
+      const after = auditCache(db, start, end);
+      const beforePath = saveAudit(db, before, { followed_by: after.audit_id });
+      const afterPath = saveAudit(db, after, { fixed_from: before.audit_id, actions });
+      h.print({ before: { ...summary(before), path: beforePath }, actions_count: actions.length, actions: actions.slice(0, 100), after: { ...summary(after), path: afterPath }, seconds: Math.round((Date.now() - t0) / 1000) });
       return true;
     }
     case 'status': {

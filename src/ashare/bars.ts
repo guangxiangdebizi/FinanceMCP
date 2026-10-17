@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Bars } from './indicators.js';
+import { adjustmentRatio } from './data.js';
 
 /**
  * Stream forward-adjusted daily bars for every stock between `start` and
@@ -41,7 +42,8 @@ export function forEachStockBars(
     for (const r of rows) {
       if (Number.isFinite(r.adj_factor)) carry = r.adj_factor;
       else bars.adjMissing!++;
-      const ratio = Number.isFinite(lastFactor) ? carry / lastFactor : 1;
+      // Same qfq definition as the data tools (data.ts), based on the last factor ≤ end.
+      const ratio = Number.isFinite(lastFactor) ? adjustmentRatio('qfq', carry, lastFactor) : 1;
       bars.dates.push(r.trade_date);
       bars.open.push(r.open * ratio);
       bars.high.push(r.high * ratio);

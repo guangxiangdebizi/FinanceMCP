@@ -8,12 +8,14 @@ import { computeIndicators, INDICATOR_VERSION } from './indicators.js';
 import { detectSignals, SIGNAL_BY_ID, technicalState } from './signals.js';
 import { fundamentalRisk, fundamentalsAsOf } from './fundamentals.js';
 import { loadVerdicts } from './evidence.js';
+import { financialHistory, marketData, resolveCode, stockBasic, stockHistory } from './data.js';
 
 export { ashareToolDefinitions, ASHARE_TOOL_NAMES } from './definitions.js';
 
 type ToolResult = { content: { type: 'text'; text: string }[] };
 
 const text = (body: string): ToolResult => ({ content: [{ type: 'text', text: body }] });
+const json = (body: unknown): ToolResult => text(JSON.stringify(body));
 const fmt = (v: unknown, d = 2) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : v == null ? '-' : String(v));
 
 function resolveDate(db: DatabaseSync, raw: unknown): { date: string; note?: string } {
@@ -34,17 +36,6 @@ function db(): DatabaseSync {
   return getAshareDb();
 }
 
-function normalizeCode(raw: string, d: DatabaseSync): string {
-  const code = raw.trim().toUpperCase();
-  if (/^\d{6}\.(SH|SZ|BJ)$/.test(code)) return code;
-  if (/^\d{6}$/.test(code)) {
-    const row = d.prepare('SELECT ts_code FROM stock_basic WHERE symbol = ? ORDER BY list_status = \'L\' DESC LIMIT 1').get(code) as any;
-    if (row) return row.ts_code;
-  }
-  const byName = d.prepare('SELECT ts_code FROM stock_basic WHERE name = ? ORDER BY list_status = \'L\' DESC LIMIT 1').get(raw.trim()) as any;
-  if (byName) return byName.ts_code;
-  throw new Error(`无法识别的股票代码: ${raw}`);
-}
 
 // ---------------------------------------------------------------- status
 
@@ -64,6 +55,8 @@ function dataStatus(args: Record<string, any>): ToolResult {
   const report = latestReportMeta(d, date);
   const latestReady = latestReportMeta(d, undefined, true, date);
   const evidence = loadVerdicts(d, date).meta;
+  const auditRow = d.prepare('SELECT audit_id, created_at, start_date, end_date, status, summary FROM data_audit ORDER BY created_at DESC LIMIT 1').get() as any;
+  const latestAudit = auditRow ? { ...auditRow, summary: JSON.parse(auditRow.summary) } : null;
   const status = {
     as_of_trade_date: date,
     note,
@@ -76,6 +69,7 @@ function dataStatus(args: Record<string, any>): ToolResult {
     report_for_date: report ?? null,
     latest_ready_report: latestReady ?? null,
     evidence_window: evidence,
+    latest_audit: latestAudit,
   };
   const lines = [
     `# A股数据状态 ${date}`,
@@ -83,6 +77,8 @@ function dataStatus(args: Record<string, any>): ToolResult {
     `- 数据质量：**${quality.status}**${quality.reasons.length ? `（${quality.reasons.join('；')}）` : ''}`,
     `- 日线 ${quality.counts.daily} 条（前一交易日 ${quality.counts.prev_daily}），每日指标覆盖 ${quality.coverage.daily_basic_vs_daily}，复权因子覆盖 ${quality.coverage.adj_factor_vs_daily}`,
     `- 核心指数：${quality.indices_present.join(', ') || '无'}`,
+    `- 缓存快照：${quality.snapshot.mixed ? quality.snapshot.note : `各数据集同一批次获取（相差 ${quality.snapshot.spread_minutes ?? '-'} 分钟）`}`,
+    `- 最近一次历史缓存审计：${latestAudit ? `${latestAudit.audit_id}（${latestAudit.start_date}~${latestAudit.end_date}，${latestAudit.status}）` : '无'}`,
     `- 缓存最新日线：${latestDaily}`,
     `- 当日报告：${report ? `${report.report_id}（${report.status}，${report.generated_at}）` : '尚未发布'}`,
     `- 最近可用报告：${latestReady ? `${latestReady.report_id}（${latestReady.trade_date}）` : '无'}`,
@@ -213,7 +209,7 @@ function watchlist(args: Record<string, any>): ToolResult {
 function stockAnalysis(args: Record<string, any>): ToolResult {
   const d = db();
   const { date, note } = resolveDate(d, args.date);
-  const code = normalizeCode(String(args.ts_code ?? ''), d);
+  const code = resolveCode(d, args.ts_code);
   const info = d.prepare('SELECT * FROM stock_basic WHERE ts_code = ?').get(code) as any;
   const days = recentTradeDays(d, date, 260);
   let result: any;
@@ -314,6 +310,10 @@ export async function runAshareTool(name: string, args: Record<string, any>): Pr
     case 'ashare_watchlist': return watchlist(args);
     case 'ashare_stock_analysis': return stockAnalysis(args);
     case 'ashare_sector_rank': return sectorRankTool(args);
+    case 'ashare_stock_history': return json(stockHistory(db(), args));
+    case 'ashare_financial_data': return json(financialHistory(db(), args));
+    case 'ashare_market_data': return json(marketData(db(), args));
+    case 'ashare_stock_basic': return json(stockBasic(db(), args));
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }

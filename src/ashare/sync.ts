@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { fetchStats } from './fetch.js';
 import {
   addDays, DatasetSync, checkQuality, QualityReport, shanghaiToday, syncFinaIndicator, syncIndexDaily,
-  syncStockBasic, syncTradeCal, syncTradeDate, tradeDaysBetween,
+  syncStockBasic, syncSuspend, syncTradeCal, syncTradeDate, tradeDaysBetween,
 } from './ingest.js';
 
 export interface SyncSummary {
@@ -35,6 +35,7 @@ export async function syncRange(db: DatabaseSync, start: string, end: string, op
     const refresh = opts.force || (opts.refreshFrom !== undefined && day >= opts.refreshFrom);
     if (refresh) refreshed.push(day);
     datasets[day] = await syncTradeDate(db, day, refresh ? 'refresh' : 'skip_ok');
+    datasets[day].suspend_d = await syncSuspend(db, day, refresh);
     console.error(`[ashare] ${day} (${i + 1}/${days.length}) ${JSON.stringify(datasets[day])}`);
   }
   await syncIndexDaily(db, end, addDays(start, -400), opts.refreshFrom);

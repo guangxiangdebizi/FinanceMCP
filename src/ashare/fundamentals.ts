@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { addDays } from './ingest.js';
+import { financialsAsOf } from './data.js';
 
 export interface Fundamentals {
   ts_code: string;
@@ -17,23 +17,9 @@ export interface Fundamentals {
   eps: number | null;
 }
 
-/**
- * Point-in-time financial indicators: for each stock, the latest report
- * period whose announcement date is on or before `asOf`, and within that
- * period the latest announcement on or before `asOf`. Reports older than
- * 18 months are treated as missing rather than stale-but-current.
- */
+/** Announcement-date constrained financials for every stock (see financialsAsOf in data.ts). */
 export function fundamentalsAsOf(db: DatabaseSync, asOf: string): Map<string, Fundamentals> {
-  const rows = db.prepare(`
-    SELECT * FROM (
-      SELECT f.*, ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY end_date DESC, ann_date DESC) rn
-      FROM fina_indicator f
-      WHERE ann_date <= ? AND end_date >= ?
-    ) WHERE rn = 1`).all(asOf, addDays(asOf, -550)) as any[];
-  return new Map(rows.map(r => {
-    delete r.rn;
-    return [r.ts_code, r as Fundamentals];
-  }));
+  return financialsAsOf(db, asOf) as unknown as Map<string, Fundamentals>;
 }
 
 export interface FundamentalRisk {

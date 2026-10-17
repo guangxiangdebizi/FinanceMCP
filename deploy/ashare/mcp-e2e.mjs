@@ -27,7 +27,8 @@ check('initialize', init.status === 200 && !!init.body.result?.serverInfo, { sta
 
 const list = await rpc('tools/list', {});
 const names = list.body.result?.tools?.map(t => t.name) ?? [];
-const expected = ['ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank'];
+const expected = ['ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank',
+  'ashare_stock_history', 'ashare_financial_data', 'ashare_market_data', 'ashare_stock_basic'];
 check('tools/list', JSON.stringify(names) === JSON.stringify(expected), { names });
 
 const calls = [
@@ -37,6 +38,10 @@ const calls = [
   ['ashare_watchlist', { date, history_days: 5 }],
   ['ashare_stock_analysis', { ts_code: '600519.SH', date }],
   ['ashare_sector_rank', { date, top: 10 }],
+  ['ashare_stock_history', { ts_code: '600519.SH', end_date: date, limit: 20, include_basic: true }],
+  ['ashare_financial_data', { ts_code: '600519.SH', as_of_date: date, limit: 4 }],
+  ['ashare_market_data', { end_date: date }],
+  ['ashare_stock_basic', { ts_codes: ['600519.SH', '000001.SZ'] }],
 ];
 const outputs = {};
 for (const [name, args] of calls) {

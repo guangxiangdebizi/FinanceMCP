@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { CORE_INDICES, recentTradeDays } from './ingest.js';
 import { sma } from './indicators.js';
+import { breadthByDate } from './data.js';
 
 export type Regime = 'uptrend' | 'downtrend' | 'range';
 
@@ -61,16 +62,7 @@ export function indexPerformance(db: DatabaseSync, date: string): IndexPerforman
 }
 
 export function marketBreadth(db: DatabaseSync, date: string): MarketBreadth {
-  const row = db.prepare(`
-    SELECT COUNT(*) stocks,
-      SUM(CASE WHEN d.pct_chg > 0 THEN 1 ELSE 0 END) up,
-      SUM(CASE WHEN d.pct_chg < 0 THEN 1 ELSE 0 END) down,
-      SUM(CASE WHEN d.pct_chg = 0 THEN 1 ELSE 0 END) flat,
-      SUM(CASE WHEN l.up_limit IS NOT NULL AND d.close >= l.up_limit - 0.001 THEN 1 ELSE 0 END) limit_up,
-      SUM(CASE WHEN l.down_limit IS NOT NULL AND d.close <= l.down_limit + 0.001 THEN 1 ELSE 0 END) limit_down,
-      SUM(d.amount) amount
-    FROM daily d LEFT JOIN stk_limit l ON l.trade_date = d.trade_date AND l.ts_code = d.ts_code
-    WHERE d.trade_date = ?`).get(date) as any;
+  const row: any = breadthByDate(db, date, date).get(date) ?? { stocks: 0, up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0, amount: 0 };
   const pcts = (db.prepare('SELECT pct_chg FROM daily WHERE trade_date = ? ORDER BY pct_chg').all(date) as any[]).map(r => r.pct_chg);
   const days = recentTradeDays(db, date, 21);
   const amounts = days.map(d => (db.prepare('SELECT SUM(amount) a FROM daily WHERE trade_date = ?').get(d) as any).a ?? NaN);

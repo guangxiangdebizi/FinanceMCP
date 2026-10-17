@@ -181,13 +181,56 @@ export async function syncTradeDate(db: DatabaseSync, date: string, mode: SyncMo
 }
 
 /**
+ * Suspensions (Tushare suspend_d, suspend_type S) for one trade date. They let
+ * the audit tell a suspended stock from a real gap in `daily`. A day with no
+ * suspensions legitimately returns nothing, so completeness cannot be judged
+ * from the row count: a successful request is REFRESH_OK and replaces the
+ * date; a failed one changes nothing and leaves the date to be fetched again.
+ */
+export async function syncSuspend(db: DatabaseSync, date: string, refresh = false): Promise<DatasetSync> {
+  const before = countFor(db, 'suspend_d', date);
+  if (!refresh && syncedOk(db, 'suspend_d', date)) return { rows: before, fetched: false };
+  const hadOk = syncedOk(db, 'suspend_d', date);
+  try {
+    const rows = await fetchAll('suspend_d', { trade_date: date, suspend_type: 'S' }, 'ts_code,trade_date,suspend_timing', 6000);
+    replaceDate(db, 'suspend_d', ['ts_code', 'trade_date', 'suspend_timing'], date, rows);
+    logSync(db, 'suspend_d', date, rows.length, 'ok', refresh ? 'refresh' : '',
+      { refresh_status: 'REFRESH_OK', before_rows: before, after_rows: rows.length, write_mode: 'replaced' });
+    return { rows: rows.length, fetched: true, status: 'ok', refresh_status: 'REFRESH_OK', fetched_rows: rows.length, before_rows: before, write: 'replaced' };
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    const status = hadOk ? 'ok' : 'failed';
+    logSync(db, 'suspend_d', date, 0, status, 'request failed: ' + message,
+      { refresh_status: 'REFRESH_FAILED', before_rows: before, after_rows: before, write_mode: 'none' });
+    return { rows: before, fetched: true, status, refresh_status: 'REFRESH_FAILED', fetched_rows: 0, before_rows: before, write: 'none', error: message.slice(0, 200) };
+  }
+}
+
+/** Fetch one core index over [start, end] and merge it; used for regular sync and for filling holes. */
+export async function syncIndexRange(db: DatabaseSync, code: string, start: string, end: string, asOf = end): Promise<number> {
+  const fields = 'ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount';
+  const key = `${code}:${start}-${end}`;
+  try {
+    const rows = await fetchAll('index_daily', { ts_code: code, start_date: start, end_date: end }, fields, 8000);
+    upsertRows(db, 'index_daily', fields.split(','), rows);
+    // A range ending at the as-of day is complete only if that day's bar came back.
+    const complete = end === asOf ? rows.some(r => r.trade_date === asOf) : rows.length > 0;
+    logSync(db, 'index_daily', key, rows.length, complete ? 'ok' : 'partial', '',
+      { refresh_status: complete ? 'REFRESH_OK' : 'REFRESH_INCOMPLETE', write_mode: 'merged' });
+    return rows.length;
+  } catch (error: any) {
+    logSync(db, 'index_daily', key, 0, 'failed', 'request failed: ' + String(error?.message ?? error), { refresh_status: 'REFRESH_FAILED', write_mode: 'none' });
+    return 0;
+  }
+}
+
+/**
  * Core index bars. Missing history is filled in both directions; bars from
  * `refreshFrom` to `end` are fetched again even when already stored, so the
  * as-of day's index close is re-checked like the stock data.
  */
 export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart: string, refreshFrom?: string): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
-  const fields = 'ts_code,trade_date,open,high,low,close,pre_close,pct_chg,vol,amount';
   for (const code of Object.keys(CORE_INDICES)) {
     const span = db.prepare('SELECT MIN(trade_date) first, MAX(trade_date) last FROM index_daily WHERE ts_code = ?').get(code) as any;
     // Fill history before the earliest stored bar and new bars after the latest one.
@@ -199,20 +242,7 @@ export async function syncIndexDaily(db: DatabaseSync, end: string, defaultStart
       if (from <= end) ranges.push([from, end]);
     }
     let count = 0;
-    for (const [start, stop] of ranges) {
-      const key = `${code}:${start}-${stop}`;
-      try {
-        const rows = await fetchAll('index_daily', { ts_code: code, start_date: start, end_date: stop }, fields, 8000);
-        upsertRows(db, 'index_daily', fields.split(','), rows);
-        // A range ending at the as-of day is complete only if that day's bar came back.
-        const complete = stop === end ? rows.some(r => r.trade_date === end) : rows.length > 0;
-        logSync(db, 'index_daily', key, rows.length, complete ? 'ok' : 'partial', '',
-          { refresh_status: complete ? 'REFRESH_OK' : 'REFRESH_INCOMPLETE', write_mode: 'merged' });
-        count += rows.length;
-      } catch (error: any) {
-        logSync(db, 'index_daily', key, 0, 'failed', 'request failed: ' + String(error?.message ?? error), { refresh_status: 'REFRESH_FAILED', write_mode: 'none' });
-      }
-    }
+    for (const [start, stop] of ranges) count += await syncIndexRange(db, code, start, stop, end);
     result[code] = count;
   }
   return result;
@@ -272,6 +302,8 @@ export interface QualityReport {
   cache_status: QualityStatus;
   /** Latest Tushare refresh per dataset for this date (null = never recorded). */
   refresh: Record<string, RefreshInfo | null>;
+  /** When each dataset's stored rows for this date were written; datasets may come from different fetches. */
+  snapshot: SnapshotInfo;
   checked_at: string;
 }
 
@@ -283,6 +315,37 @@ export interface RefreshInfo {
   write_mode: string | null;
   synced_at: string;
   message: string;
+}
+
+export interface SnapshotInfo {
+  written_at: Record<string, string | null>;
+  spread_minutes: number | null;
+  mixed: boolean;
+  note: string | null;
+}
+
+/**
+ * The fetch each dataset's cached rows come from. A refresh that was kept or
+ * failed leaves the earlier rows in place, so daily, daily_basic, adj_factor
+ * and stk_limit can be from fetches hours apart; that is reported, not hidden.
+ */
+export function snapshotInfo(db: DatabaseSync, date: string): SnapshotInfo {
+  const written: Record<string, string | null> = {};
+  for (const ds of DATED_DATASETS) {
+    const h = db.prepare("SELECT MAX(synced_at) t FROM sync_history WHERE dataset = ? AND key = ? AND write_mode IN ('replaced', 'merged')").get(ds.table, date) as any;
+    // Rows synced before write_mode existed: the latest successful sync wrote them.
+    const legacy = db.prepare("SELECT synced_at t FROM sync_log WHERE dataset = ? AND key = ? AND write_mode IS NULL AND status = 'ok'").get(ds.table, date) as any;
+    written[ds.table] = h?.t ?? legacy?.t ?? null;
+  }
+  const times = Object.values(written).filter((t): t is string => !!t).map(t => Date.parse(t));
+  const spread = times.length > 1 ? Math.round((Math.max(...times) - Math.min(...times)) / 60000) : times.length ? 0 : null;
+  const mixed = spread !== null && spread > 60;
+  return {
+    written_at: written,
+    spread_minutes: spread,
+    mixed,
+    note: mixed ? `各数据集当日缓存来自不同时间的获取（最大相差 ${spread} 分钟），其中较早的为上一次有效快照` : null,
+  };
 }
 
 /** Latest recorded refresh of each dated dataset and core index for `date`. */
@@ -369,6 +432,7 @@ export function checkQuality(db: DatabaseSync, date: string, persist = true): Qu
     indices_present: indices,
     cache_status: cacheStatus,
     refresh,
+    snapshot: snapshotInfo(db, date),
     checked_at: new Date().toISOString(),
   };
   if (persist) db.prepare('INSERT OR REPLACE INTO quality_check (trade_date, status, detail, checked_at) VALUES (?,?,?,?)')

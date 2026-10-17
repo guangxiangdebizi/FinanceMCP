@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const ASHARE_TOOLS = ['ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank'];
+const ASHARE_TOOLS = ['ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank',
+  'ashare_stock_history', 'ashare_financial_data', 'ashare_market_data', 'ashare_stock_basic'];
 
 async function reservePort() {
   const server = http.createServer();
