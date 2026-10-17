@@ -214,12 +214,13 @@
 
 ### 5.8 统计核实记录
 
-`deploy/ashare/verify-research-summary.mjs` 从冻结研究库（或完整 `summary.json`）重新推导上述每一个数字并逐项比对，输出 `docs/ashare-samples/phaseb-research-audit.json`（103 项检查，PASS）：
+`deploy/ashare/verify-research-summary.mjs` 从冻结研究库（或完整 `summary.json`）重新推导上述每一个数字并逐项比对，输出 `docs/ashare-samples/phaseb-research-audit.json`（124 项检查，PASS）：
 
-- 采样日期：形成 84 / 模拟 27 / 合计 111，stride 5，warmup 130，horizon 10，asOf `20261016`，split `20260331`，每个日期都有扫描输入 SHA256。
-- 分母：V1 模拟 863/831/770/61/32；V2 模拟 876/841/773/68/35；V1 形成完成 2895，V2 形成完成 2847；状态计数之和等于事件数，完成数等于 `statuses.completed`。
+- 采样日期：形成 84 / 模拟 27 / 合计 111，warmup 130，horizon 10，asOf `20261016`，split `20260331`，每个日期都有扫描输入 SHA256。
+- 采样网格：以 `20240717` 为起点、每 5 个开市日取一个，共 109 个网格日期；另有且仅有两个网格外日期——`20260331`（为覆盖切分日本身插入，因此 `20260330→20260331` 为 +1、`20260331→20260407` 为 +4）与 `20261016`（数据截止日，距上一网格日 +3）。该检查直接读取冻结快照的 `trade_cal`。
+- 分母（事件/入场/完成/已入场未完成/未入场）：V1 形成 3008/2965/2895/70/43，V1 模拟 863/831/770/61/32，V2 形成 2953/2914/2847/67/39，V2 模拟 876/841/773/68/35；状态计数之和等于事件数，完成数等于 `statuses.completed`。
 - 重叠敏感性：不重叠形成 36 个日期、模拟 12 个日期，及文档中的不重叠全市场超额。
-- 基准覆盖：完整/部分/缺失/成员数逐项可加。
+- 基准覆盖：完整/部分/缺失/成员数逐项可加；模拟段按版本断言——全市场 0 完整 + 770/773 部分，沪深300 770/773 全完整，行业 560+210（V1）与 574+199（V2）。
 - 共同事件配对差：从 `event` 表重新计算，确认恒为 0，并给出成员构成。
 
 任何一项不符，脚本以非零状态退出；因此文档数字与代码输出不会静默漂移。
@@ -249,7 +250,7 @@
 | `/home/jcshi/ashare-research/ashare-20261016.sqlite`（冻结市场快照） | 1,685,577,728 B | `ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1` |
 | `/home/jcshi/ashare-research/phaseb/scans/`（111 个输入扫描） | 约 612 MB | 逐日哈希见 `input_scan_sha256` |
 
-完整结果可从研究库原样重发（只读校验已通过：`experiment.result` 与 `summary.json` 内容完全相等；研究库内该 JSON 的 SHA256 为 `7068f4f331c2661f7266daf061fba243e17e539ee8ebbb3bee58466ceb71206d`）。仓库文件是它的**无损投影**：只做列式重排、6 位小数舍入与重复限制列表去重，不重算任何评分、收益或统计；`verify-research-summary.mjs --summary <仓库文件> --full-summary <完整文件> --research-db <研究库>` 会逐字段确认投影一致（103 项检查）。
+完整结果可从研究库原样重发（只读校验已通过：`experiment.result` 与 `summary.json` 内容完全相等；研究库内该 JSON 的 SHA256 为 `7068f4f331c2661f7266daf061fba243e17e539ee8ebbb3bee58466ceb71206d`）。仓库文件是它的**无损投影**：只做列式重排、6 位小数舍入与重复限制列表去重，不重算任何评分、收益或统计；`verify-research-summary.mjs --summary <仓库文件> --full-summary <完整文件> --research-db <研究库>` 会逐字段确认投影一致（124 项检查）。
 
 复现步骤：
 
@@ -276,7 +277,7 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | 证据 | 结果 |
 |---|---|
 | `npm test` | 174/174 通过，0 失败，0 跳过 |
-| `node --test test/ashare-*.test.mjs` | 128/128 通过（基线 96 + P0 9 + 前瞻快照 9 + 研究接口 7 + 证据自洽 7） |
+| `node --test test/ashare-*.test.mjs` | 129/129 通过（基线 96 + P0 9 + 前瞻快照 9 + 研究接口 7 + 证据自洽 8） |
 | P0 NULL OHLC 反例 | `test/ashare-ohlc-audit.test.mjs` 9/9 通过（见 §2.1） |
 | P0 真实缓存一致性 | `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json` PASS，3,513 个股票日 0 差异（见 §2.1） |
 | 前瞻快照反例 | `test/ashare-snapshot.test.mjs` 9/9 通过（见 §3.3） |
@@ -286,8 +287,8 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | V1 一致性（封版复测，`docs/ashare-samples/phaseb-v1-parity-freeze.json`） | PASS：基线 `fc24fef` 构建 vs 封版构建，9 个日期全市场逐字段精确匹配，0 差异；6 个连续股票池日期输出与持久化状态哈希相同 |
 | 真实因子证据 | 11/11 通过（见 §3） |
 | 研究接口契约 | `test/ashare-research-interface.test.mjs` 7/7 通过（见 §3.1） |
-| 研究统计核实 | `docs/ashare-samples/phaseb-research-audit.json` 103 项检查 PASS（见 §5.8） |
-| 证据文件自洽 | `test/ashare-research-evidence.test.mjs` 7/7 通过（见 §5.9） |
+| 研究统计核实 | `docs/ashare-samples/phaseb-research-audit.json` 124 项检查 PASS（见 §5.8） |
+| 证据文件自洽 | `test/ashare-research-evidence.test.mjs` 8/8 通过（见 §5.9） |
 | 真实缓存性能 | `docs/ashare-samples/phaseb-factor-performance.json` 11 项检查 PASS（见 §3.2） |
 | 真实缓存 B0 | 全部检查通过（见 §2） |
 | 研究可复现 | 相同输入重跑 `run_id` 与结果一致；扫描内容变化生成新 `run_id` |

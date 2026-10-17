@@ -35,15 +35,33 @@ export const EXPECTED = {
   non_overlapping_formation_dates: 36,
   non_overlapping_simulation_dates: 12,
   versions: ['score-1.0.0', 'score-2.0.0'],
+  // The selection grid is every 5th open trading day from 20240717, with exactly
+  // two off-grid dates: 20260331 (added so the split date itself is sampled) and
+  // 20261016 (the data cutoff). Verified below against the frozen trade calendar.
+  stride_grid: { start: '20240717', off_grid_dates: ['20260331', '20261016'] },
   // Acceptance-doc table values, expressed exactly as the summary stores them.
   table: {
     'score-1.0.0': {
-      formation: { completed: 2895, net_mean: 0.011683, net_median: -0.003719, win_rate: 0.480484, non_overlap_dates: 36, non_overlap_market_excess: -0.005973640856655983 },
+      formation: { events: 3008, entered: 2965, completed: 2895, unresolved_after_entry: 70, not_entered: 43, net_mean: 0.011683, net_median: -0.003719, win_rate: 0.480484, non_overlap_dates: 36, non_overlap_market_excess: -0.005973640856655983 },
       historical_simulation: { events: 863, entered: 831, completed: 770, unresolved_after_entry: 61, not_entered: 32, net_mean: -0.003586, net_median: -0.020029, win_rate: 0.415584, non_overlap_dates: 12, non_overlap_market_excess: 0.005085391500612675 },
     },
     'score-2.0.0': {
-      formation: { completed: 2847, net_mean: 0.009096, net_median: -0.0038, win_rate: 0.481911, non_overlap_dates: 36, non_overlap_market_excess: -0.009990202468028968 },
+      formation: { events: 2953, entered: 2914, completed: 2847, unresolved_after_entry: 67, not_entered: 39, net_mean: 0.009096, net_median: -0.0038, win_rate: 0.481911, non_overlap_dates: 36, non_overlap_market_excess: -0.009990202468028968 },
       historical_simulation: { events: 876, entered: 841, completed: 773, unresolved_after_entry: 68, not_entered: 35, net_mean: -0.003188, net_median: -0.018283, win_rate: 0.419146, non_overlap_dates: 12, non_overlap_market_excess: 0.0030534786209185766 },
+    },
+  },
+  // Simulation-segment benchmark coverage: equal_market is partial by construction,
+  // CSI300 is fully covered, and the industry reference splits into complete+partial.
+  benchmark_coverage: {
+    'score-1.0.0': {
+      equal_market: { complete_coverage_events: 0, partial_coverage_events: 770 },
+      csi300: { complete_coverage_events: 770, partial_coverage_events: 0 },
+      industry: { complete_coverage_events: 560, partial_coverage_events: 210 },
+    },
+    'score-2.0.0': {
+      equal_market: { complete_coverage_events: 0, partial_coverage_events: 773 },
+      csi300: { complete_coverage_events: 773, partial_coverage_events: 0 },
+      industry: { complete_coverage_events: 574, partial_coverage_events: 199 },
     },
   },
 };
@@ -135,7 +153,7 @@ export async function verifyResearchSummary(options) {
     status: 'PENDING',
     started_at: new Date(started).toISOString(),
     command: 'node deploy/ashare/verify-research-summary.mjs',
-    run_id: null, inputs: {}, checks: {}, failures: [], evidence: {},
+    run_id: null, inputs: {}, checks: {}, failures: [], skipped: [], evidence: {},
   };
   const check = (name, ok, detail) => {
     result.checks[name] = ok;
@@ -204,6 +222,37 @@ export async function verifyResearchSummary(options) {
   check('input_scan_sha256_per_date', dates.every(d => /^[0-9a-f]{64}$/.test(scanHashes[d] ?? '')), { expected: dates.length, actual: Object.keys(scanHashes).length });
   result.evidence.dates = { formation: formation.length, simulation: simulation.length, first: dates[0], last: dates.at(-1) };
 
+  // ---- 2b. stride grid: every 5th open trading day, plus exactly two documented off-grid dates.
+  // The calendar lives in the frozen market snapshot, not the research DB, so this
+  // check needs --snapshot; without it the check is reported as SKIPPED, not passed.
+  if (options.snapshot) {
+    const snapshotDb = new DatabaseSync(resolve(options.snapshot), { readOnly: true });
+    let calendar;
+    try {
+      snapshotDb.exec('PRAGMA query_only=ON');
+      calendar = snapshotDb.prepare('SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date')
+        .all(EXPECTED.stride_grid.start, EXPECTED.data_cutoff).map(r => r.cal_date);
+    } finally { snapshotDb.close(); }
+    const index = new Map(calendar.map((d, i) => [d, i]));
+    // The base grid is every 5th open day from the start. An inserted date (the split
+    // date) is off that grid and locally splits one 5-day step into 1 + 4, so counting
+    // non-5 transitions would report the following grid date too; test grid membership.
+    const base = index.get(EXPECTED.stride_grid.start);
+    const offGrid = dates.filter(d => index.has(d) && ((index.get(d) - base) % EXPECTED.stride !== 0));
+    check('stride_grid_start', calendar[0] === EXPECTED.stride_grid.start, { expected: EXPECTED.stride_grid.start, actual: calendar[0] });
+    check('stride_grid_dates_are_trading_days', dates.every(d => index.has(d)), { missing: dates.filter(d => !index.has(d)) });
+    check('stride_grid_off_grid_dates', JSON.stringify(offGrid) === JSON.stringify(EXPECTED.stride_grid.off_grid_dates),
+      { expected: EXPECTED.stride_grid.off_grid_dates, actual: offGrid });
+    const gaps = dates.slice(1).map((d, i) => ({ previous: dates[i], date: d, gap: (index.get(d) ?? NaN) - (index.get(dates[i]) ?? NaN) }));
+    result.evidence.stride_grid = {
+      start: calendar[0], calendar_days: calendar.length, on_grid_dates: dates.length - offGrid.length, off_grid: offGrid,
+      non_stride_transitions: gaps.filter(g => g.gap !== EXPECTED.stride),
+      note: '20260331 is inserted at the split, so 20260330->20260331 is +1 and 20260331->20260407 is +4; 20261016 is the cutoff at +3 from the last grid date.',
+    };
+  } else {
+    result.skipped.push({ check: 'stride_grid_off_grid_dates', reason: 'trade calendar is in the frozen market snapshot; supply --snapshot' });
+  }
+
   // ---- 3. per-version/segment denominators and return metrics
   const table = {};
   for (const version of EXPECTED.versions) {
@@ -223,10 +272,23 @@ export async function verifyResearchSummary(options) {
       table[version][segment] = row;
       for (const [key, want] of Object.entries(expected)) {
         // Counts must match exactly; return metrics are documented to 0.001% (ratio 1e-5), so allow 1e-6.
-        const tolerance = key === 'completed' || key === 'non_overlap_dates' ? 0 : 1e-6;
+        const tolerance = typeof want === 'number' && Number.isInteger(want) ? 0 : 1e-6;
         const actual = row[key];
         check(`${version}:${segment}:${key}`, actual !== undefined && actual !== null && Math.abs(actual - want) <= tolerance,
           { expected: want, actual, tolerance });
+      }
+      // Simulation-segment benchmark coverage is documented per version; assert the split.
+      if (segment === 'historical_simulation') {
+        for (const [key, want] of Object.entries(EXPECTED.benchmark_coverage[version])) {
+          const b = summary.benchmarks?.[key] ?? {};
+          check(`${version}:${segment}:coverage:${key}`,
+            b.complete_coverage_events === want.complete_coverage_events && b.partial_coverage_events === want.partial_coverage_events,
+            { expected: want, actual: { complete: b.complete_coverage_events, partial: b.partial_coverage_events } });
+        }
+        check(`${version}:${segment}:equal_market_never_complete`, summary.benchmarks?.equal_market?.complete_coverage_events === 0,
+          { complete: summary.benchmarks?.equal_market?.complete_coverage_events });
+        check(`${version}:${segment}:csi300_fully_complete`, summary.benchmarks?.csi300?.partial_coverage_events === 0,
+          { partial: summary.benchmarks?.csi300?.partial_coverage_events });
       }
       check(`${version}:${segment}:denominators_add_up`, d.events === d.completed + d.unresolved_after_entry + d.not_entered
         && d.entered === d.completed + d.unresolved_after_entry, { denominators: d });

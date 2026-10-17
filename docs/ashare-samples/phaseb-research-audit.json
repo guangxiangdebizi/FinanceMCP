@@ -1,7 +1,7 @@
 {
   "schema_version": "phaseb-research-audit-1.0.0",
   "status": "PASS",
-  "started_at": "2026-10-17T18:28:09.169Z",
+  "started_at": "2026-10-17T18:35:43.655Z",
   "command": "node deploy/ashare/verify-research-summary.mjs",
   "run_id": "PHB-2853b1b630df4bcc98c4",
   "inputs": {
@@ -43,7 +43,14 @@
     "selection_dates_sorted_unique": true,
     "selection_dates_include_split_and_cutoff": true,
     "input_scan_sha256_per_date": true,
+    "stride_grid_start": true,
+    "stride_grid_dates_are_trading_days": true,
+    "stride_grid_off_grid_dates": true,
+    "score-1.0.0:formation:events": true,
+    "score-1.0.0:formation:entered": true,
     "score-1.0.0:formation:completed": true,
+    "score-1.0.0:formation:unresolved_after_entry": true,
+    "score-1.0.0:formation:not_entered": true,
     "score-1.0.0:formation:net_mean": true,
     "score-1.0.0:formation:net_median": true,
     "score-1.0.0:formation:win_rate": true,
@@ -64,12 +71,21 @@
     "score-1.0.0:historical_simulation:win_rate": true,
     "score-1.0.0:historical_simulation:non_overlap_dates": true,
     "score-1.0.0:historical_simulation:non_overlap_market_excess": true,
+    "score-1.0.0:historical_simulation:coverage:equal_market": true,
+    "score-1.0.0:historical_simulation:coverage:csi300": true,
+    "score-1.0.0:historical_simulation:coverage:industry": true,
+    "score-1.0.0:historical_simulation:equal_market_never_complete": true,
+    "score-1.0.0:historical_simulation:csi300_fully_complete": true,
     "score-1.0.0:historical_simulation:denominators_add_up": true,
     "score-1.0.0:historical_simulation:statuses_sum_to_events": true,
     "score-1.0.0:historical_simulation:completed_equals_status": true,
     "score-1.0.0:historical_simulation:by_date_matches_dates": true,
     "score-1.0.0:historical_simulation:benchmark_coverage_reported": true,
+    "score-2.0.0:formation:events": true,
+    "score-2.0.0:formation:entered": true,
     "score-2.0.0:formation:completed": true,
+    "score-2.0.0:formation:unresolved_after_entry": true,
+    "score-2.0.0:formation:not_entered": true,
     "score-2.0.0:formation:net_mean": true,
     "score-2.0.0:formation:net_median": true,
     "score-2.0.0:formation:win_rate": true,
@@ -90,6 +106,11 @@
     "score-2.0.0:historical_simulation:win_rate": true,
     "score-2.0.0:historical_simulation:non_overlap_dates": true,
     "score-2.0.0:historical_simulation:non_overlap_market_excess": true,
+    "score-2.0.0:historical_simulation:coverage:equal_market": true,
+    "score-2.0.0:historical_simulation:coverage:csi300": true,
+    "score-2.0.0:historical_simulation:coverage:industry": true,
+    "score-2.0.0:historical_simulation:equal_market_never_complete": true,
+    "score-2.0.0:historical_simulation:csi300_fully_complete": true,
     "score-2.0.0:historical_simulation:denominators_add_up": true,
     "score-2.0.0:historical_simulation:statuses_sum_to_events": true,
     "score-2.0.0:historical_simulation:completed_equals_status": true,
@@ -134,12 +155,40 @@
     "snapshot_sha256": true
   },
   "failures": [],
+  "skipped": [],
   "evidence": {
     "dates": {
       "formation": 84,
       "simulation": 27,
       "first": "20240717",
       "last": "20261016"
+    },
+    "stride_grid": {
+      "start": "20240717",
+      "calendar_days": 544,
+      "on_grid_dates": 109,
+      "off_grid": [
+        "20260331",
+        "20261016"
+      ],
+      "non_stride_transitions": [
+        {
+          "previous": "20260330",
+          "date": "20260331",
+          "gap": 1
+        },
+        {
+          "previous": "20260331",
+          "date": "20260407",
+          "gap": 4
+        },
+        {
+          "previous": "20261013",
+          "date": "20261016",
+          "gap": 3
+        }
+      ],
+      "note": "20260331 is inserted at the split, so 20260330->20260331 is +1 and 20260331->20260407 is +4; 20261016 is the cutoff at +3 from the last grid date."
     },
     "table": {
       "score-1.0.0": {
@@ -440,9 +489,9 @@
       ]
     ]
   },
-  "completed_at": "2026-10-17T18:31:19.175Z",
+  "completed_at": "2026-10-17T18:38:54.704Z",
   "timings_ms": {
-    "total": 190006
+    "total": 191049
   },
   "method": "Re-derived every documented Phase B statistic from the frozen experiment.result and the per-event table (read-only research DB) and compared it with the expected values transcribed from docs/ashare-phaseb-acceptance.md. Recomputed the common-comparable-event paired delta from the event table, verified the committed compact evidence is a faithful projection of the full result, and checked the research DB and market snapshot hashes are unchanged."
 }

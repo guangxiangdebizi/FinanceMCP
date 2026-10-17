@@ -197,3 +197,37 @@ test('the research DB and market snapshot are never written by the audit', () =>
   assert.throws(() => ro.prepare("INSERT INTO experiment VALUES ('x','{}',NULL,'now')").run(), /readonly/i);
   ro.close();
 });
+
+test('stride grid is verified against a trade calendar and names exactly the two inserted dates', async () => {
+  // Build a snapshot-shaped calendar: every weekday from the grid start to the cutoff.
+  // Inserting 20260331 as the split date makes the next grid step 4 days, which a
+  // naive "gap !== 5" test would wrongly report as an off-grid date.
+  const dir = mkdtempSync(join(tmpdir(), 'ashare-stride-'));
+  const path = join(dir, 'snapshot.sqlite');
+  const db = new DatabaseSync(path);
+  db.exec('CREATE TABLE trade_cal (cal_date TEXT PRIMARY KEY, is_open INTEGER NOT NULL, pretrade_date TEXT);');
+  const open = [];
+  const d = new Date(Date.UTC(2024, 6, 17));
+  while (d.toISOString().slice(0, 10) <= '2026-10-16') {
+    if (d.getUTCDay() % 6 !== 0) open.push(d.toISOString().slice(0, 10).replace(/-/g, ''));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  const insert = db.prepare('INSERT INTO trade_cal VALUES (?, 1, NULL)');
+  for (const day of open) insert.run(day);
+  db.close();
+
+  const evidence = JSON.parse(readFileSync(COMMITTED, 'utf8'));
+  const grid = [];
+  for (let i = 0; i < open.length; i += 5) grid.push(open[i]);
+  evidence.selection_dates = [...new Set([...grid, '20260331', '20261016'])].sort();
+  const evidencePath = join(dir, 'evidence.json');
+  writeFileSync(evidencePath, JSON.stringify(evidence));
+  const result = await verifyResearchSummary({ summary: evidencePath, snapshot: path });
+  const strideChecks = Object.fromEntries(Object.entries(result.checks).filter(([k]) => k.startsWith('stride_grid')));
+  assert.equal(strideChecks.stride_grid_off_grid_dates, true, JSON.stringify(result.failures));
+  assert.deepEqual(result.evidence.stride_grid.off_grid, EXPECTED.stride_grid.off_grid_dates);
+  // Without --snapshot the grid check is explicitly skipped, never silently passed.
+  const noSnapshot = await verifyResearchSummary({ summary: evidencePath });
+  assert.equal('stride_grid_off_grid_dates' in noSnapshot.checks, false);
+  assert.ok(noSnapshot.skipped.some(s => s.check === 'stride_grid_off_grid_dates'));
+});
