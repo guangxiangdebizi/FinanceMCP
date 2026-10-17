@@ -1,8 +1,8 @@
 {
   "schema_version": "ohlc-audit-evidence-1.0.0",
   "status": "PASS",
-  "started_at": "2026-10-17T17:29:06.728Z",
-  "command": "node deploy/ashare/verify-ohlc-audit.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/home/jcshi/ashare-research/build-e8cbe4a/ashare' '/home/jcshi/workspace/FM-p0/docs/ashare-samples/phaseb-ohlc-audit-real-cache.json'",
+  "started_at": "2026-10-17T17:33:29.271Z",
+  "command": "node deploy/ashare/verify-ohlc-audit.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/tmp/fm-baseline-src/build/ashare' '/home/jcshi/workspace/FM-p0/docs/ashare-samples/phaseb-ohlc-audit-real-cache.json'",
   "node_version": "v24.16.0",
   "snapshot": {
     "path": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
@@ -18,12 +18,14 @@
     "score_version": "score-1.0.0"
   },
   "baseline": {
-    "modules": "/home/jcshi/ashare-research/build-e8cbe4a/ashare",
-    "score_version": "score-1.0.0"
+    "modules": "/tmp/fm-baseline-src/build/ashare",
+    "score_version": "score-1.0.0",
+    "commit": "fc24fefd3a502646b47020947fc13d30f06f908e"
   },
   "limitations": [
     "The snapshot is the frozen 2026-10-16 cache; this proves the pre-fix V1 output is unchanged where the cache has no NULL/invalid bar, not that no upstream day ever produces one.",
-    "NULL detection itself is covered by test/ashare-ohlc-audit.test.mjs on a synthetic market."
+    "NULL detection itself is covered by test/ashare-ohlc-audit.test.mjs on a synthetic market.",
+    "Parity covers scanMarket rows and analyzeMarket V1 rows; the new quality anomaly counters (null_ohlc, null_vol, null_amount, invalid_bar) are reported separately because they are additive evidence, not scoring output."
   ],
   "audit": {
     "days": [
@@ -59,7 +61,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 114
+        "ms": 112
       },
       {
         "trade_date": "20260929",
@@ -127,7 +129,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 89
+        "ms": 85
       },
       {
         "trade_date": "20261008",
@@ -161,7 +163,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 98
+        "ms": 86
       },
       {
         "trade_date": "20261009",
@@ -195,7 +197,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 92
+        "ms": 85
       },
       {
         "trade_date": "20261012",
@@ -229,7 +231,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 90
+        "ms": 84
       },
       {
         "trade_date": "20261013",
@@ -263,7 +265,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 91
+        "ms": 86
       },
       {
         "trade_date": "20261014",
@@ -297,7 +299,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 97
+        "ms": 86
       },
       {
         "trade_date": "20261015",
@@ -331,7 +333,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 96
+        "ms": 87
       },
       {
         "trade_date": "20261016",
@@ -365,7 +367,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 90
+        "ms": 86
       }
     ],
     "null_counts": {
@@ -434,10 +436,46 @@
     "sql_invalid_bars_in_window": 0
   },
   "parity": {
-    "dates": [
-      {
+    "scan": {
+      "20261015": {
         "trade_date": "20261015",
         "scanned": {
+          "baseline": 5565,
+          "candidate": 5565
+        },
+        "eligible": 1757,
+        "differences": 0,
+        "meta": {
+          "rows": true,
+          "sectors": true,
+          "signal_counts": true,
+          "suspended_or_missing": true
+        },
+        "baseline_ms": 8457,
+        "candidate_ms": 8118
+      },
+      "20261016": {
+        "trade_date": "20261016",
+        "scanned": {
+          "baseline": 5567,
+          "candidate": 5567
+        },
+        "eligible": 1756,
+        "differences": 0,
+        "meta": {
+          "rows": true,
+          "sectors": true,
+          "signal_counts": true,
+          "suspended_or_missing": true
+        },
+        "baseline_ms": 8907,
+        "candidate_ms": 7881
+      }
+    },
+    "analyze": {
+      "20261015": {
+        "trade_date": "20261015",
+        "rows": {
           "baseline": 5565,
           "candidate": 5565
         },
@@ -445,14 +483,23 @@
           "baseline": 1757,
           "candidate": 1757
         },
-        "baseline_ms": 9375,
-        "candidate_ms": 9038,
         "differences": 0,
-        "null_quality_codes": 0
+        "universe_stable": true,
+        "quality_stable": true,
+        "shared_anomalies_equal": true,
+        "added_anomaly_keys": [
+          "null_ohlc",
+          "null_vol",
+          "null_amount",
+          "invalid_bar"
+        ],
+        "null_quality_codes": 0,
+        "baseline_ms": 8858,
+        "candidate_ms": 9810
       },
-      {
+      "20261016": {
         "trade_date": "20261016",
-        "scanned": {
+        "rows": {
           "baseline": 5567,
           "candidate": 5567
         },
@@ -460,19 +507,25 @@
           "baseline": 1756,
           "candidate": 1756
         },
-        "baseline_ms": 8382,
-        "candidate_ms": 8871,
         "differences": 0,
-        "null_quality_codes": 0
+        "universe_stable": true,
+        "quality_stable": true,
+        "shared_anomalies_equal": true,
+        "added_anomaly_keys": [
+          "null_ohlc",
+          "null_vol",
+          "null_amount",
+          "invalid_bar"
+        ],
+        "null_quality_codes": 0,
+        "baseline_ms": 8698,
+        "candidate_ms": 9390
       }
-    ],
+    },
     "differences": [],
     "compared_eligible": 3513,
     "difference_count": 0,
-    "scan_identical": {
-      "20261015": true,
-      "20261016": true
-    }
+    "difference_sample": []
   },
-  "completed_at": "2026-10-17T17:30:23.279Z"
+  "completed_at": "2026-10-17T17:34:46.673Z"
 }
