@@ -1,8 +1,8 @@
 {
   "schema_version": "ohlc-audit-evidence-1.0.0",
   "status": "PASS",
-  "started_at": "2026-10-17T17:33:29.271Z",
-  "command": "node deploy/ashare/verify-ohlc-audit.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/tmp/fm-baseline-src/build/ashare' '/home/jcshi/workspace/FM-p0/docs/ashare-samples/phaseb-ohlc-audit-real-cache.json'",
+  "started_at": "2026-10-17T18:24:32.658Z",
+  "command": "node deploy/ashare/verify-ohlc-audit.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/tmp/fm-baseline-src/build/ashare' '/home/jcshi/workspace/FinanceMCP/docs/ashare-samples/phaseb-ohlc-audit-real-cache.json'",
   "node_version": "v24.16.0",
   "snapshot": {
     "path": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
@@ -13,7 +13,7 @@
     "unchanged": true
   },
   "candidate": {
-    "modules": "/home/jcshi/workspace/FM-p0/build/ashare/",
+    "modules": "/home/jcshi/workspace/FinanceMCP/build/ashare/",
     "audit_version": "audit-1.2.0",
     "score_version": "score-1.0.0"
   },
@@ -61,7 +61,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 112
+        "ms": 109
       },
       {
         "trade_date": "20260929",
@@ -95,7 +95,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 89
+        "ms": 96
       },
       {
         "trade_date": "20260930",
@@ -129,7 +129,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 85
+        "ms": 87
       },
       {
         "trade_date": "20261008",
@@ -163,7 +163,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 86
+        "ms": 88
       },
       {
         "trade_date": "20261009",
@@ -197,7 +197,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 85
+        "ms": 88
       },
       {
         "trade_date": "20261012",
@@ -231,7 +231,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 84
+        "ms": 87
       },
       {
         "trade_date": "20261013",
@@ -299,7 +299,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 86
+        "ms": 83
       },
       {
         "trade_date": "20261015",
@@ -333,7 +333,7 @@
         },
         "issues": [],
         "reasons": [],
-        "ms": 87
+        "ms": 84
       },
       {
         "trade_date": "20261016",
@@ -451,8 +451,8 @@
           "signal_counts": true,
           "suspended_or_missing": true
         },
-        "baseline_ms": 8457,
-        "candidate_ms": 8118
+        "baseline_ms": 8121,
+        "candidate_ms": 7934
       },
       "20261016": {
         "trade_date": "20261016",
@@ -468,8 +468,8 @@
           "signal_counts": true,
           "suspended_or_missing": true
         },
-        "baseline_ms": 8907,
-        "candidate_ms": 7881
+        "baseline_ms": 7861,
+        "candidate_ms": 7779
       }
     },
     "analyze": {
@@ -494,8 +494,8 @@
           "invalid_bar"
         ],
         "null_quality_codes": 0,
-        "baseline_ms": 8858,
-        "candidate_ms": 9810
+        "baseline_ms": 8849,
+        "candidate_ms": 8778
       },
       "20261016": {
         "trade_date": "20261016",
@@ -518,8 +518,8 @@
           "invalid_bar"
         ],
         "null_quality_codes": 0,
-        "baseline_ms": 8698,
-        "candidate_ms": 9390
+        "baseline_ms": 8663,
+        "candidate_ms": 8684
       }
     },
     "differences": [],
@@ -527,5 +527,5 @@
     "difference_count": 0,
     "difference_sample": []
   },
-  "completed_at": "2026-10-17T17:34:46.673Z"
+  "completed_at": "2026-10-17T18:25:45.303Z"
 }

@@ -143,10 +143,10 @@ data/snapshot）、`build_sha256`（`build/ashare/*.js` 排序后逐文件 SHA25
 
 `deploy/ashare/verify-research-snapshot.mjs` 在冻结快照
 `~/ashare-research/ashare-20261016.sqlite`（sha256 `ac31a9eb…4dd1`）上运行，输出
-`docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`（`ok=true`，17/17 通过）：
+`docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`（`ok=true`，17/17 通过；`snapshot_id` 含 `build_sha256`，封版构建 `680448b9…6aac` 下重新采集）：
 
 - 源文件 sha256、大小与 mtime 前后不变；只读连接上的写操作被拒绝。
-- 20261016 快照：`FWD-20261016-01b5d0a42f65e11b`，引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，
+- 20261016 快照：`FWD-20261016-988d6b18211018b3`，引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，
   质量 `READY`，扫描 5567 只、可评分 1756 只、因子行 1756。
 - V1 一致性：1756 只全部与正式 `stock_score` 的分数和排名一致（0 差异）。
 - V1 池 40 只（`formal_live_watchlist`），V2 池 40 只（`research_v2_sequential`，首次运行无上一状态）；
