@@ -17,6 +17,7 @@
 | 一次真实数据 E2E（同步→分析→报告→公网 MCP） | ✅ 交易日 20261016 |
 | 自动调度配置 | ✅ 已启用，首次计划运行 2026-10-19 18:40 CST |
 | 第二轮正确性修复（1017：P0-1~3、P1-1~6，见 §9） | ✅ 提交 `55b2b09`（分支 `ashare-v1-fix`），`npm test` 76/76，真实缓存副本 5/5，已部署 |
+| 第三轮修复（1017-fix2：手动报告隔离、刷新状态分离，见 §10） | ✅ 提交 `661e130`（分支 `ashare-v1-fix2`），`npm test` 83/83，真实缓存副本 6/6，已部署 |
 | **连续 3 个真实交易日增量更新与报告验收** | ⏳ **PENDING**（2026-10-19/20/21 尚未发生；判定规则见 §8） |
 | **ChatGPT 网页版手动调用 / 已有定时任务验证** | ⏳ **PENDING，待账号侧操作**（本机无法登录 ChatGPT；步骤见 §8.3） |
 
@@ -141,12 +142,19 @@ systemctl --user start finance-ashare-daily.service（20261017 周六）→ {"tr
 | 条件 | 含义 |
 |---|---|
 | `scheduled_runs` | 当日（北京时间）至少 2 份 `run_mode=live` 报告，即 18:40 与 21:10 两次定时运行都触发并完成 |
-| `data_rechecked` | `sync_history` 中当日 `daily` 至少被请求 2 次（第二次运行确实复查当日行情，而不是沿用第一次结果） |
+| `data_rechecked` | `sync_history` 中当日 `daily` 至少有 2 次 `refresh_status=REFRESH_OK` 的请求（第二次运行确实复查当日行情）；失败或不完整的请求不计入 |
 | `final_status` | 最后一份 live 报告为 **READY**。DEGRADED（非核心缺口：涨跌停价覆盖率或非核心指数缺失）默认**不通过**；仅在 `--allow-degraded` 时记为 `PASS_DEGRADED`，不会显示为 PASS。NOT_READY 一律不通过 |
 | `mcp_consistent` | MCP 工具对该日返回的报告 ID 等于最后一份 live 报告 |
 | `watchlist_continuous` | 股票池 `previous_date` 为前一交易日，且数量 = 前一日数量 + 新增 − 移出 |
 
-当天 21:15 前未满足的条件显示为 `PENDING`。整体 `passed` 要求最近 N 个交易日全部 PASS（或允许时 PASS_DEGRADED）。
+当天 21:15 前未满足的条件显示为 `PENDING`。
+
+**两类证据分开核验**：`acceptance` 只证明*流水线执行*（数据库里的 live 报告与有效 Tushare 请求），不能证明这些运行由 systemd timer 触发
+（手动 `systemctl start` 或 `docker exec … daily` 也会留下同样的记录）。*调度证据*由 `deploy/ashare/check-schedule.sh <YYYYMMDD>` 从
+systemd journal 读取：只有北京时间 18:40–18:45 与 21:10–21:15 窗口内的 `Starting` 记为计划运行（timer `RandomizedDelaySec=120`），
+并要求两次都 `Finished`、无失败。两者都通过，当日才算 PASS。
+2026-10-17 实测（无计划运行的周六）：`check-schedule.sh 20261017` → 列出 00:35（上一轮部署调试）与 07:45（手动触发）的启动，
+`run_1840=no run_2110=no`，`schedule=FAIL`，退出码 1，即手动启动不会被误计为计划运行。整体 `passed` 要求最近 N 个交易日全部 PASS（或允许时 PASS_DEGRADED）。
 修复前的版本把 DEGRADED 计为通过、只要求一份非 NOT_READY 报告，且无法证明第二次运行重新拉取了数据。
 
 部署后基线（2026-10-17 周六）：`acceptance --days 3` → `passed: false`；20261014/15 无 live 报告，20261016 仅一次补发、
@@ -168,10 +176,10 @@ systemctl --user start finance-ashare-daily.service（20261017 周六）→ {"tr
 每个交易日 21:20 CST 之后在 VPS 上执行并把输出存入 `docs/ashare-samples/acceptance-<日期>.txt`：
 
 ```bash
-# 1. 两次计划运行（应各有一次 Started/Finished，且无 failed）
-journalctl --user -u finance-ashare-daily.service --since "<YYYY-MM-DD> 18:00" --until "<YYYY-MM-DD> 23:59" --no-pager
+# 1. 调度证据：两次计划运行（journal，应输出 run_1840=yes run_2110=yes schedule=PASS）
+deploy/ashare/check-schedule.sh <YYYYMMDD>
 ls -la ~/.local/share/finance-mcp-ashare/logs/ | grep daily-<YYYYMMDD>
-# 2. 当日判定（逐项 failed 列表、live_runs、daily_fetches、final、mcp_report_id、watchlist）
+# 2. 流水线证据：当日判定（逐项 failed 列表、live_runs、daily_fetches[].refresh_status、final、mcp_report_id、watchlist）
 docker exec finance-mcp-ashare node build/ashare/cli.js acceptance --days 1 --end <YYYYMMDD>
 # 3. 公网 MCP 返回的报告 ID（与上一步 final.report_id 对比）
 node deploy/ashare/mcp-e2e.mjs https://share.shijingchang.cn/ashare/mcp <YYYYMMDD>
@@ -291,3 +299,78 @@ node deploy/ashare/mcp-e2e.mjs https://share.shijingchang.cn/ashare/mcp 20261016
 - 部署：`docker compose up -d --build` 重建并重启容器后健康；`docker restart` 后 MCP 仍返回同一报告；数据目录
   `ashare.sqlite`、`reports/20261016/ASR-…-ddd0d0.json` 与 `latest.json` 在宿主卷上持久存在。
 - 周六手动触发服务：`{"trade_date":"20261017","skipped":true,"reason":"非交易日"}`，单元正常结束。
+
+## 10. 第三轮修复（2026-10-17，goal `docs/goal/1017-v1-fix2.md`）
+
+审阅基线 `cb53e4b`。修复提交 `661e130`（分支 `ashare-v1-fix2`，基于 `ashare-v1-fix`）。部署前备份：
+`~/ashare-backup/ashare-20261017-pre-fix2.sqlite`（`sqlite3 .backup`）与 `reports-20261017-pre-fix2.tgz`。
+（上一轮的 `ashare-20261017-prefix.sqlite` 已由这份新备份替代并删除；两轮之间正式库只有 `run_mode`/`sync_history` 的增量迁移。）
+评分权重、信号、股票池规则与历史表现均未改动。
+
+```
+npm test                         → tests 83, pass 83, fail 0（上一轮 76 + 新增 7）
+npx tsc --noEmit -p .            → 无错误
+node --test test/ashare-refresh.test.mjs        → 6/6（反例 A~E，含报告/MCP 层）
+node --test test/ashare-correctness.test.mjs    → 10/10（新增最新 live 日期的 report 隔离）
+ASHARE_DATA_DIR=<正式缓存副本> node deploy/ashare/verify-real-cache.mjs → 6/6 PASS（docs/ashare-samples/fix2-1017-real-cache.json）
+node deploy/ashare/mcp-e2e.mjs https://share.shijingchang.cn/ashare/mcp 20261016 → 9/9 PASS（部署后，mcp-e2e-public-20261017-fix2.json）
+```
+
+回归有效性（在 build 中恢复旧逻辑后应失败的测试）：旧 `report` 路由（等于最新 live 日期时写正式库）→ “fix2 P0-1” 失败；
+质量判定忽略刷新结果 → “A/D/E” 失败；短返回合并进完整快照并按缓存行数记为成功 → “A”、“A/D/E”、“P0-1 short refresh” 失败；
+同日只降级 replay 的旧排序 → “P1-1” 失败；验收计入任意请求 → “P1-2” 失败。
+
+### 10.1 P0：手动报告与正式数据隔离
+
+- 根因：`report --date` 只有在 `date < lastLiveDate` 时才进入研究库；`date == lastLiveDate`（例如 20261016）会在正式库调用
+  `generateReport(…, 'manual')`，重写当日正式股票池、评分与 `latest.json`，且该手动报告生成时间更晚，`latestReportMeta` 只降级 replay，
+  MCP 会改为返回这份手动报告。
+- 修改：`src/ashare/commands.ts`（`report --date` 一律使用研究库）、`src/ashare/report.ts`（`generateReport` 在正式库只接受 `live`、
+  在研究库拒绝 `live`；`latestReportMeta` 同日排序 live → manual → 无 run_mode → replay）、`src/ashare/cli.ts`（用法说明）。
+- 测试：最新 live 日期、更早 live 日期、研究库中尚未生成的日期各执行一次 `report`，结果均为 `space=research`、路径在 `research/reports/`；
+  正式 watchlist / watchlist_change / stock_score / report / latest.json 前后完全一致；MCP 仍返回原 live report_id；正式库上
+  `generateReport(…, 'manual'|'replay')` 抛错；下一 live 日的 `previous_date` 与数量连续。排序测试覆盖“同日更晚生成的 manual 不胜过 live”。
+- 真实数据（副本）：`replay 20261012~20261016`，`report --date` 20261014 / **20261016** / 20261019 → 三份研究报告（READY/READY/NOT_READY），
+  正式库快照哈希不变，MCP 返回 `ASR-20261016-20261016163620-ddd0d0`（live，40 只）。
+- 正式库中没有遗留的 manual 记录（`run_mode`：live 1、replay 74）。
+
+### 10.2 P0：缓存完整性与上游刷新状态分离
+
+- 根因：同步状态只按写入后的 SQLite 行数判断。5500 → 3000 时缓存仍为 5500，状态仍为 `ok`，刷新异常被掩盖；偏短的返回还会被
+  `INSERT OR REPLACE` 合并进完整快照，混入部分更新；Tushare 报错直接抛出，没有留下该数据集的失败记录。
+- 修改：`src/ashare/db.ts`（`sync_log`/`sync_history` 增加 `refresh_status`、`before_rows`、`after_rows`、`write_mode`，启动时迁移；
+  `logSync` 写入这些字段）、`src/ashare/ingest.ts`（`syncTradeDate` 区分 REFRESH_OK / INCOMPLETE / FAILED，完整缓存上的短返回 `kept`
+  不写入，请求异常记录后继续；指数刷新同样记录；`checkQuality` 输出 `cache_status` 与 `refresh`，最新刷新异常时 READY → DEGRADED）。
+  报告与 `ashare_data_status` 直接使用 `checkQuality`，无需单独改动；未引入新的状态服务或任务框架。
+- 反例测试（`test/ashare-refresh.test.mjs`）：
+  - A 5500 → 3000：仍 5500 条、修订值未混入，`refresh_status=REFRESH_INCOMPLETE`、`write_mode=kept`，缓存 `status=ok`；
+    报告层 DEGRADED，理由“最新一次刷新 daily 不完整（返回 33 条，沿用上一次有效快照 60 条…）”，`ashare_data_status` 与 `ashare_daily_report` 均显示。
+  - B 3000 → 5500：首次 merged/partial（报告层 NOT_READY），第二次 replaced/REFRESH_OK，恢复 READY。
+  - C 5500 → 5490（撤回 10 条）：REFRESH_OK、原子替换、撤回行不残留。
+  - D 请求异常：数据保留，`REFRESH_FAILED` 与错误信息留在 sync_log/sync_history，其他数据集照常刷新；报告 DEGRADED（“adj_factor 请求失败”）。
+  - E 连续运行：不完整 → 失败 → 成功后自动恢复 READY、原因清空，条数不变，同日股票池重建而非重复。
+- 真实数据（副本，真实 Tushare 返回上注入短返回/错误）：短返回 3000 条 → kept，`cache_status=READY`、`status=DEGRADED`；
+  注入错误 → REFRESH_FAILED，DEGRADED；真实刷新 → REFRESH_OK（replaced 5567），READY；三步四表条数均为 5567/5567/5577/5655。
+- 剩余风险：`daily` 流程中较早的交易日一旦为 `ok` 不再刷新，若其最后一次刷新是 INCOMPLETE，该日报告保持 DEGRADED（如实，不自动消除）。
+  本次修复之前的同步记录 `refresh_status` 为 null，不参与判定（正式 20261016 即如此，状态 READY）。
+
+### 10.3 P1：连续三日验收证据
+
+- `acceptance` 保留，`data_rechecked` 只统计 `REFRESH_OK` 的请求（单测：两次均 INCOMPLETE 时不通过）；DEGRADED 规则不变
+  （仅 `--allow-degraded` 时 `PASS_DEGRADED`）。流水线证据与调度证据的区分与 `check-schedule.sh` 见 §8.1、§8.2。
+- 2026-10-19 / 20 / 21 仍为 **PENDING**，未填写任何未来结果。
+
+### 10.4 P2：MCP 只读初始化
+
+- 已完成（小改动）：`getAshareDb()` 直接以只读方式打开，不再先开可写连接；结构不是最新时抛出“请先运行 finance-ashare migrate”。
+  `deploy/ashare/docker-compose.yml` 的启动命令为 `cli.js migrate && exec node build/httpServer.js`，迁移只在容器启动时进行一次。
+  部署后容器日志 `{"migrated": []}`，`sync_log` 已含新列，健康检查通过。
+
+### 10.5 部署后验证
+
+- `docker compose up -d --build`：数据卷仍为 `~/.local/share/finance-mcp-ashare → /data`，容器 healthy。
+- 公网 MCP e2e 9/9；`ashare_watchlist(20261016)` → `ASR-20261016-20261016163620-ddd0d0`，40 只；`ashare_data_status(20261016)` →
+  READY（`cache_status=READY`，旧同步记录 `refresh_status=null`）。
+- 正式 `reports/`（72 个日期目录）与部署前备份逐字节一致；正式库 20261016 股票池 40 行；正式数据目录未生成 `research.sqlite`
+  （研究库只在副本上使用过）。
+- `finance-ashare-daily.timer` enabled，下次触发 2026-10-19 18:41 CST。

@@ -102,7 +102,7 @@ node build/ashare/cli.js sync --start 20240102 --end 20261016    # 历史回填�
 node build/ashare/cli.js evidence                                # 信号历史检验
 node build/ashare/cli.js replay --start 20260701 --end 20261015  # 历史日期重放（写入研究库 research.sqlite，不改正式数据）
 node build/ashare/cli.js daily                                   # 定时任务入口（今天；每次都重新查询当日行情）
-node build/ashare/cli.js report --date 20261016 [--research]     # 仅用本地缓存生成指定日报告；早于正式最新日期时自动进入研究库
+node build/ashare/cli.js report --date 20261016                  # 仅用本地缓存生成指定日报告（始终写入研究库）
 node build/ashare/cli.js pool-eval --start 20260701 --end 20261009 [--research] # 股票池实际表现（严格截至 end）
 node build/ashare/cli.js acceptance --days 3 [--allow-degraded]  # 连续真实交易日验收
 node build/ashare/cli.js status                                  # 数据完整性状态
@@ -111,16 +111,23 @@ node build/ashare/cli.js migrate                                 # 旧版缓存�
 ```
 
 正式库与研究库：
-- `ashare.sqlite`（正式库）：行情缓存 + 定时流水线的股票池、评分、报告。只有 `daily` 与不早于正式最新日期的 `report` 写入其中；
-  `daily --date` 早于正式最新股票池日期时直接拒绝，避免改写后续日期的连续性。
-- `research.sqlite`（研究库，`ASHARE_RESEARCH_DB_PATH` 可改）：`replay`、回溯日期的 `report` 与 `pool-eval --research` 使用。
+- `ashare.sqlite`（正式库）：行情缓存 + 定时流水线的股票池、评分、报告。**只有 `daily` 写入**正式股票池/评分/报告/`latest.json`
+  （`generateReport` 在正式库上拒绝 manual/replay 模式）；`daily --date` 早于正式最新股票池日期时直接拒绝，避免改写后续日期的连续性。
+- `research.sqlite`（研究库，`ASHARE_RESEARCH_DB_PATH` 可改）：`replay`、任意日期的 `report --date`（包括正式最新日期）与 `pool-eval --research` 使用。
   它只保存自己的股票池/评分/质量检查/报告表，行情与信号证据通过只读 `ATTACH` 读取正式库；报告文件写在 `research/reports/`，
   不会覆盖正式 `reports/<日期>/latest.json`。
-- MCP 工具以只读连接打开正式库，读取每个交易日的报告时按“交易日 → 正式/手动优先于重放 → 生成时间”排序。
+- MCP 工具只以只读连接打开正式库（不再先用可写连接初始化）；建表与迁移由容器启动命令 `cli.js migrate` 完成，结构过旧时工具报错提示运行 migrate。
+  读取每个交易日的报告时按“交易日 → live → manual（旧库遗留）→ 无 run_mode → replay → 生成时间”排序。
 
 同日重复同步：`daily` 对 as-of 交易日总是重新请求 `daily/daily_basic/adj_factor/stk_limit` 与核心指数；返回完整（≥ 前一交易日
-和已存条数的 97%）时按交易日整体替换（修订值覆盖、撤回的行删除），明显偏短的返回只合并、不缩减已有数据。每次请求记入
-`sync_history`（`sync_log` 仅保留最新状态），验收据此确认 21:10 的运行确实复查了当日行情。
+和已存条数的 97%）时按交易日整体替换（修订值覆盖、撤回的行删除）。每次请求记入 `sync_history`（`sync_log` 仅保留最新状态）。
+
+缓存完整性与刷新状态分开记录：`status`（ok/partial/empty）描述写入后的本地缓存；`refresh_status` 描述本次 Tushare 请求——
+`REFRESH_OK`（完整返回）、`REFRESH_INCOMPLETE`（明显偏短）、`REFRESH_FAILED`（请求报错）；同时记录获取行数、原有行数、同步后行数与写入方式
+（replaced / kept / merged / none）。偏短返回时：已有完整缓存则原样保留上一次快照（kept，不混入部分更新）；缓存本身不完整则合并有效行（merged）。
+请求报错不改动数据。`checkQuality` 输出 `cache_status`（仅看缓存）与各数据集最新 `refresh`：缓存满足门槛但最新刷新不完整或失败时，
+最终状态为 **DEGRADED** 并写明“沿用上一次有效快照”；缓存不满足核心门槛仍为 NOT_READY；下一次 `REFRESH_OK` 后自动恢复。
+`ashare_data_status` 与 `ashare_daily_report` 均显示这些原因。本次修复之前的同步记录没有 `refresh_status`（显示为 null，不参与判定）。
 
 ## 部署（本 VPS）
 
