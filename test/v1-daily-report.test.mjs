@@ -27,7 +27,7 @@ const { openAshareDb, upsertRows } = await import('../build/ashare/db.js');
 const { weekdays } = await import('./ashare-fixture.mjs');
 const account = await import('../build/portfolio/account.js');
 const { openPortfolioDb } = await import('../build/portfolio/db.js');
-const { confirmRealAccount, initBaseline } = await import('../build/portfolio/ledger.js');
+const { confirmRealAccount, initBaseline, setAccountCompleteness } = await import('../build/portfolio/ledger.js');
 const { PLAN_TRACKING_SCHEMA, buildDailyReport } = await import('../build/portfolio/dailyReport.js');
 
 const DAYS = weekdays('20261005', 10);
@@ -339,6 +339,10 @@ test('D1-5 门控全满足 → ACTIONABLE，且腿可执行；但数量仍来自
   initBaseline(confirmedPortfolio, 'confirmed-account', { asOf: LAST, snapshotId });
   account.markSnapshotCurrent(confirmedPortfolio, snapshotId, { confirmedBy: 'test-fixture' });
   confirmRealAccount(confirmedPortfolio, 'confirmed-account', { confirm: true, note: 'synthetic fixture' });
+  // V1.0 准入：日报与决策共用同一个账户门控，因此同样要求覆盖决策日的完整性声明。
+  setAccountCompleteness(confirmedPortfolio, 'confirmed-account', {
+    as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'synthetic fixture declaration',
+  }, { confirm: true, recordedBy: 'test-fixture' });
 
   const report = buildDailyReport({
     portfolioDb: confirmedPortfolio,

@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { latestSnapshot, readSnapshot, valueCents, type AccountSnapshot } from './account.js';
 import { buildResearchSummary } from './researchSummary.js';
+import { evaluateAccountStatus, type AccountStatusEvaluation } from './decision.js';
 import { DEFAULT_FEE_RULES, DEFAULT_LOT_RULES, type FeeRules, type LotRules } from './rules.js';
 import { screenEtfCandidates, type EtfCandidateRow, type EtfCandidateScreenResult } from '../ashare/etfUniverse.js';
 
@@ -242,7 +243,14 @@ export interface DailyReportResult {
     satisfied: boolean;
     is_current: boolean;
     account_status: string;
+    /** 与 decision.ts 同源：same_day_snapshot / ledger_reconstruction / none。 */
+    state_basis: 'same_day_snapshot' | 'ledger_reconstruction' | 'none';
+    snapshot_as_of: string | null;
+    reported_events_through: string | null;
+    last_user_reconciled_at: string | null;
+    unreported_trade_risk: boolean;
     reasons: { code: string; detail: string }[];
+    warnings: { code: string; detail: string }[];
     note: string;
   };
   fact_register: { id: string; value: string | number | boolean | null; as_of: string | null; source: string; quality: string; claim_status: 'FACT' | 'UNVERIFIED' }[];
@@ -600,14 +608,28 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     ? readSnapshot(portfolioDb, input.snapshotId)
     : latestSnapshot(portfolioDb);
 
-  // 账户门控：与研究摘要/决策一致的硬条件。
+  // 账户门控：必须与 decision.ts 的 evaluateAccountStatus 同源，否则会出现
+  // "决策说可执行、日报说不可执行"两套口径。这里直接调用同一个门控函数。
   const accountStatus: string = summary.account_status ?? 'REAL_ACCOUNT_PENDING';
-  const snapshotIsCurrent = snapshot?.is_current === true;
   const gateReasons: { code: string; detail: string }[] = [];
-  if (!snapshotIsCurrent) gateReasons.push({ code: 'account_not_current', detail: '账户快照 is_current=false（PRD §3 截图基线只能研究）' });
-  if (accountStatus !== 'REAL_ACCOUNT_VERIFIED') gateReasons.push({ code: 'account_not_verified', detail: `账本门控为 ${accountStatus}，未确认为真实账户` });
-  if (snapshot && snapshot.as_of.replace(/-/g, '') !== asOf) {
-    gateReasons.push({ code: 'account_snapshot_stale', detail: `快照日期 ${snapshot.as_of} 与目标交易日 ${asOf} 不同（0 天容忍）` });
+  const snapshotIsCurrent = snapshot?.is_current === true;
+  let accountEvaluation: AccountStatusEvaluation | null = null;
+  if (snapshot) {
+    accountEvaluation = evaluateAccountStatus(
+      portfolioDb,
+      {
+        snapshot_id: snapshot.snapshot_id,
+        as_of: snapshot.as_of,
+        is_current: snapshot.is_current,
+        positions: snapshot.positions.map(p => ({ ts_code: p.ts_code, quantity: p.quantity, ref_price_milli: p.ref_price_milli })),
+        totals: { cash_cents: snapshot.totals.cash_cents, securities_mv_cents: snapshot.totals.securities_mv_cents },
+      },
+      accountId,
+      asOf,
+    );
+    for (const reason of accountEvaluation.reasons) gateReasons.push({ code: reason.code, detail: reason.detail });
+  } else {
+    gateReasons.push({ code: 'account_gate_unavailable', detail: '账户库中没有任何快照' });
   }
   const gateSatisfied = gateReasons.length === 0 && summary.status !== 'DATA_INSUFFICIENT';
 
@@ -832,8 +854,16 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       satisfied: gateSatisfied,
       is_current: snapshotIsCurrent,
       account_status: accountStatus,
+      state_basis: accountEvaluation?.state_basis ?? 'none',
+      snapshot_as_of: accountEvaluation?.snapshot_as_of ?? null,
+      reported_events_through: accountEvaluation?.reported_events_through ?? null,
+      last_user_reconciled_at: accountEvaluation?.last_user_reconciled_at ?? null,
+      unreported_trade_risk: accountEvaluation?.unreported_trade_risk ?? true,
       reasons: gateReasons,
-      note: '可执行要求：当前确认快照 + 账本 REAL_ACCOUNT_VERIFIED + 同一交易日 + 无未交收卖出。未满足时每个腿 executable=false。',
+      warnings: accountEvaluation?.warnings ?? [],
+      note: '可执行要求：账本可重建的账户状态（同日快照或基线+增量事件）+ REAL_ACCOUNT_VERIFIED + '
+        + '无未交收卖出 + 覆盖决策日的完整性声明。未满足时每个腿 executable=false；'
+        + 'unreported_trade_risk=true 表示可能存在未录入交易，不能声称与券商实时一致。',
     },
     fact_register: factRegister,
     assumptions: {
