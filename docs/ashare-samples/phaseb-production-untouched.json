@@ -19,7 +19,7 @@
     "ashare_timer_armed": true
   },
   "baseline": {
-    "captured_at": "2026-10-18T00:30:11.480Z",
+    "captured_at": "2026-10-18T01:08:07.057Z",
     "live_db_sha256": "0f071b4f73a8de45dd74ba60a420df75f5b02b7c1f269cd35fcfde3071756d19",
     "container": "67af9eda414d57f7045a6bcd1f6b26de55759d54d0148fff5b0eef77b90eea51|sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|running|healthy|2026-10-17T13:59:25.611496291Z|0",
     "tables": {
@@ -98,7 +98,7 @@
     }
   },
   "observed": {
-    "captured_at": "2026-10-18T00:30:14.239Z",
+    "captured_at": "2026-10-18T01:08:09.693Z",
     "live_dir": "/home/jcshi/.local/share/finance-mcp-ashare",
     "live_db": {
       "path": "/home/jcshi/.local/share/finance-mcp-ashare/ashare.sqlite",
