@@ -101,6 +101,8 @@ export function decisionInputFromArgs(args: Record<string, any>, db: DatabaseSyn
     snapshot: summary,
     as_of_trade_date: asOf,
     market_db: market,
+    // 私有端点传入的只读账户库：证据校验与真实账户门控都依赖它。
+    portfolio_db: db,
     action,
     evidence,
     stock_plan: stockPlan,

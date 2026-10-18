@@ -53,6 +53,92 @@ function tableExists(db: DatabaseSync, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
+/**
+ * 停牌状态是否可证：当日 `suspend_d` 有该标的记录，或当日 `suspend_d` 同步成功
+ * （`sync_log.dataset='suspend_d' AND key=当日 AND status='ok'`）。仅仅"表里没有
+ * 这条记录"不构成停牌可判定——那更可能是这张表根本没同步。
+ */
+export function suspensionSynced(db: DatabaseSync, date: string): boolean {
+  try {
+    if (!tableExists(db, 'sync_log')) return false;
+    return !!db.prepare("SELECT 1 FROM sync_log WHERE dataset = 'suspend_d' AND key = ? AND status = 'ok'").get(date);
+  } catch {
+    return false;
+  }
+}
+
+/** 统一 bar 质量检查的输入。 */
+export interface QuoteIntegrityInput {
+  kind: 'ETF' | 'STOCK';
+  code: string;
+  asOf: string;
+  /** 交易日历给出的该 as_of 预期最近开市日；日历缺失为 null。 */
+  expected: string | null;
+  tradeDate: string;
+  open: unknown;
+  high: unknown;
+  low: unknown;
+  close: unknown;
+  vol?: unknown;
+  amount?: unknown;
+  listStatus: string | null;
+  /** 停牌状态是否可判定（个股需要 suspend_d 同步证明；ETF 无停牌表，按不可取价处理）。 */
+  suspensionKnown: boolean;
+  suspended: boolean;
+}
+
+export interface QuoteIntegrity {
+  /** 任一存在即 quality=NOT_READY、不得给出价格。 */
+  blocking: string[];
+  /** 不阻塞取价，但会阻止 ACTIONABLE 的警告。 */
+  warnings: string[];
+}
+
+const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * 日线完整性/一致性检查（decision 与 scenario 共用，避免两套口径）：
+ * - open/high/low/close 必须齐全、有限且 > 0；缺任一 OHLC → `ohlc_missing`；
+ * - high >= max(open, close)、low <= min(open, close)；
+ * - vol/amount 若存在必须 >= 0；
+ * - 上市状态必须已知且为 L；
+ * - 个股停牌状态必须可证；
+ * - bar 日期必须等于预期最近交易日。
+ */
+export function assessQuoteIntegrity(input: QuoteIntegrityInput): QuoteIntegrity {
+  const blocking: string[] = [];
+  const warnings: string[] = [];
+  const open = num(input.open);
+  const high = num(input.high);
+  const low = num(input.low);
+  const close = num(input.close);
+
+  if (close === null || close <= 0) blocking.push('invalid_close');
+  if (open === null || high === null || low === null) blocking.push('ohlc_missing');
+  else if (open <= 0 || high <= 0 || low <= 0 || high < Math.max(open, close ?? -Infinity) || low > Math.min(open, close ?? Infinity)) {
+    blocking.push('ohlc_inconsistent');
+  }
+  if (input.vol !== undefined && input.vol !== null) {
+    const vol = num(input.vol);
+    if (vol === null || vol < 0) blocking.push('volume_invalid');
+  }
+  if (input.amount !== undefined && input.amount !== null) {
+    const amount = num(input.amount);
+    if (amount === null || amount < 0) blocking.push('amount_invalid');
+  }
+  if (input.listStatus === null || input.listStatus === '') blocking.push('list_status_unknown');
+  else if (input.listStatus !== 'L') blocking.push('list_status_not_tradable');
+
+  if (input.kind === 'STOCK') {
+    if (!input.suspensionKnown) blocking.push('suspension_unknown');
+    else if (input.suspended) blocking.push('suspended_on_as_of');
+  }
+  if (input.expected !== null && input.tradeDate !== input.expected) {
+    blocking.push('bar_not_latest_trade_day');
+  }
+  return { blocking, warnings };
+}
+
 /** 交易日历查询；`trade_cal` 缺失时全部返回 undefined，由调用方降级。 */
 export function tradeCalendar(db: DatabaseSync): QuoteCache {
   const ready = tableExists(db, 'trade_cal');
@@ -104,24 +190,16 @@ export function loadServerQuote(
 
   let bar: any;
   try {
-    bar = db.prepare(`SELECT trade_date, open, high, low, close, pre_close FROM ${table}
+    bar = db.prepare(`SELECT trade_date, open, high, low, close, pre_close, vol, amount FROM ${table}
       WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 1`).get(tsCode, asOf);
   } catch {
     return NOT_READY(tsCode, asOf, `${table}_unreadable`, base);
   }
   if (!bar) return NOT_READY(tsCode, asOf, 'no_bar_on_or_before_as_of', base);
 
-  const reasons: string[] = [];
   const tradeDate = String(bar.trade_date);
-  const close = typeof bar.close === 'number' && Number.isFinite(bar.close) && bar.close > 0 ? bar.close : null;
-  if (close === null) reasons.push('invalid_close');
-  // OHLC 一致性：low ≤ close ≤ high 且都为正；非法价格不得返回 READY。
-  const ohlc = [bar.open, bar.high, bar.low].filter((v: unknown) => typeof v === 'number' && Number.isFinite(v)) as number[];
-  if (ohlc.length === 3 && !(bar.low > 0 && bar.high >= bar.low && bar.open > 0 && close !== null && close >= bar.low && close <= bar.high)) {
-    reasons.push('ohlc_inconsistent');
-  }
 
-  // 上市状态：以 fund_basic / stock_basic 为准，不看调用方。
+  // 上市状态：以 fund_basic / stock_basic 为准，不看调用方；未知即阻塞。
   let listStatus: string | null = null;
   try {
     if (kind === 'ETF') {
@@ -132,20 +210,38 @@ export function loadServerQuote(
   } catch {
     listStatus = null;
   }
-  if (listStatus && listStatus !== 'L') reasons.push(`list_status_${listStatus}`);
 
-  // 停牌：个股查 suspend_d；ETF 以当日无 bar 视为不可取价（fund_daily 无停牌表）。
+  // 停牌：个股必须有当日 suspend_d 同步证明，否则状态未知、阻塞；ETF 不设停牌表，
+  // 当日没有 bar 会由 bar 日期检查阻塞（absence of a bar 才是不可取价）。
   let suspended = false;
   let suspensionKnown = kind === 'ETF';
-  if (kind === 'STOCK' && tableExists(db, 'suspend_d')) {
+  if (kind === 'STOCK') {
     try {
-      suspended = !!db.prepare('SELECT 1 FROM suspend_d WHERE ts_code = ? AND trade_date = ?').get(tsCode, asOf);
-      suspensionKnown = true;
+      const present = tableExists(db, 'suspend_d')
+        && !!db.prepare('SELECT 1 FROM suspend_d WHERE ts_code = ? AND trade_date = ?').get(tsCode, asOf);
+      suspended = !!present;
+      suspensionKnown = present || suspensionSynced(db, asOf);
     } catch {
       suspensionKnown = false;
     }
   }
-  if (suspended) reasons.push('suspended_on_as_of');
+
+  const integrity = assessQuoteIntegrity({
+    kind,
+    code: tsCode,
+    asOf,
+    expected,
+    tradeDate,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    vol: bar.vol,
+    amount: bar.amount,
+    listStatus,
+    suspensionKnown,
+    suspended,
+  });
 
   let adjFactor: number | null = null;
   if (kind === 'ETF' && tableExists(db, 'fund_adj')) {
@@ -153,21 +249,17 @@ export function loadServerQuote(
     adjFactor = typeof row?.adj_factor === 'number' ? row.adj_factor : null;
   }
 
-  // 预期最近交易日与真实 bar 日期必须一致，否则是过期行情。
-  if (expected && tradeDate !== expected) reasons.push(`stale_bar:${tradeDate}!=${expected}`);
-
-  let quality: QuoteQuality;
-  if (close === null || reasons.includes('ohlc_inconsistent')) quality = 'NOT_READY';
-  else if (reasons.length > 0) quality = 'STALE';
-  else quality = 'READY';
+  const blocking = integrity.blocking;
+  const quality: QuoteQuality = blocking.length > 0 ? 'NOT_READY' : integrity.warnings.length > 0 ? 'STALE' : 'READY';
 
   return {
     found: true,
     ts_code: tsCode,
-    price: close,
+    // 阻塞时不给价格：旧收盘不能冒充当前可交易价。
+    price: blocking.length > 0 ? null : num(bar.close),
     trade_date: tradeDate,
     quality,
-    reasons,
+    reasons: [...blocking, ...integrity.warnings],
     source: 'market_cache',
     as_of: asOf,
     expected_trade_date: expected,

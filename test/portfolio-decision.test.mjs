@@ -18,6 +18,8 @@ const { openAshareDb, upsertRows } = await import('../build/ashare/db.js');
 const { weekdays } = await import('./ashare-fixture.mjs');
 const { accountSummary, importSnapshot, readSnapshot, DEMO_SNAPSHOT } = await import('../build/portfolio/account.js');
 const { openPortfolioDb } = await import('../build/portfolio/db.js');
+const ledger = await import('../build/portfolio/ledger.js');
+const evidenceModule = await import('../build/portfolio/evidence.js');
 const { buildDecision, classifyAssetClass, ASSET_CLASS_STRESS_VERSION } = await import('../build/portfolio/decision.js');
 
 const ROOT = process.cwd();
@@ -32,18 +34,18 @@ upsertRows(market, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'],
   DATES.map((d, i) => ({ cal_date: d, is_open: 1, pretrade_date: DATES[i - 1] ?? null })));
 
 const ETF_BASIC = [
-  { ts_code: '159241.SZ', name: '航空航天ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '航空航天指数', status: 'L' },
-  { ts_code: '159278.SZ', name: '机器人ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '机器人指数', status: 'L' },
-  { ts_code: '159558.SZ', name: '半导体设备ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '半导体设备指数', status: 'L' },
-  { ts_code: '516080.SH', name: '创新药ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '创新药指数', status: 'L' },
-  { ts_code: '560390.SH', name: '电网设备ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '电网设备指数', status: 'L' },
+  { ts_code: '159241.SZ', name: '航空航天ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '航空航天指数', status: 'L', market: 'E' },
+  { ts_code: '159278.SZ', name: '机器人ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '机器人指数', status: 'L', market: 'E' },
+  { ts_code: '159558.SZ', name: '半导体设备ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '半导体设备指数', status: 'L', market: 'E' },
+  { ts_code: '516080.SH', name: '创新药ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '创新药指数', status: 'L', market: 'E' },
+  { ts_code: '560390.SH', name: '电网设备ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '电网设备指数', status: 'L', market: 'E' },
   // ETF_UNIVERSE 之外的候选（合成数据）
-  { ts_code: '510300.SH', name: '沪深300ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '沪深300指数', status: 'L' },
-  { ts_code: '511260.SH', name: '十年国债ETF', fund_type: '债券型', invest_type: '被动指数型', benchmark: '中债综合财富(总值)指数', status: 'L' },
-  { ts_code: '518880.SH', name: '黄金ETF', fund_type: '商品型', invest_type: '被动指数型', benchmark: '上海黄金交易所Au99.99', status: 'L' },
-  { ts_code: '513100.SH', name: '纳指ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '纳斯达克100指数', status: 'L' },
+  { ts_code: '510300.SH', name: '沪深300ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '沪深300指数', status: 'L', market: 'E' },
+  { ts_code: '511260.SH', name: '十年国债ETF', fund_type: '债券型', invest_type: '被动指数型', benchmark: '中债综合财富(总值)指数', status: 'L', market: 'E' },
+  { ts_code: '518880.SH', name: '黄金ETF', fund_type: '商品型', invest_type: '被动指数型', benchmark: '上海黄金交易所Au99.99', status: 'L', market: 'E' },
+  { ts_code: '513100.SH', name: '纳指ETF', fund_type: '股票型', invest_type: '被动指数型', benchmark: '纳斯达克100指数', status: 'L', market: 'E' },
 ];
-upsertRows(market, 'fund_basic', ['ts_code', 'name', 'fund_type', 'invest_type', 'benchmark', 'status'], ETF_BASIC);
+upsertRows(market, 'fund_basic', ['ts_code', 'name', 'fund_type', 'invest_type', 'benchmark', 'status', 'market'], ETF_BASIC);
 
 // 收盘价与合成快照的参考价一致，便于逐项核对重估结果。
 const CLOSE = {
@@ -64,6 +66,9 @@ upsertRows(market, 'stock_basic', ['ts_code', 'symbol', 'name', 'list_date', 'li
   [{ ts_code: '600519.SH', symbol: '600519', name: '合成主板股票', list_date: '20010101', list_status: 'L' }]);
 upsertRows(market, 'daily', ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'pre_close', 'vol', 'amount'],
   [{ ts_code: '600519.SH', trade_date: LAST, open: 10, high: 10, low: 10, close: 10, pre_close: 10, vol: 1, amount: 1 }]);
+// R2：个股停牌状态必须可证——每个交易日的 suspend_d 同步都要有成功记录。
+upsertRows(market, 'sync_log', ['dataset', 'key', 'rows', 'status', 'message', 'synced_at'],
+  DATES.map(d => ({ dataset: 'suspend_d', key: d, rows: 0, status: 'ok', message: '', synced_at: `${LAST}T00:00:00Z` })));
 
 // ---------------------------------------------------------------- 合成账户
 
@@ -71,6 +76,8 @@ const portfolio = openPortfolioDb();
 const SYNTH = {
   ...DEMO_SNAPSHOT,
   snapshot_id: 'synthetic-current-2026-10-18',
+  // R2：账户快照日期必须与决策日同一交易日（0 天容忍）。
+  as_of: '2026-10-16',
   source: 'synthetic-test-fixture',
   note: '合成测试账户（不是真实账户）',
   warnings: ['synthetic_fixture'],
@@ -96,6 +103,15 @@ const MIXED = {
 // 对照用快照不是"当前账户"，因此不得清除 SYNTH 的当前标记（账户层只允许一个当前快照）。
 importSnapshot(portfolio, { ...MIXED, is_current: false });
 
+// R2 受控正例的显式测试注入：账本基线 + 用户确认 + 可复核的研究证据。
+ledger.initBaseline(portfolio, 'synthetic-test', { asOf: LAST, snapshotId: SYNTH.snapshot_id, note: 'r2 test fixture' });
+ledger.confirmRealAccount(portfolio, 'synthetic-test', { confirm: true, note: 'r2 test fixture' });
+evidenceModule.recordResearchEvidence(portfolio, {
+  evidence_id: 'EV-SYNTH-001', kind: 'ROTATION', buy_code: '510300.SH', sell_code: '159558.SZ',
+  strategy_id: 'r2-test', as_of: LAST, valid_until: null, status: 'VERIFIED',
+  recorded_by: 'test-fixture', note: '受控测试证据（不是真实研究结论）',
+}, { confirm: true });
+
 const current = accountSummary(readSnapshot(portfolio, SYNTH.snapshot_id));
 const mixed = accountSummary(readSnapshot(portfolio, MIXED.snapshot_id));
 const NAV = current.totals.total_assets_cents;
@@ -106,6 +122,7 @@ const base = (overrides = {}) => ({
   snapshot: current,
   as_of_trade_date: LAST,
   market_db: market,
+  portfolio_db: portfolio,
   ...overrides,
 });
 const sellBuy = (overrides = {}) => buildDecision(base({
@@ -143,13 +160,15 @@ test('1b. 资产类别判定：权益 / 债券 / 黄金 / 跨境 / 未分类', (
 
 // ---------------------------------------------------------------- 2. 未缓存候选
 
-test('2. 候选未缓存 → DATA_INSUFFICIENT / candidate_not_cached，且不伪造价格', () => {
+test('2. 候选未缓存 → DATA_INSUFFICIENT / 身份未知，且不伪造价格', () => {
   const d = buildDecision(base({
     action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '588999.SH', buy_kind: 'ETF' },
     evidence: VERIFIED,
   }));
   assert.equal(d.status, 'DATA_INSUFFICIENT');
-  assert.ok(d.reasons.some(r => r.code === 'candidate_not_cached'), JSON.stringify(d.reasons));
+  // R2：身份以 resolveInstrument 为准；缓存里查不到的代码是 instrument_unknown，
+  // 比旧契约的 candidate_not_cached 更明确（旧行为仍会把未知代码当 ETF 取价）。
+  assert.ok(d.reasons.some(r => ['instrument_unknown', 'candidate_not_cached'].includes(r.code)), JSON.stringify(d.reasons));
   const q = d.quotes.entries.find(x => x.ts_code === '588999.SH');
   assert.equal(q.available, false);
   assert.equal('price_milli' in q, false, '未缓存时不能有任何价格字段');
@@ -264,18 +283,18 @@ test('5. RESEARCH_VERIFIED + evidence_id + 当前账户 + 当日行情 → ACTIO
   assert.equal(stale.options.find(o => o.action === 'SELL_AND_BUY').executable, false);
 });
 
-test('5b. 过期行情 → ILLUSTRATIVE / quote_stale，并保留真实行情日期', () => {
+test('5b. as_of 不在交易日历 → DATA_INSUFFICIENT（R2 统一交易日历）', () => {
   const d = buildDecision(base({
-    as_of_trade_date: '20261019',   // 非交易日，且行情停在 LAST
+    as_of_trade_date: '20261019',   // 不在缓存 trade_cal 中
     action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', buy_kind: 'ETF' },
     evidence: VERIFIED,
   }));
-  const rotate = d.options.find(o => o.action === 'SELL_AND_BUY');
-  assert.equal(rotate.status, 'ILLUSTRATIVE');
-  assert.ok(rotate.reasons.some(r => r.code === 'quote_stale'));
-  assert.equal(rotate.quote_dates['510300.SH'], LAST);
-  assert.ok(d.quotes.stale_codes.includes('510300.SH'));
-  assert.equal(rotate.executable, false);
+  // R2 收紧：旧行为把“日历缺少该日期”降级为 warning 并仍给出 ILLUSTRATIVE；
+  // 新契约要求 as_of 必须是日历中的开市日，否则不做可执行计算。
+  assert.equal(d.status, 'DATA_INSUFFICIENT');
+  assert.ok(d.reasons.some(r => r.code === 'as_of_not_trading_day'), JSON.stringify(d.reasons));
+  assert.equal(d.options.find(o => o.action === 'SELL_AND_BUY').executable, false);
+  assert.equal(d.options.find(o => o.action === 'SELL_AND_BUY').status, 'DATA_INSUFFICIENT');
 });
 
 // ---------------------------------------------------------------- 6. 个股计划风险
@@ -441,7 +460,11 @@ test('9. CLI portfolio-decision 输出 JSON 且只读（exit 0）', () => {
   assert.equal(run.status, 0, run.stderr);
   const out = JSON.parse(run.stdout);
   assert.equal(out.schema, 'ashare-portfolio-decision/1.0');
-  assert.equal(out.status, 'ACTIONABLE');
+  // R2：CLI 已把只读账户库传给 buildDecision，因此证据与真实账户门控都能复核；
+  // 这里的正例仍是显式受控测试注入（临时账户库 + 基线 + confirmRealAccount + 证据）。
+  assert.equal(out.status, 'ACTIONABLE', JSON.stringify(out.reasons));
+  assert.equal(out.options.find(o => o.action === 'SELL_AND_BUY').executable, true);
+  assert.equal(out.account_status.gate, 'VERIFIED');
   assert.equal(out.account_id, 'synthetic-test');
   assert.deepEqual(out.options.map(o => o.action), ['HOLD', 'REDUCE_EQUITY', 'SELL_AND_BUY', 'NO_ACTION']);
   assert.equal(out.quotes.source, 'server_cache');

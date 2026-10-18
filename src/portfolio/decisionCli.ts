@@ -99,6 +99,8 @@ export function runDecisionCommand(h: PortfolioCliHelpers): boolean {
       snapshot: summary,
       as_of_trade_date: asOf,
       market_db: market,
+      // 研究证据与真实账户门控只从独立账户库复核；没有它一律不可执行。
+      portfolio_db: db,
       action,
       evidence,
       stock_plan: stockPlan,

@@ -79,6 +79,10 @@ upsertRows(market, 'daily', ['ts_code', 'trade_date', 'open', 'high', 'low', 'cl
 upsertRows(market, 'suspend_d', ['ts_code', 'trade_date', 'suspend_timing'], [
   { ts_code: '600030.SH', trade_date: LAST, suspend_timing: null },
 ]);
+// R2：个股停牌状态必须可证——LAST 的 suspend_d 已成功同步（否则按 suspension_unknown 阻塞）。
+upsertRows(market, 'sync_log', ['dataset', 'key', 'rows', 'status', 'message', 'synced_at'], [
+  { dataset: 'suspend_d', key: LAST, rows: 1, status: 'ok', message: '', synced_at: `${LAST}T00:00:00Z` },
+]);
 market.close();
 
 // 账户库：演示快照（is_current=false）+ 两个明确标注为合成的"当前"快照。
@@ -267,14 +271,21 @@ test('A4-6. 非交易日 as_of → DATA_INSUFFICIENT 或 NOT_EXECUTABLE', async 
 });
 
 // ---------------------------------------------------------------- 7. 过期 bar
-test('A4-7. 过期 bar（as_of 是交易日但没有当日行情）→ NOT_EXECUTABLE quote_stale', async () => {
+test('A4-7. 过期 bar（as_of 是交易日但没有当日行情）→ NOT_EXECUTABLE quote_missing', async () => {
   const s = await callAsEtf({
     action: 'sell-buy', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH',
     as_of_trade_date: NEXT, ...VERIFIED,
   });
+  // R2 收紧：bar 日期必须等于预期最近交易日；旧行为把旧 bar 标成 STALE 并继续计算，
+  // 新契约下没有当日 bar 就不可取价（ETF 尤其如此），因此是 quote_missing 而不是 quote_stale。
   assert.equal(s.status, 'NOT_EXECUTABLE', JSON.stringify(s.reasons));
-  assert.ok(s.reasons.some(r => r.code === 'quote_stale'), JSON.stringify(s.reasons));
-  assert.deepEqual(s.quotes.stale_codes.sort(), ['159558.SZ', '510300.SH']);
+  assert.ok(s.reasons.some(r => r.code === 'quote_missing'), JSON.stringify(s.reasons));
+  assert.deepEqual(s.quotes.missing_codes.sort(), ['159558.SZ', '510300.SH']);
+  for (const code of ['159558.SZ', '510300.SH']) {
+    const q = s.server_quotes.find(x => x.ts_code === code);
+    assert.equal(q.quality, 'NOT_READY', code);
+    assert.ok(q.reasons.includes('bar_not_latest_trade_day'), JSON.stringify(q.reasons));
+  }
 });
 
 // ---------------------------------------------------------------- 8. 停牌个股
@@ -284,7 +295,11 @@ test('A4-8. 停牌个股 → NOT_EXECUTABLE', async () => {
     as_of_trade_date: LAST, ...VERIFIED,
   });
   assert.equal(s.status, 'NOT_EXECUTABLE', JSON.stringify(s.reasons));
-  assert.ok(s.reasons.some(r => ['instrument_not_tradable', 'quote_stale'].includes(r.code)), JSON.stringify(s.reasons));
+  // 停牌是“行情不可取”而非“旧价可算”：服务器报价明确记录 suspended_on_as_of。
+  const q = s.server_quotes.find(x => x.ts_code === '600030.SH');
+  assert.equal(q.quality, 'NOT_READY');
+  assert.ok(q.reasons.includes('suspended_on_as_of'), JSON.stringify(q.reasons));
+  assert.ok(s.reasons.some(r => ['quote_missing', 'instrument_not_tradable'].includes(r.code)), JSON.stringify(s.reasons));
 });
 
 // ---------------------------------------------------------------- 9. 资金不足

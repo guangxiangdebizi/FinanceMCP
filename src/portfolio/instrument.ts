@@ -42,6 +42,22 @@ export function normalizeInstrumentCode(raw: unknown): string | null {
   return null;
 }
 
+/**
+ * 6 位代码补全交易所后缀。与 `normalizeInstrumentCode` 的区别：本函数容忍裸代码，
+ * 用于把用户/证据里常见的 `560390` 归一成 `560390.SH`。ETF：5→SH、1→SZ；
+ * 个股：6→SH、0/3→SZ、4/8→BJ。
+ */
+export function normalizeSecurityCode(raw: string): string {
+  const text = String(raw ?? '').trim().toUpperCase();
+  if (/^\d{6}\.(SH|SZ|BJ)$/.test(text)) return text;
+  const digits = text.replace(/[^0-9]/g, '');
+  if (digits.length !== 6) return text;
+  if (/^[56]/.test(digits)) return `${digits}.SH`;
+  if (/^[013]/.test(digits)) return `${digits}.SZ`;
+  if (/^[48]/.test(digits)) return `${digits}.BJ`;
+  return digits;
+}
+
 function hasTable(db: DatabaseSync, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
