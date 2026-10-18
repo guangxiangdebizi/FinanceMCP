@@ -727,9 +727,13 @@ export function evaluateAccountStatus(
     gate = evaluated.verified ? 'VERIFIED' : 'PENDING';
     confirmedAt = evaluated.confirmed_at;
     completeness = readAccountCompleteness(portfolioDb, accountId) ?? null;
-    // 缺失声明时按"存在未上报交易风险"处理（保守方向），绝不默认"已完整"。
-    // 声明了 false 但没写 reported_events_through，或账本在声明之后还有事件，
-    // 同样按存在风险处理：声明不能覆盖它没有覆盖到的时点。
+    // 未上报交易风险的判定（保守方向，绝不默认"已完整"）：
+    // 只有"用户显式声明无风险"**且**声明覆盖到决策日（reported_events_through >= asOf）
+    // **且**账本在覆盖区间之后没有事件时，才算没有风险。否则一律视为存在风险。
+    //
+    // 这样跨日估值不需要用户每天重新声明：声明一次"已录入到 2026-10-16"之后，
+    // 2026-10-19 仍然可以重建与估值，只是带着 unreported_trade_risk=true，
+    // 因此不会给出可执行腿（可执行数量是对当前现金/份额的承诺）。
     if (completeness === null) {
       unreportedRisk = true;
     } else if (!completeness.unreported_trade_risk) {
@@ -737,7 +741,7 @@ export function evaluateAccountStatus(
       const lateEvents = through === null ? 0 : (portfolioDb.prepare(
         'SELECT COUNT(*) AS n FROM account_event WHERE account_id = ? AND occurred_on > ? AND occurred_on <= ?',
       ).get(accountId, through, asOf) as any)?.n ?? 0;
-      unreportedRisk = through === null || lateEvents > 0;
+      unreportedRisk = through === null || through < asOf || lateEvents > 0;
     } else {
       unreportedRisk = true;
     }
@@ -817,13 +821,13 @@ export function evaluateAccountStatus(
               detail: `账户 ${accountId} 在 ${asOf} 仍有未交收卖出 ${(pendingSettlement / 100).toFixed(2)} 元，可用现金口径有歧义`,
             });
           }
-          // (f) 完整性披露：必须存在覆盖决策日的声明。
-          if (!completeness || completeness.as_of < asOf) {
+          // (f) 完整性披露：必须存在声明（用户至少要说明"核对到哪个时点"）。
+          //     声明是否覆盖决策日不再硬阻塞：未覆盖时按 unreported_trade_risk=true
+          //     处理，跨日估值仍可进行，只是不给可执行腿。
+          if (!completeness) {
             reasons.push({
               code: 'account_completeness_undeclared',
-              detail: completeness
-                ? `完整性声明只覆盖到 ${completeness.as_of}，早于决策日 ${asOf}`
-                : `账户 ${accountId} 没有完整性声明（用户尚未确认已录入到哪个时点）`,
+              detail: `账户 ${accountId} 没有完整性声明（用户尚未确认已录入到哪个时点）`,
             });
           }
           // A2：同日确认快照存在时，必须与账本重放对账一致。

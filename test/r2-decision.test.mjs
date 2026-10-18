@@ -716,3 +716,34 @@ test.after(() => {
   portfolio.close();
   market.close();
 });
+
+test('R2-A1-5. 跨日估值不需要每天重新声明：声明覆盖到基线即可重建后续交易日', () => {
+  // 账户在 LAST 日确认并声明"已录入到 LAST、无未上报风险"。
+  ledger.initBaseline(portfolio, 'r2-crossday', { asOf: LAST, snapshotId: 'r2-current', note: 'fixture' });
+  ledger.confirmRealAccount(portfolio, 'r2-crossday', { confirm: true, note: 'r2 test fixture' });
+  ledger.setAccountCompleteness(portfolio, 'r2-crossday', {
+    as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'fixture',
+  }, { confirm: true, recordedBy: 'test-fixture' });
+  try {
+    // 声明日当天：无未上报风险。
+    const sameDay = decision.evaluateAccountStatus(portfolio, current, 'r2-crossday', LAST);
+    assert.equal(sameDay.unreported_trade_risk, false, JSON.stringify(sameDay.reasons));
+
+    // 下一个交易日：仍可重建（不需要重新声明），但风险标记为 true —— 因为声明
+    // 只覆盖到 LAST，之后的交易日没有被用户核对过。
+    const nextDay = '20261020'; // 合成日历中的下一个开市日
+    const later = decision.evaluateAccountStatus(portfolio, current, 'r2-crossday', nextDay);
+    assert.equal(later.ok, true, JSON.stringify(later.reasons));
+    assert.equal(later.state_basis, 'ledger_reconstruction');
+    assert.equal(later.unreported_trade_risk, true, '声明未覆盖的日期必须视为存在未上报交易风险');
+    assert.ok(later.warnings.some(w => w.code === 'account_snapshot_stale'), JSON.stringify(later.warnings));
+
+    // 交易类表达因此只能是示意。
+    const d = rotation({ account_id: 'r2-crossday', as_of_trade_date: nextDay });
+    assert.notEqual(d.status, 'ACTIONABLE');
+    assert.equal(rotateOf(d).executable, false);
+  } finally {
+    portfolio.prepare('DELETE FROM account_completeness WHERE account_id = ?').run('r2-crossday');
+    portfolio.prepare('DELETE FROM account_baseline WHERE account_id = ?').run('r2-crossday');
+  }
+});
