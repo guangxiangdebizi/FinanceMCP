@@ -276,8 +276,8 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 
 | 证据 | 结果 |
 |---|---|
-| `npm test` | 175/175 通过，0 失败，0 跳过 |
-| `node --test test/ashare-*.test.mjs` | 146/146 通过（基线 129 + 状态链/观察属性 9 + 共同起点 8） |
+| `npm test` | 214/214 通过，0 失败，0 跳过 |
+| `node --test test/ashare-*.test.mjs` | 168/168 通过（基线 129 + 路径别名 10 + 调度核验 12 + 状态链/观察属性 9 + 共同起点 8） |
 | P0 NULL OHLC 反例 | `test/ashare-ohlc-audit.test.mjs` 9/9 通过（见 §2.1） |
 | P0 真实缓存一致性 | `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json` PASS，3,513 个股票日 0 差异（见 §2.1） |
 | 前瞻快照反例 | `test/ashare-snapshot.test.mjs` 9/9 通过（见 §3.3） |

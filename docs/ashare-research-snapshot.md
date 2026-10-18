@@ -308,7 +308,7 @@ data/snapshot）、`build_sha256`（`build/ashare/*.js` 排序后逐文件 SHA25
 | 非交易日/无股票池 | → `REFUSED` |
 | 内容冲突 | 同日正式股票池变化 → 抛错，原种子不变 |
 
-`node --test test/ashare-*.test.mjs`：146/146 通过（基线 129 + 链/观察 9 + 种子 8；其中基线内
+`node --test test/ashare-*.test.mjs`：168/168 通过（基线 129 + 路径别名 10 + 调度核验 12 + 链/观察 9 + 种子 8；其中基线内
 `test/ashare-snapshot.test.mjs` 仍为 9 项）。
 
 ## 11. 后续接入日频流程（本轮不做）
