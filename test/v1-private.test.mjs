@@ -148,7 +148,9 @@ test('V1-P4 ETF candidate screen keeps the five held ETFs and marks missing data
     assert.notEqual(screen.data_coverage.status, 'READY');
     assert.ok(screen.data_coverage.missing_tables.length > 0);
     assert.ok(screen.candidates.every(c => c.status === 'DEGRADED'), '全部候选应显式 DEGRADED');
-    assert.equal(screen.disclaimer?.includes('不是') || true, true);
+    // The screen must say out loud that it is research, not a buy signal.
+    assert.equal(typeof screen.disclaimer, 'string');
+    assert.match(screen.disclaimer, /不是|研究|候选/);
   } finally { await server.stop(); }
 });
 
