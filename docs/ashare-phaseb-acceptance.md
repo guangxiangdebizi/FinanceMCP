@@ -288,6 +288,7 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | 独立复核三项审查问题 | PASS（NULL OHLC 掩码、未退出区间、`horizon<2`）及执行器整合 PASS（`/tmp/phaseb-fix-verification.txt`） |
 | V1 一致性（`docs/ashare-samples/phaseb-v1-parity.json`） | PASS：9 个日期全部精确匹配，源快照与基线构建哈希不变 |
 | V1 一致性（封版复测，`docs/ashare-samples/phaseb-v1-parity-freeze.json`） | PASS：基线 `fc24fef` 构建 vs 封版构建，9 个日期全市场逐字段精确匹配，0 差异；6 个连续股票池日期输出与持久化状态哈希相同 |
+| V1 一致性（前瞻完整性复测，`docs/ashare-samples/phaseb-v1-parity-forward.json`） | PASS：基线 `fc24fef` 构建 vs `fix/ashare-forward-integrity` 构建 `52a8e472…3b71`，9 个日期全市场逐字段精确匹配，0 差异 |
 | 真实因子证据 | 11/11 通过（见 §3） |
 | 研究接口契约 | `test/ashare-research-interface.test.mjs` 7/7 通过（见 §3.1） |
 | 研究统计核实 | `docs/ashare-samples/phaseb-research-audit.json` 124 项检查 PASS（见 §5.8） |
