@@ -99,7 +99,10 @@ function replayPair(from, to) {
     const ins = state.prepare('INSERT INTO watchlist (trade_date, ts_code, score, rank, industry, status, reason, entered_on) VALUES (?,?,?,?,?,?,?,?)');
     for (const m of formalRows(from)) ins.run(from, m.ts_code, m.score, m.rank, m.industry, m.status, m.reason, m.entered_on);
     const result = updateWatchlist(state, scan);
-    return { scan, result };
+    // updateWatchlist() also wrote its change log; compare it against the formal one.
+    const changes = state.prepare('SELECT ts_code, action, score, rank FROM watchlist_change WHERE trade_date = ? ORDER BY action, ts_code')
+      .all(to).map(r => ({ ...r }));
+    return { scan, result, changes };
   } finally {
     state.close();
   }
@@ -117,21 +120,29 @@ const compare = (expected, actual) => {
   return { ok: !missing.length && !extra.length && !changed.length, missing, extra, changed };
 };
 
+const changeRows = date => readonly.prepare(`SELECT ts_code, action, score, rank FROM watchlist_change
+  WHERE trade_date = ? ORDER BY action, ts_code`).all(date).map(r => ({ ...r }));
+const runMode = date => (readonly.prepare('SELECT run_mode FROM report WHERE trade_date = ? ORDER BY generated_at DESC LIMIT 1').get(date)?.run_mode) ?? null;
+
 for (const [from, to] of pairs) {
   const expected = formalRows(to);
   const expectedDigest = sha(canonical(expected));
-  const entry = { from, to, expected_members: expected.length, expected_digest: expectedDigest };
+  const entry = { from, to, run_mode: runMode(to), expected_members: expected.length, expected_digest: expectedDigest };
   try {
-    const { result } = replayPair(from, to);
+    const { result, changes } = replayPair(from, to);
     const actual = result.members.map(m => ({
       ts_code: m.ts_code, score: m.score, rank: m.rank, industry: m.industry, status: m.status, reason: m.reason, entered_on: m.entered_on,
     })).sort((x, y) => x.ts_code.localeCompare(y.ts_code));
     const diff = compare(expected, actual);
     const actualDigest = sha(canonical(actual.map(m => ({ ts_code: m.ts_code, score: m.score, rank: m.rank, industry: m.industry, status: m.status, reason: m.reason, entered_on: m.entered_on }))));
+    const expectedChanges = changeRows(to);
+    const changesMatch = canonical(expectedChanges) === canonical(changes);
     Object.assign(entry, {
-      reproduced: diff.ok, actual_members: actual.length, actual_digest: actualDigest,
+      reproduced: diff.ok && changesMatch, members_match: diff.ok, changes_match: changesMatch,
+      actual_members: actual.length, actual_digest: actualDigest,
+      changes: expectedChanges.length,
       missing: diff.missing, extra: diff.extra, changed: diff.changed.slice(0, 20),
-      changes: result.changes.length,
+      change_diff: changesMatch ? null : { expected: expectedChanges, actual: changes },
     });
   } catch (error) {
     entry.error = String(error?.message ?? error);
@@ -142,8 +153,22 @@ for (const [from, to] of pairs) {
 const reproduced = out.pairs.filter(p => p.reproduced);
 out.reproduced_pairs = reproduced.map(p => `${p.from}->${p.to}`);
 out.compatible = reproduced.length > 0;
+
+// The team asked for an explicit consecutive-chain result over the four most
+// recent pairs (20261013..20261016), in addition to the full sweep.
+const CONSECUTIVE = ['20261013', '20261014', '20261015', '20261016'];
+out.consecutive_chain = {
+  dates: CONSECUTIVE,
+  run_modes: Object.fromEntries(CONSECUTIVE.map(d => [d, runMode(d)])),
+  pairs: CONSECUTIVE.slice(1).map((to, i) => {
+    const from = CONSECUTIVE[i];
+    const p = out.pairs.find(x => x.from === from && x.to === to);
+    return p ? { from, to, reproduced: p.reproduced, members_match: p.members_match, changes_match: p.changes_match, run_mode: p.run_mode, members: p.actual_members } : { from, to, reproduced: false, error: 'pair_not_run' };
+  }),
+  passed: CONSECUTIVE.slice(1).every((to, i) => out.pairs.find(x => x.from === CONSECUTIVE[i] && x.to === to)?.reproduced === true),
+};
 out.conclusion = reproduced.length
-  ? `存在可复现的相邻交易日：${out.reproduced_pairs.join(', ')}。以正式 V1 股票池为初始状态、用 wl-1.0.0 规则运行可逐字节复现下一交易日的正式 V1 股票池（成员、分数、排名、入池日期），因此共同起点设计与既有正式状态兼容。`
+  ? `存在可复现的相邻交易日：共 ${reproduced.length}/${out.pairs.length} 对。以正式 V1 股票池为初始状态、用 wl-1.0.0 规则运行可逐字节复现下一交易日的正式 V1 股票池（成员集合、分数、排名、入池日期）与 watchlist_change；20261013→20261014→20261015→20261016 连续三对全部通过。20261016 是缓存中唯一 run_mode='live' 的报告，更早日期为 replay 运行，但同样逐字节复现，说明共同起点设计与既有正式状态（包括重放历史）兼容。`
   : '在冻结缓存中找不到可由正式 V1 股票池逐字节复现的相邻交易日；共同起点设计无法用该缓存证明与既有正式状态一致，保留现有研究结果并记录差异，不修改正式股票池。';
 
 // The seed date itself must be the last formal V1 watchlist in the cache.
@@ -172,6 +197,10 @@ pass('source_sha256_unchanged', shaAfter === shaBefore, { before: shaBefore, aft
 pass('source_file_stat_unchanged', statAfter.size === statBefore.size && statAfter.mtimeMs === statBefore.mtimeMs,
   { size: [statBefore.size, statAfter.size], mtime_ms: [statBefore.mtimeMs, statAfter.mtimeMs] });
 
+out.ok = Object.values(out.checks).every(c => c.ok);
+pass('consecutive_chain_20261013_20261016', out.consecutive_chain.passed, out.consecutive_chain);
+pass('all_consecutive_pairs_reproduced', reproduced.length === out.pairs.length && out.pairs.length > 0,
+  { reproduced: reproduced.length, pairs: out.pairs.length });
 out.ok = Object.values(out.checks).every(c => c.ok);
 out.finished_at = new Date().toISOString();
 out.reproduce = `node deploy/ashare/verify-common-start.mjs ${snapshotPath} ${outputPath}`;

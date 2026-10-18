@@ -143,8 +143,12 @@ V1 已积累正式历史状态，而 V2 首次快照若从空池初始化，两�
 **确定性验证**（`deploy/ashare/verify-common-start.mjs`，证据
 `docs/ashare-samples/phaseb-common-start-real-cache.json`）：在冻结缓存上，对每一对相邻且有正式股票池的
 交易日 D → D+1，以正式 `watchlist(D)` 为初始状态、用 `score-1.0.0` 扫描 D+1 并调用未修改的
-`updateWatchlist()`，与正式 `watchlist(D+1)` 逐成员比较（成员集合、`score`、`rank`、`entered_on`）。
-结果 **71/71 对全部逐字节复现**（含 20261015 → 20261016），说明共同起点设计与既有正式状态兼容；
+`updateWatchlist()`，与正式 `watchlist(D+1)` 逐成员比较（成员集合、`score`、`rank`、`entered_on`），
+并比较 `watchlist_change`（`ts_code`、`action`、`score`、`rank`）。冻结缓存中共有 72 个正式股票池日期、
+71 对相邻交易日（20260701 → 20261016），**71/71 对全部逐字节复现**，共比较 326 条变更记录，0 差异；
+其中 20261013 → 20261014 → 20261015 → 20261016 连续三对单独列为 `consecutive_chain` 且全部通过。
+20261016 是缓存中唯一 `run_mode='live'` 的报告，更早日期为 replay 运行（当时的股票池按 `wl-1.0.0`
+从重放状态逐日生成），但同样逐字节复现——说明共同起点设计与既有正式状态（包括重放历史）兼容。
 正式股票池未被修改，源文件 sha256 前后不变。
 
 ## 5. 存储结构
