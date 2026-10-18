@@ -565,8 +565,11 @@ test('10. fund schema is additive and idempotent; sync helpers write only fund_*
     const basic = await syncFundBasic(mem);
     assert.equal(basic.rows, 5);
     const daily = await syncFundDaily(mem, DATES[0], DATES[1]);
-    assert.equal(daily[DATES[0]].write, 'replaced');
-    assert.equal(daily[DATES[1]].rows, 1);
+    // 全市场一日只返回 1 行，远低于 ETF_DAILY_MIN_ROWS：既不能判为完整，也不能写入缓存。
+    assert.equal(daily[DATES[0]].write, 'none');
+    assert.equal(daily[DATES[0]].rows, 0);
+    assert.match(daily[DATES[0]].error, /低于全市场下限/);
+    assert.equal(daily[DATES[1]].rows, 0);
     const adj = await syncFundAdj(mem, DATES[0], DATES[1]);
     assert.equal(adj[SPLIT], 1);
     const share = await syncFundShare(mem, DATES[0], DATES[1]);
@@ -581,6 +584,320 @@ test('10. fund schema is additive and idempotent; sync helpers write only fund_*
     globalThis.fetch = originalFetch;
   }
   assert.ok(ETF_LIQUIDITY_WINDOW === 20);
+});
+
+// ---------------------------------------------------------------- K. daily completeness (A2)
+
+/** 全市场某一交易日的合成回答：n 只代码。 */
+function marketRows(date, n, prefix = '5') {
+  return Array.from({ length: n }, (_, i) => bar(`${prefix}${String(i).padStart(5, '0')}.SH`, date));
+}
+/** 只回答 fund_daily 的离线桩：按 trade_date 返回预设行数。 */
+function dailyFetch(byDate) {
+  return async (_url, init) => {
+    const { api_name, params, fields } = JSON.parse(init.body);
+    const rows = api_name === 'fund_daily' ? (byDate[params.trade_date] ?? []) : [];
+    const cols = fields.split(',');
+    return { ok: true, json: async () => ({ code: 0, data: { fields: cols, items: rows.map(r => cols.map(c => r[c] ?? null)) } }) };
+  };
+}
+const rowsOn = (d, date) => d.prepare('SELECT COUNT(*) n FROM fund_daily WHERE trade_date = ?').get(date).n;
+/** 一个周五 + 其后周一的交易日历；周五已有一整日行情。 */
+function mondayDb(name, { mondayRows = 0 } = {}) {
+  const FRI = '20261009';
+  const MON = '20261012';
+  const d = openAshareDb(join(dir, name));
+  upsertRows(d, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'], [
+    { cal_date: '20261008', is_open: 1, pretrade_date: '20261007' },
+    { cal_date: FRI, is_open: 1, pretrade_date: '20261008' },
+    { cal_date: '20261010', is_open: 0, pretrade_date: FRI },
+    { cal_date: '20261011', is_open: 0, pretrade_date: FRI },
+    { cal_date: MON, is_open: 1, pretrade_date: FRI },
+  ]);
+  upsertRows(d, 'fund_daily', DAILY_COLS, marketRows(FRI, 2000));
+  if (mondayRows) upsertRows(d, 'fund_daily', DAILY_COLS, marketRows(MON, mondayRows));
+  return { db: d, FRI, MON };
+}
+
+test('13. Monday: a 1-row answer after a full Friday is never complete and never replaces', async () => {
+  const fresh = mondayDb('mon-fresh.sqlite');
+  const keep = mondayDb('mon-keep.sqlite', { mondayRows: 2000 });
+  // 自然日前一日是周日（0 行），旧实现因此把 1 行回答当成“有基准且完整”。
+  globalThis.fetch = dailyFetch({ [fresh.MON]: marketRows(fresh.MON, 1) });
+  try {
+    const out = await syncFundDaily(fresh.db, fresh.MON, fresh.MON);
+    assert.notEqual(out[fresh.MON].write, 'replaced', '1 行回答不得替换当日');
+    assert.notEqual(out[fresh.MON].status, 'ok');
+    assert.equal(rowsOn(fresh.db, fresh.MON), 0, '低于绝对下限的回答不写入缓存');
+    assert.equal(rowsOn(fresh.db, fresh.FRI), 2000, '周五快照不受影响');
+
+    // 已有完整周一快照时，残缺回答必须被挡住而不是覆盖。
+    const kept = await syncFundDaily(keep.db, keep.MON, keep.MON, { refresh: true });
+    assert.equal(kept[keep.MON].write, 'none');
+    assert.equal(kept[keep.MON].rows, 2000, '已有快照必须保留');
+    assert.notEqual(kept[keep.MON].status, 'ok');
+    assert.match(kept[keep.MON].error, /明显少于基准/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    fresh.db.close();
+    keep.db.close();
+  }
+});
+
+test('14. post-holiday: the first day back is compared with the last trading day before the gap', async () => {
+  const mem = openAshareDb(join(dir, 'holiday.sqlite'));
+  const BEFORE = '20260930';
+  const BACK = '20261008'; // 国庆长假后第一个交易日，自然日前一日是停市的 20261007
+  upsertRows(mem, 'trade_cal', ['cal_date', 'is_open'], [{ cal_date: BEFORE, is_open: 1 }, { cal_date: BACK, is_open: 1 }]);
+  upsertRows(mem, 'fund_daily', DAILY_COLS, marketRows(BEFORE, 2000));
+  globalThis.fetch = dailyFetch({ [BACK]: marketRows(BACK, 1) });
+  try {
+    const out = await syncFundDaily(mem, BACK, BACK);
+    assert.notEqual(out[BACK].write, 'replaced');
+    assert.notEqual(out[BACK].status, 'ok');
+    assert.equal(rowsOn(mem, BACK), 0);
+    assert.match(out[BACK].error, /明显少于基准/);
+    assert.equal(rowsOn(mem, BEFORE), 2000);
+  } finally {
+    globalThis.fetch = originalFetch;
+    mem.close();
+  }
+});
+
+test('15. recovery: a retry with a full answer replaces the day and returns to ok', async () => {
+  const mem = mondayDb('mon-recovery.sqlite');
+  try {
+    globalThis.fetch = dailyFetch({ [mem.MON]: marketRows(mem.MON, 1) });
+    const bad = await syncFundDaily(mem.db, mem.MON, mem.MON);
+    assert.notEqual(bad[mem.MON].status, 'ok');
+    // 失败当天不会被记为 ok，因此下一次同步会自动重取。
+    globalThis.fetch = dailyFetch({ [mem.MON]: marketRows(mem.MON, 2000) });
+    const good = await syncFundDaily(mem.db, mem.MON, mem.MON);
+    assert.equal(good[mem.MON].write, 'replaced');
+    assert.equal(good[mem.MON].status, 'ok');
+    assert.equal(good[mem.MON].rows, 2000);
+    assert.equal(good[mem.MON].error, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    mem.db.close();
+  }
+});
+
+test('16. absolute floor: a tiny answer is never complete, even with no calendar predecessor', async () => {
+  assert.equal(etf.ETF_DAILY_MIN_ROWS, 500, '全市场一日下限是导出常量');
+  const mem = openAshareDb(join(dir, 'floor.sqlite'));
+  const DAY = '20261012';
+  upsertRows(mem, 'trade_cal', ['cal_date', 'is_open'], [{ cal_date: DAY, is_open: 1 }]); // 日历里没有更早的交易日
+  try {
+    globalThis.fetch = dailyFetch({ [DAY]: marketRows(DAY, 100) });
+    const tiny = await syncFundDaily(mem, DAY, DAY);
+    assert.notEqual(tiny[DAY].write, 'replaced');
+    assert.notEqual(tiny[DAY].status, 'ok');
+    assert.equal(rowsOn(mem, DAY), 0);
+    assert.match(tiny[DAY].error, /低于全市场下限 500/);
+
+    // 行数达标但日历给不出前一交易日：记为 unverifiable，仍然不是 complete。
+    globalThis.fetch = dailyFetch({ [DAY]: marketRows(DAY, 2000) });
+    const full = await syncFundDaily(mem, DAY, DAY, { refresh: true });
+    assert.equal(full[DAY].status, 'unverifiable');
+    assert.equal(full[DAY].write, 'merged');
+    assert.equal(rowsOn(mem, DAY), 2000);
+    assert.match(full[DAY].error, /完整性不可验证/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    mem.close();
+  }
+});
+
+// ---------------------------------------------------------------- L. OHLC validation (A2)
+
+test('17. invalid OHLC/volume bars are never READY and never provide an executable price', () => {
+  const bad = openAshareDb(join(dir, 'bad-bars.sqlite'));
+  const DAYS = ['20261015', '20261016'];
+  upsertRows(bad, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'],
+    DAYS.map((d, i) => ({ cal_date: d, is_open: 1, pretrade_date: DAYS[i - 1] ?? null })));
+  const GOOD = { open: 1, high: 1.02, low: 0.99, close: 1.005, pre_close: 1, vol: 1000, amount: 100 };
+  const CASES = [
+    ['510001.SH', {}, null],
+    ['510002.SH', { close: 0 }, 'nonpositive_close'],
+    ['510003.SH', { close: null }, 'missing_close'],
+    ['510004.SH', { high: 0.9, low: 1.1 }, 'invalid_ohlc'],
+    ['510005.SH', { vol: -1 }, 'negative_volume'],
+    ['510006.SH', { open: 0 }, 'invalid_ohlc'],
+  ];
+  for (const [code, over] of CASES) {
+    upsertRows(bad, 'fund_basic', ['ts_code', 'name', 'market', 'status'], [{ ts_code: code, name: `测试${code}`, market: 'E', status: 'L' }]);
+    upsertRows(bad, 'fund_daily', DAILY_COLS, [
+      bar(code, DAYS[0], { ...GOOD, close: 1.0 }),
+      bar(code, DAYS[1], { ...GOOD, ...over }),
+    ]);
+    upsertRows(bad, 'fund_adj', ['ts_code', 'trade_date', 'adj_factor'], DAYS.map(d => ({ ts_code: code, trade_date: d, adj_factor: 1 })));
+    upsertRows(bad, 'fund_share', ['ts_code', 'trade_date', 'fd_share', 'fund_type', 'market'], [
+      { ts_code: code, trade_date: DAYS[0], fd_share: 1000, fund_type: 'ETF', market: 'SH' },
+      { ts_code: code, trade_date: DAYS[1], fd_share: 1010, fund_type: 'ETF', market: 'SH' },
+    ]);
+  }
+  try {
+    const q = etfQuotes(bad, CASES.map(c => c[0]), { start: DAYS[0], end: DAYS[1] });
+    const byCode = new Map(q.quotes.map(x => [x.ts_code, x]));
+    // 配对正向：合法 K 线 → READY，价格与净申购估计都成立。
+    const ok = byCode.get('510001.SH');
+    assert.equal(ok.quality.status, 'READY', JSON.stringify(ok.quality.reasons));
+    assert.equal(ok.executable_price_cny, 1.005);
+    assert.equal(ok.latest_bar.close_cny, 1.005);
+    assert.equal(ok.latest_bar.valid, true);
+    assert.deepEqual(ok.latest_bar.validation_reasons, []);
+    assert.equal(ok.flow.label, 'net_creation_estimate');
+    assert.equal(ok.flow.amount_cny, Math.round(10 * 1e4 * 1.005 * 100) / 100);
+    for (const [code, , expected] of CASES.slice(1)) {
+      const x = byCode.get(code);
+      assert.equal(x.quality.status, 'NOT_READY', `${code} 非法 K 线不得 READY`);
+      assert.ok(x.quality.reasons.includes(expected), `${code}: ${expected} in ${JSON.stringify(x.quality.reasons)}`);
+      assert.equal(x.latest_bar.valid, false);
+      assert.equal(x.latest_bar.close_cny, null, `${code} 不得给出可执行价格`);
+      assert.equal(x.executable_price_cny, null);
+      assert.equal(x.adjusted.close, null, `${code} 非法 K 线不换算复权价`);
+      assert.equal(x.flow.label, null, `${code} 坏价格不得驱动净申购估计`);
+    }
+  } finally {
+    bad.close();
+  }
+});
+
+test('18. fund_basic permission errors are distinguishable from a plain missing record', async () => {
+  const mem = openAshareDb(join(dir, 'basic-permission.sqlite'));
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ code: 40001, msg: '抱歉，您没有权限访问该接口，请提升积分' }) });
+  try {
+    const r = await syncFundBasic(mem);
+    assert.equal(r.rows, 0);
+    assert.equal(r.permission_denied, true);
+    assert.match(r.error, /权限|积分/);
+    const reasons = etfQuotes(mem, ['516080.SH'], { start: '20261015', end: '20261016' }).quotes[0].quality.reasons;
+    assert.ok(reasons.includes('fund_basic_missing'));
+    assert.ok(reasons.includes('fund_basic_permission'), JSON.stringify(reasons));
+    assert.equal(etfStatus(mem, { date: '20261016' }).fund_basic.permission_denied, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    mem.close();
+  }
+
+  // 普通失败只报缺失，不冒充权限问题。
+  const other = openAshareDb(join(dir, 'basic-other-error.sqlite'));
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ code: 40002, msg: '系统繁忙，请稍后重试' }) });
+  try {
+    const r = await syncFundBasic(other);
+    assert.equal(r.permission_denied, undefined);
+    const reasons = etfQuotes(other, ['516080.SH'], { start: '20261015', end: '20261016' }).quotes[0].quality.reasons;
+    assert.ok(reasons.includes('fund_basic_missing'));
+    assert.equal(reasons.includes('fund_basic_permission'), false);
+    assert.equal(etfStatus(other, { date: '20261016' }).fund_basic.permission_denied, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    other.close();
+  }
+});
+
+// ---------------------------------------------------------------- M. corporate actions (A3)
+
+test('19. a 1→3 split inside the share window suppresses the estimate as corporate_action_ambiguous', () => {
+  upsertRows(realDb, 'fund_share', ['ts_code', 'trade_date', 'fd_share', 'fund_type', 'market'], [
+    { ts_code: REAL, trade_date: '20260708', fd_share: 100000, fund_type: 'ETF', market: 'SZ' },
+    { ts_code: REAL, trade_date: '20260709', fd_share: 300000, fund_type: 'ETF', market: 'SZ' },
+  ]);
+  const x = etfQuotes(realDb, [REAL], { start: '20260708', end: '20260709' }).quotes[0];
+  // 原始份额变化如实返回（事实），但不得据此报出巨量“净申购”。
+  assert.equal(x.share.share_change_wan, 200000);
+  assert.equal(x.flow.label, null);
+  assert.equal(x.flow.reason, 'corporate_action_ambiguous');
+  assert.equal(x.flow.amount_cny, null);
+  assert.equal(x.flow.adjustment_kind, 'factor_change_unclassified', '因子变化只记为未分类，不断言拆分');
+  assert.deepEqual(x.flow.adjustment_event, {
+    from_date: '20260708', to_date: '20260709', from_factor: 1, to_factor: 3, factor_ratio: 3,
+    adjustment_kind: 'factor_change_unclassified',
+  });
+  assert.equal(JSON.stringify(x.flow).includes('net_inflow'), false);
+});
+
+test('20. an unchanged factor (dividend-only) still yields an estimate; 159241 1015→1016 gives 0', () => {
+  const flowDb = openAshareDb(join(dir, 'flow-basic.sqlite'));
+  const DAYS = ['20261015', '20261016'];
+  upsertRows(flowDb, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'],
+    DAYS.map((d, i) => ({ cal_date: d, is_open: 1, pretrade_date: DAYS[i - 1] ?? null })));
+  const SPEC = [
+    ['159241.SZ', 1.005, 123207.4265, 123207.4265],
+    ['510001.SH', 1.005, 1000, 1100],
+  ];
+  for (const [code, close, s0, s1] of SPEC) {
+    const market = code.endsWith('.SH') ? 'SH' : 'SZ';
+    upsertRows(flowDb, 'fund_basic', ['ts_code', 'name', 'market', 'status'], [{ ts_code: code, name: `测试${code}`, market: 'E', status: 'L' }]);
+    upsertRows(flowDb, 'fund_daily', DAILY_COLS, DAYS.map(d => bar(code, d, { open: close, high: close, low: close, close, pre_close: close })));
+    upsertRows(flowDb, 'fund_adj', ['ts_code', 'trade_date', 'adj_factor'], DAYS.map(d => ({ ts_code: code, trade_date: d, adj_factor: 1 })));
+    upsertRows(flowDb, 'fund_share', ['ts_code', 'trade_date', 'fd_share', 'fund_type', 'market'], [
+      { ts_code: code, trade_date: DAYS[0], fd_share: s0, fund_type: 'ETF', market },
+      { ts_code: code, trade_date: DAYS[1], fd_share: s1, fund_type: 'ETF', market },
+    ]);
+  }
+  try {
+    const [unchanged, dividend] = etfQuotes(flowDb, SPEC.map(s => s[0]), { start: DAYS[0], end: DAYS[1] }).quotes;
+    assert.equal(unchanged.flow.label, 'net_creation_estimate');
+    assert.equal(unchanged.flow.amount_cny, 0, '份额不变 → 估计为 0');
+    assert.equal(unchanged.flow.share_change_wan, 0);
+    assert.equal(unchanged.flow.adjustment_kind, null);
+    assert.equal(unchanged.flow.nav_proxy_date, '20261016');
+    assert.equal(unchanged.quality.status, 'READY');
+    assert.equal(dividend.flow.label, 'net_creation_estimate');
+    assert.equal(dividend.flow.amount_cny, Math.round(100 * 1e4 * 1.005 * 100) / 100);
+    assert.equal(dividend.quality.status, 'READY');
+  } finally {
+    flowDb.close();
+  }
+});
+
+test('21. reversed / over-long share periods, bad units and unverified adjustments are rejected', () => {
+  const at = { nav_proxy: 1, nav_proxy_date: '20260709', adjustment_checked: true, share_dates_are_trading_days: true, latest_bar_date: '20260709' };
+  const pt = d => ({ trade_date: d, fd_share_wan: 1000 });
+  assert.equal(classifyFlow({ ...at, latest: pt('20260709'), previous: pt('20260710') }).reason, 'share_dates_not_comparable', '日期倒序');
+  assert.equal(classifyFlow({ ...at, latest: pt('20260709'), previous: pt('20260709') }).reason, 'share_dates_not_comparable', '同一日期不是两个可比时点');
+  assert.match(classifyFlow({ ...at, latest: pt('20260709'), previous: pt('20260501') }).reason, /^share_date_gap_\d+d_exceeds_45d$/, '两期不等长（超过容差）');
+  assert.equal(classifyFlow({ ...at, latest: { trade_date: '20260709', fd_share_wan: 0 }, previous: pt('20260708') }).reason, 'share_units_invalid');
+  assert.equal(classifyFlow({ ...at, latest: pt('20260709'), previous: { trade_date: '20260708', fd_share_wan: -5 } }).reason, 'share_units_invalid');
+  assert.equal(classifyFlow({ ...at, latest: { trade_date: '20260709', fd_share_wan: Number.NaN }, previous: pt('20260708') }).reason, 'share_missing');
+  assert.equal(classifyFlow({ ...at, share_dates_are_trading_days: false, latest: pt('20260709'), previous: pt('20260708') }).reason, 'share_date_not_trading_day');
+  assert.equal(classifyFlow({ ...at, adjustment_checked: false, latest: pt('20260709'), previous: pt('20260708') }).reason, 'corporate_action_unverified');
+  assert.equal(classifyFlow({ ...at, nav_proxy_date: '20260708', latest: pt('20260709'), previous: pt('20260708') }).reason, 'nav_proxy_date_mismatch');
+  assert.equal(classifyFlow({ ...at, nav_proxy_date: null, latest: pt('20260709'), previous: pt('20260708') }).reason, 'nav_proxy_date_mismatch');
+  // 配对正向：同日价格代理 + 因子未变 + 份额为正 → 估计成立。
+  const ok = classifyFlow({ ...at, latest: { trade_date: '20260709', fd_share_wan: 1100 }, previous: pt('20260708') });
+  assert.equal(ok.label, 'net_creation_estimate');
+  assert.equal(ok.amount_cny, 100 * 1e4 * 1);
+});
+
+test('22. a share date without its own bar, or far behind the latest bar, produces no estimate', () => {
+  const mem = openAshareDb(join(dir, 'flow-stale.sqlite'));
+  const DAYS = ['20260601', '20260602', '20261015', '20261016'];
+  upsertRows(mem, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'],
+    DAYS.map((d, i) => ({ cal_date: d, is_open: 1, pretrade_date: DAYS[i - 1] ?? null })));
+  const seed = (code, barDays, shareDays) => {
+    upsertRows(mem, 'fund_basic', ['ts_code', 'name', 'market', 'status'], [{ ts_code: code, name: `测试${code}`, market: 'E', status: 'L' }]);
+    upsertRows(mem, 'fund_daily', DAILY_COLS, barDays.map(d => bar(code, d, { open: 1, high: 1, low: 1, close: 1, pre_close: 1 })));
+    upsertRows(mem, 'fund_adj', ['ts_code', 'trade_date', 'adj_factor'], barDays.map(d => ({ ts_code: code, trade_date: d, adj_factor: 1 })));
+    upsertRows(mem, 'fund_share', ['ts_code', 'trade_date', 'fd_share', 'fund_type', 'market'],
+      shareDays.map((d, i) => ({ ts_code: code, trade_date: d, fd_share: 1000 + i * 10, fund_type: 'ETF', market: 'SH' })));
+  };
+  // 份额停在 6 月，行情已到 10 月：份额明显滞后，不能输出“当期净申购”。
+  seed('510011.SH', DAYS, ['20260601', '20260602']);
+  // 份额日 20261016 当天没有行情：价格代理日期不匹配。
+  seed('510012.SH', ['20260601', '20261015'], ['20261015', '20261016']);
+  try {
+    const [stale, noBar] = etfQuotes(mem, ['510011.SH', '510012.SH'], { start: '20260601', end: '20261016' }).quotes;
+    assert.equal(stale.flow.label, null);
+    assert.equal(stale.flow.reason, 'share_stale_for_period');
+    assert.match(stale.flow.detail, /超过 45 日容差/);
+    assert.equal(noBar.flow.label, null);
+    assert.equal(noBar.flow.reason, 'nav_proxy_date_mismatch');
+  } finally {
+    mem.close();
+  }
 });
 
 process.on('beforeExit', () => {
