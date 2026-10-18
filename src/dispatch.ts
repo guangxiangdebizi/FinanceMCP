@@ -20,7 +20,7 @@ import { futuresData } from './tools/futuresData.js';
 import { routeToolCall } from './utils/dataSourceRouter.js';
 import { isToolSourceAvailable, ToolSource } from './toolAvailability.js';
 import { getConfiguredCredentialSources, getSourcePriority } from './config.js';
-import { ashareToolDefinitions, ASHARE_TOOL_NAMES } from './ashare/definitions.js';
+import { ashareToolDefinitions, ASHARE_TOOL_NAMES, PORTFOLIO_TOOL_NAMES, portfolioToolDefinitions } from './ashare/definitions.js';
 import { isToolExposed } from './toolProfile.js';
 
 export const toolList = [
@@ -105,7 +105,7 @@ function contextualizeTool(tool: (typeof toolList)[number]) {
 }
 
 export function isToolAvailable(name: string): boolean {
-  if (ASHARE_TOOL_NAMES.has(name)) return isToolExposed(name);
+  if (PORTFOLIO_TOOL_NAMES.has(name) || ASHARE_TOOL_NAMES.has(name)) return isToolExposed(name);
   return toolList.some(tool => tool.name === name)
     && isToolExposed(name)
     && isToolSourceAvailable(toolSources(name));
@@ -114,19 +114,25 @@ export function isToolAvailable(name: string): boolean {
 export function getAvailableToolList() {
   // A-share tools read the local cache only, so request credentials do not scope them.
   const ashareTools = ashareToolDefinitions.filter(tool => isToolExposed(tool.name));
+  // Private account tools are advertised only under the explicit ASHARE_PORTFOLIO_ENABLED gate.
+  const portfolioTools = portfolioToolDefinitions.filter(tool => isToolExposed(tool.name));
   return [
     ...toolList
       .filter(tool => isToolExposed(tool.name) && isToolSourceAvailable(toolSources(tool.name)))
       .map(contextualizeTool),
     ...ashareTools,
+    ...portfolioTools,
   ];
 }
 
 export function assertToolAvailable(name: string): void {
-  if (!toolList.some(tool => tool.name === name) && !ASHARE_TOOL_NAMES.has(name)) {
+  if (!toolList.some(tool => tool.name === name) && !ASHARE_TOOL_NAMES.has(name) && !PORTFOLIO_TOOL_NAMES.has(name)) {
     throw new Error(`Unknown tool: ${name}`);
   }
   if (!isToolAvailable(name)) {
+    if (PORTFOLIO_TOOL_NAMES.has(name)) {
+      throw new Error(`Tool ${name} is a private account tool and is disabled; set ASHARE_PORTFOLIO_ENABLED=1 to enable it`);
+    }
     throw new Error(`Tool ${name} is not available for the configured API credentials or tool profile`);
   }
 }
@@ -266,6 +272,11 @@ async function dispatchNativeTool(name: string, args: Record<string, any>): Prom
 
 export async function dispatchTool(name: string, args: Record<string, any>): Promise<any> {
   assertToolAvailable(name);
+  if (PORTFOLIO_TOOL_NAMES.has(name)) {
+    // Private account tools read the separate portfolio database only.
+    const { runPortfolioTool } = await import('./portfolio/tools.js');
+    return runPortfolioTool(name, args);
+  }
   if (ASHARE_TOOL_NAMES.has(name)) {
     // Local analysis tools never enter the external data-source fallback router.
     const { runAshareTool } = await import('./ashare/tools.js');

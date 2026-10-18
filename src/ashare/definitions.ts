@@ -152,8 +152,6 @@ ashareToolDefinitions.push(
   },
 );
 
-export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name));
-
 // ETF 数据纵切（R0）。与既有工具并列新增，不改变原有 10 个工具的名称与描述。
 ashareToolDefinitions.push(
   {
@@ -180,4 +178,59 @@ ashareToolDefinitions.push(
     annotations: READ_ONLY,
   },
 );
+
+export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name));
+
+/**
+ * 私有账户工具（可选）。这些工具读取独立账户库 `portfolio.sqlite`，默认不暴露：
+ * 只有在 `ASHARE_PORTFOLIO_ENABLED=1` 时它们才进入 tools/list 并可被调用，避免
+ * 公网 `ashare_daily` profile 泄露账户数量、成本与持仓。与市场工具同属 A 股模块，
+ * 但单独成集，互不影响。定义本身不含运行时依赖，便于在没有 node:sqlite 的
+ * Node 版本上也能安全地做 tools/list。
+ */
+const PORTFOLIO_NOTE = '演示/只读账户：数据来自 PRD §3 截图基线，写入独立的 portfolio.sqlite，与公开市场端点隔离；费用、交易单位与压力参数均为假设值，不是券商事实；不下单、不访问券商。';
+
+export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY }[] = [
+  {
+    name: 'ashare_portfolio_summary',
+    description: `只读账户快照汇总：五只 ETF 的数量、参考价/成本、市值、权重、现金、理财、总资产、赫芬达尔集中度、主题暴露与对账结果。${PORTFOLIO_NOTE} 历史净值与历史最大回撤未知，显式返回 available=false。需要 ASHARE_PORTFOLIO_ENABLED=1。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        snapshot_id: { type: 'string', description: '账户快照 ID；缺省为最新快照（R0 只有 demo-2026-10-18）' },
+        include_checks: { type: 'boolean', description: '是否附带逐项对账明细，默认 true' },
+      },
+    },
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'ashare_portfolio_scenario',
+    description: `只读静态换仓情景（确定性）：给定行情与规则，计算卖出回笼、费用分解、可买整手数量、剩余现金、交易前后权重/现金比例/HHI/主题暴露与声明式压力损失，并输出 HOLD/ROTATE/REDUCE_EQUITY 对照。行情缺失、过期、停牌、非上市、整手不符、持仓不足、资金不足一手或候选无相对优势时返回 NOT_EXECUTABLE/NO_ACTION 并说明原因；不计算胜率。${PORTFOLIO_NOTE} 需要 ASHARE_PORTFOLIO_ENABLED=1。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['hold', 'sell-buy'], description: 'hold（不操作）或 sell-buy（卖出并买入）' },
+        sell_code: { type: 'string', description: '卖出代码，如 159558.SZ' },
+        sell_shares: { type: 'number', description: '卖出份数，必须为 100 的正整数倍' },
+        buy_code: { type: 'string', description: '买入代码，如 510300.SH' },
+        as_of_trade_date: { type: 'string', description: '行情交易日 YYYYMMDD；缺省为快照 as_of' },
+        sell_price: { type: 'number', description: '卖出价，元/份' },
+        buy_price: { type: 'number', description: '买入价，元/份' },
+        quote_date: { type: 'string', description: '报价日期 YYYYMMDD；与行情交易日不同则标记为过期且不可执行' },
+        buy_kind: { type: 'string', enum: ['etf', 'stock'], description: '买入品种，默认 etf' },
+        buy_board: { type: 'string', description: '买入板块（688/300/8/4/main），用于 PRD §4 权限检查' },
+        advantage: { type: 'boolean', description: '是否已证明候选相对优势；为 false 或缺省时返回 NO_ACTION' },
+        advantage_basis: { type: 'string', description: '相对优势依据（原样透传到结果）' },
+        sell_list_status: { type: 'string', description: '卖出标的上游上市状态 L/D/P，缺省 L' },
+        buy_list_status: { type: 'string', description: '买入标的上游上市状态 L/D/P，缺省 L' },
+        sell_suspended: { type: 'boolean', description: '卖出标的当日是否停牌' },
+        buy_suspended: { type: 'boolean', description: '买入标的当日是否停牌' },
+      },
+      required: ['action'],
+    },
+    annotations: READ_ONLY,
+  },
+];
+
+export const PORTFOLIO_TOOL_NAMES = new Set(portfolioToolDefinitions.map(t => t.name));
 

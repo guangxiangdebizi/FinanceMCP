@@ -24,7 +24,13 @@ const USAGE = `用法: finance-ashare <command> [options]
   research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
                                                                  用已保存的快照评价持有期收益；未到期保持 PENDING
   research-seed --date YYYYMMDD [--db PATH]                      以该日正式 V1 股票池写入一次性 V1/V2 共同起点（只读正式库）
-  migrate                                                        将旧版缓存主键布局迁移为按股票连续存储`;
+  migrate                                                        将旧版缓存主键布局迁移为按股票连续存储
+
+  账户子命令（独立 portfolio.sqlite，只读演示账户，默认不在 MCP 暴露）：
+  portfolio-import                                               导入 PRD §3 基线快照（幂等）
+  portfolio-summary [--snapshot ID]                              账户汇总：市值/权重/集中度/主题暴露/对账
+  portfolio-scenario --action hold|sell-buy [--sell CODE --buy CODE --shares N ...]
+                                                                 静态换仓情景（确定性，不下单）`;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,6 +55,16 @@ async function main() {
   if (command === 'research-snapshot' || command === 'research-evaluate' || command === 'research-seed') {
     const { runCommand } = await import('./commands.js');
     if (!(await runCommand(undefined as any, command, { arg, flag, ymd, print }))) process.exitCode = 2;
+    return;
+  }
+  // Account commands only touch the separate portfolio database. They must not
+  // open (or create) the market cache, so they are handled before openAshareDb.
+  if (command?.startsWith('portfolio-')) {
+    const { runPortfolioCommand } = await import('../portfolio/cli.js');
+    if (!runPortfolioCommand(command, { arg, flag, ymd, print })) {
+      process.stderr.write(USAGE + '\n');
+      process.exitCode = 2;
+    }
     return;
   }
   const db = openAshareDb();
