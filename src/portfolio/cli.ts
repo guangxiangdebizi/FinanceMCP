@@ -13,6 +13,8 @@ import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quote
 import { buildScenario, type EtfQuoteInput, type ScenarioAction } from './scenario.js';
 import { DEFAULT_FEE_RULES, DEFAULT_STRESS_RULES } from './rules.js';
 import { runDecisionCommand } from './decisionCli.js';
+import { runResearchSummaryCommand } from './researchCli.js';
+import { EVIDENCE_STATUSES, ensureEvidenceSchema, recordResearchEvidence, type EvidenceStatus } from './evidence.js';
 
 /**
  * 账户子命令。输出到 stdout 的永远是 JSON（与 ashare CLI 一致），进度与错误走 stderr。
@@ -66,6 +68,12 @@ export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [opti
                                                        单位净值序列与基线之后的最大回撤
   portfolio-ledger-validate --account ID [--db PATH]   账本不变量检查（现金/数量/撤销/拆分）
   portfolio-ledger-confirm-real --account ID --confirm 用户显式确认为真实账户（无 --confirm 直接拒绝）
+
+  研究证据（唯一写路径；不通过 MCP 暴露）：
+  portfolio-evidence-record --id ID --kind ROTATION --buy CODE [--sell CODE]
+        --strategy ID --as-of YYYYMMDD [--valid-until YYYYMMDD]
+        --status PENDING|VERIFIED|REVOKED --recorded-by WHO [--note TEXT] --confirm [--dry-run] [--db PATH]
+                                                       写入一条可复核的研究证据记录；无 --confirm 直接拒绝
 `;
 
 /** 严格整数参数：拒绝小数、空串与超出安全整数范围的输入。 */
@@ -241,6 +249,39 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
     case 'portfolio-decision':
       // 条件化配置比较：候选行情只从只读市场缓存读取（见 decisionCli.ts）。
       return runDecisionCommand(h);
+    case 'portfolio-research-summary':
+      // 研究模式晚间摘要：只读账户库与市场缓存，输出永远不是 ACTIONABLE。
+      return runResearchSummaryCommand(h);
+    case 'portfolio-evidence-record': {
+      const input = {
+        evidence_id: requireArg(h, 'id'),
+        kind: h.arg('kind') ?? 'ROTATION',
+        buy_code: requireArg(h, 'buy'),
+        sell_code: h.arg('sell')?.trim() || null,
+        strategy_id: requireArg(h, 'strategy'),
+        as_of: h.ymd(requireArg(h, 'as-of'), '--as-of'),
+        valid_until: h.arg('valid-until') ? h.ymd(h.arg('valid-until'), '--valid-until') : null,
+        status: (h.arg('status') ?? 'PENDING').toUpperCase() as EvidenceStatus,
+        recorded_by: requireArg(h, 'recorded-by'),
+      };
+      if (!EVIDENCE_STATUSES.includes(input.status)) {
+        throw new Error(`--status 需要 ${EVIDENCE_STATUSES.join(' / ')}`);
+      }
+      if (!h.flag('confirm') || h.flag('dry-run')) {
+        // dry-run 只打印将要写入的内容，不建表、不写库；confirm 是唯一的写入门。
+        h.print({ dry_run: true, would_record: input, note: '未加 --confirm：不写入。确认后由用户本人重新执行并加 --confirm。' });
+        return true;
+      }
+      const db = openPortfolioDb(h.arg('db'));
+      try {
+        ensureEvidenceSchema(db);
+        const result = recordResearchEvidence(db, input, { confirm: true });
+        h.print({ ...result, db: portfolioDbPath(), note: '研究证据不代表收益保证；只有状态 VERIFIED 且代码/日期匹配时才可能支持条件化预案。' });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
     case 'portfolio-ledger-init': {
       const accountId = requireArg(h, 'account');
       const asOf = h.ymd(requireArg(h, 'as-of'), '--as-of');
