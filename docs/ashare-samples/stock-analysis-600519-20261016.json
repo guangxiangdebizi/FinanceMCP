@@ -1,0 +1,219 @@
+{
+  "ts_code": "600519.SH",
+  "name": "贵州茅台",
+  "industry": "白酒",
+  "as_of_trade_date": "20261016",
+  "indicator_version": "ind-1.0.0",
+  "adjust": "前复权（以 as-of 日为基准），价格类指标已换算回当日未复权价位",
+  "last_bar": "20261016",
+  "stale": false,
+  "state": {
+    "trend": "range",
+    "above_ma20": true,
+    "above_ma60": true,
+    "ret5": 0.0523,
+    "ret20": 0.0341,
+    "ret60": 0.0556,
+    "rsi14": 65.4223,
+    "atr_pct": 0.0168,
+    "vol_ratio": 1.3348
+  },
+  "latest": {
+    "close": 1329,
+    "ma5": 1298.172,
+    "ma10": 1274.773,
+    "ma20": 1267.5155,
+    "ma60": 1296.9087,
+    "ma120": 1281.3238,
+    "dif": 3.4366,
+    "dea": -5.6603,
+    "macd_hist": 18.1938,
+    "rsi6": 80.7761,
+    "rsi14": 65.4223,
+    "cci14": 191.1601,
+    "boll_up": 1313.2955,
+    "boll_mid": 1267.5155,
+    "boll_low": 1221.7355,
+    "atr14": 22.2677,
+    "vol_ratio_20": 1.3348,
+    "amount20_yi": 36.5958
+  },
+  "last_10_days": {
+    "dates": [
+      "20260928",
+      "20260929",
+      "20260930",
+      "20261008",
+      "20261009",
+      "20261012",
+      "20261013",
+      "20261014",
+      "20261015",
+      "20261016"
+    ],
+    "close_raw": [
+      1243.88,
+      1235.58,
+      1258.62,
+      1255.79,
+      1263,
+      1288,
+      1274.89,
+      1286,
+      1312.97,
+      1329
+    ],
+    "rsi14": [
+      36.649,
+      34.309,
+      44.84,
+      43.909,
+      46.932,
+      55.824,
+      50.998,
+      54.581,
+      61.87,
+      65.422
+    ],
+    "dif": [
+      -15.038,
+      -15.932,
+      -14.613,
+      -13.638,
+      -12.144,
+      -8.841,
+      -7.198,
+      -4.942,
+      -0.967,
+      3.437
+    ],
+    "dea": [
+      -10.733,
+      -11.773,
+      -12.341,
+      -12.6,
+      -12.509,
+      -11.775,
+      -10.86,
+      -9.676,
+      -7.935,
+      -5.66
+    ],
+    "cci14": [
+      -121.341,
+      -123.533,
+      -33.76,
+      -38.107,
+      70.693,
+      156.623,
+      141.921,
+      132.134,
+      199.888,
+      191.16
+    ]
+  },
+  "recent_signals": [
+    {
+      "trade_date": "20260911",
+      "id": "trend_breakdown",
+      "name": "跌破中期均线"
+    },
+    {
+      "trade_date": "20261009",
+      "id": "macd_golden_cross",
+      "name": "MACD金叉"
+    },
+    {
+      "trade_date": "20261015",
+      "id": "breakout_20d",
+      "name": "20日放量突破"
+    },
+    {
+      "trade_date": "20261015",
+      "id": "boll_squeeze_breakout",
+      "name": "布林收口突破"
+    }
+  ],
+  "signal_details": [
+    {
+      "id": "trend_breakdown",
+      "name": "跌破中期均线",
+      "trigger": "收盘价由 MA60 上方跌破 MA60，且当日成交量 ≥ 20 日均量",
+      "invalidation": "收盘价重新站上 MA60",
+      "risk": "风险提示信号，不构成做空建议",
+      "evidence": "evidence_supported",
+      "evidence_basis": "10日超额 -0.5859%，t=-4.9，事件 27833 个/529 天（20240102~20261016）"
+    },
+    {
+      "id": "macd_golden_cross",
+      "name": "MACD金叉",
+      "trigger": "DIF 上穿 DEA（前一日 DIF ≤ DEA，当日 DIF > DEA）",
+      "invalidation": "DIF 重新下穿 DEA",
+      "risk": "震荡区间内金叉/死叉反复，信号滞后",
+      "evidence": "contradicted",
+      "evidence_basis": "10日超额 -0.4054%，t=-4.12，事件 85122 个/532 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    },
+    {
+      "id": "breakout_20d",
+      "name": "20日放量突破",
+      "trigger": "收盘价突破此前 20 个交易日最高价，且当日成交量 ≥ 20 日均量 1.5 倍",
+      "invalidation": "收盘价回落至突破前 20 日最高价下方 3% 以上",
+      "risk": "假突破；涨停封板次日无法按开盘价成交",
+      "evidence": "contradicted",
+      "evidence_basis": "10日超额 -1.3189%，t=-9.27，事件 82243 个/533 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    },
+    {
+      "id": "boll_squeeze_breakout",
+      "name": "布林收口突破",
+      "trigger": "布林带宽处于近 120 日最低 20% 分位后，收盘价上穿上轨",
+      "invalidation": "收盘价跌回布林中轨下方",
+      "risk": "收口方向判断错误时回撤较快",
+      "evidence": "contradicted",
+      "evidence_basis": "10日超额 -0.9968%，t=-5.5，事件 36063 个/525 天（20240102~20261016）；在 downtrend,range,uptrend 状态下方向相反"
+    }
+  ],
+  "fundamentals": {
+    "ts_code": "600519.SH",
+    "end_date": "20260630",
+    "ann_date": "20260815",
+    "roe": 17.9543,
+    "roe_dt": 17.933,
+    "netprofit_yoy": -1.9516,
+    "dt_netprofit_yoy": -2.04,
+    "or_yoy": 1.4699,
+    "grossprofit_margin": 89.5552,
+    "debt_to_assets": 15.1931,
+    "ocf_to_profit": 115.1103,
+    "ocfps": 56.5489,
+    "eps": 35.57,
+    "note": "按公告日约束：仅使用 as-of 日之前已公告的财报"
+  },
+  "fundamental_risks": [],
+  "valuation": {
+    "trade_date": "20261016",
+    "pe_ttm": 20.4013,
+    "pb": 6.6123,
+    "ps_ttm": 9.764,
+    "dv_ttm": 3.9145,
+    "total_mv_yi": 16613.5845,
+    "turnover_rate": 0.308
+  },
+  "score": {
+    "trade_date": "20261016",
+    "score": 84.22,
+    "rank": 5,
+    "components": {
+      "technical": 0.844,
+      "liquidity": 0.977,
+      "fundamental": 0.817,
+      "valuation": 0.6,
+      "sector": 0.951
+    }
+  },
+  "watchlist": {
+    "trade_date": "20261016",
+    "status": "kept",
+    "entered_on": "20261015",
+    "reason": "排名 5，仍在保留阈值内"
+  }
+}

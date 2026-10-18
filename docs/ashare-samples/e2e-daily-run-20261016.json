@@ -1,0 +1,47 @@
+{
+  "sync": {
+    "start": "20261012",
+    "end": "20261016",
+    "trade_days": 5,
+    "quality": [
+      {
+        "trade_date": "20261014",
+        "status": "READY",
+        "reasons": []
+      },
+      {
+        "trade_date": "20261015",
+        "status": "READY",
+        "reasons": []
+      },
+      {
+        "trade_date": "20261016",
+        "status": "READY",
+        "reasons": []
+      }
+    ],
+    "fina": {
+      "20260331": 6897,
+      "20260630": 10758,
+      "20260930": 58
+    },
+    "tushare": {
+      "calls": 24,
+      "retries": 0,
+      "rows": 46500
+    },
+    "seconds": 13
+  },
+  "evidence_refreshed": false,
+  "report": {
+    "report_id": "ASR-20261016-20261016163620-ddd0d0",
+    "trade_date": "20261016",
+    "status": "READY",
+    "path": "/data/reports/20261016/ASR-20261016-20261016163620-ddd0d0.json",
+    "regime": "下降趋势",
+    "watchlist_count": 40,
+    "added": 0,
+    "removed": 0,
+    "reasons": []
+  }
+}

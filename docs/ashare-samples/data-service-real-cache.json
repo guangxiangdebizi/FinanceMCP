@@ -1,0 +1,508 @@
+{
+  "data_dir": "/home/jcshi/ashare-verify/data",
+  "started_at": "2026-10-17T13:54:01.775Z",
+  "samples": {
+    "large_cap": "600519.SH",
+    "recent_ipo": "920211.BJ",
+    "delisted": "002808.SZ",
+    "suspended": "000016.SZ",
+    "multi_period_financials": "600519.SH",
+    "fina_anomaly": "603400.SH",
+    "index": "000300.SH",
+    "ex_rights_date_600519": "20260626"
+  },
+  "timings_ms": {
+    "ashare_stock_history": [
+      {
+        "ms": 35,
+        "bytes": 2925,
+        "args": {
+          "ts_code": "600519.SH",
+          "start_date": "20260618",
+          "end_date": "20260703",
+          "adjust": "qfq"
+        }
+      },
+      {
+        "ms": 21,
+        "bytes": 2892,
+        "args": {
+          "ts_code": "600519.SH",
+          "start_date": "20260618",
+          "end_date": "20260703",
+          "adjust": "hfq"
+        }
+      },
+      {
+        "ms": 21,
+        "bytes": 2152,
+        "args": {
+          "ts_code": "600519.SH",
+          "start_date": "20260618",
+          "end_date": "20260625",
+          "adjust": "qfq"
+        }
+      },
+      {
+        "ms": 25,
+        "bytes": 34018,
+        "args": {
+          "ts_code": "600519.SH",
+          "start_date": "20250915",
+          "end_date": "20261016",
+          "limit": 500
+        }
+      },
+      {
+        "ms": 21,
+        "bytes": 8434,
+        "args": {
+          "ts_code": "920211.BJ",
+          "start_date": "20260501",
+          "end_date": "20261016",
+          "adjust": "none",
+          "limit": 500
+        }
+      },
+      {
+        "ms": 21,
+        "bytes": 2654,
+        "args": {
+          "ts_code": "002808.SZ",
+          "start_date": "20260529",
+          "end_date": "20261016",
+          "adjust": "none",
+          "limit": 500
+        }
+      },
+      {
+        "ms": 23,
+        "bytes": 17294,
+        "args": {
+          "ts_code": "000016.SZ",
+          "start_date": "20260101",
+          "end_date": "20261016",
+          "adjust": "qfq",
+          "limit": 500
+        }
+      },
+      {
+        "ms": 20,
+        "bytes": 3552,
+        "args": {
+          "ts_code": "300114.SZ",
+          "start_date": "20250101",
+          "end_date": "20250301",
+          "adjust": "none"
+        }
+      },
+      {
+        "ms": 23,
+        "bytes": 23037,
+        "args": {
+          "ts_code": "600519.SH",
+          "end_date": "20261016",
+          "include_basic": true
+        }
+      },
+      {
+        "ms": 25,
+        "bytes": 23037,
+        "args": {
+          "ts_code": "600519.SH",
+          "end_date": "20261016",
+          "include_basic": true
+        }
+      }
+    ],
+    "ashare_financial_data": [
+      {
+        "ms": 2,
+        "bytes": 6236,
+        "args": {
+          "ts_code": "600519.SH",
+          "as_of_date": "20260801",
+          "limit": 12,
+          "include_revisions": true
+        }
+      },
+      {
+        "ms": 1,
+        "bytes": 5434,
+        "args": {
+          "ts_code": "603400.SH",
+          "as_of_date": "20260501"
+        }
+      },
+      {
+        "ms": 1,
+        "bytes": 5450,
+        "args": {
+          "ts_code": "603400.SH",
+          "as_of_date": "20260901"
+        }
+      }
+    ],
+    "ashare_market_data": [
+      {
+        "ms": 57,
+        "bytes": 3385,
+        "args": {
+          "end_date": "20261016"
+        }
+      },
+      {
+        "ms": 531,
+        "bytes": 10751,
+        "args": {
+          "start_date": "20260901",
+          "end_date": "20261016",
+          "indices": [
+            "000300.SH"
+          ],
+          "include_breadth": false
+        }
+      }
+    ],
+    "ashare_stock_basic": [
+      {
+        "ms": 1,
+        "bytes": 1570,
+        "args": {
+          "ts_codes": [
+            "600519.SH",
+            "920211.BJ",
+            "002808.SZ",
+            "000016.SZ",
+            "300114.SZ"
+          ]
+        }
+      }
+    ]
+  },
+  "checks": {
+    "ex_rights_adjustment": {
+      "ok": true,
+      "ts_code": "600519.SH",
+      "ex_date": "20260626",
+      "factor_before": 8.4464,
+      "factor_on_ex": 8.6463,
+      "raw_close": [
+        1215,
+        1241.41,
+        1222.45,
+        1207.68,
+        1212.1,
+        1168.63,
+        1194.96,
+        1185.49,
+        1193.01,
+        1203,
+        1194.45
+      ],
+      "qfq_close": [
+        1186.9095,
+        1212.709,
+        1194.1873,
+        1179.7588,
+        1184.0766,
+        1168.63,
+        1194.96,
+        1185.49,
+        1193.01,
+        1203,
+        1194.45
+      ],
+      "pct_chg": [
+        -2.0161,
+        2.1737,
+        -1.5273,
+        -1.2082,
+        0.366,
+        -1.3048,
+        2.2531,
+        -0.7925,
+        0.6343,
+        0.8374,
+        -0.7107
+      ],
+      "max_return_vs_pct_chg_error_pp": 0.0003,
+      "max_hfq_error": 0.000048000001697801054,
+      "qfq_base": {
+        "trade_date": "20260703",
+        "adj_factor": 8.6463
+      },
+      "as_of_before_ex": {
+        "end_date": "20260625",
+        "base": {
+          "trade_date": "20260625",
+          "adj_factor": 8.4464
+        },
+        "qfq_equals_raw": true
+      },
+      "ex_row_pre_close": 1184.08
+    },
+    "engine_bars_match_data_tool": {
+      "ok": true,
+      "bars": 260,
+      "tool_rows": 260,
+      "max_abs_diff": 0.00004997629048375529
+    },
+    "recent_ipo": {
+      "ok": true,
+      "ts_code": "920211.BJ",
+      "list_date": "20260605",
+      "first_bar": "20260605",
+      "coverage": {
+        "trade_days": 111,
+        "bars": 89,
+        "suspended_days": [],
+        "not_listed_days": 22,
+        "pending_delisting_days": [],
+        "upstream_missing_days": [],
+        "missing_days": [],
+        "suspend_data_missing_days": 0,
+        "adj_factor_missing_days": []
+      },
+      "warnings": []
+    },
+    "delisted": {
+      "ok": true,
+      "ts_code": "002808.SZ",
+      "delist_date": "20260714",
+      "last_bar": "20260713",
+      "coverage": {
+        "trade_days": 94,
+        "bars": 15,
+        "suspended_days": [
+          "20260529",
+          "20260601",
+          "20260602",
+          "20260603",
+          "20260604",
+          "20260605",
+          "20260608",
+          "20260609",
+          "20260610",
+          "20260611",
+          "20260612",
+          "20260615",
+          "20260616",
+          "20260617",
+          "20260618",
+          "20260622"
+        ],
+        "not_listed_days": 63,
+        "pending_delisting_days": [],
+        "upstream_missing_days": [],
+        "missing_days": [],
+        "suspend_data_missing_days": 0,
+        "adj_factor_missing_days": []
+      },
+      "warnings": []
+    },
+    "suspended": {
+      "ok": true,
+      "ts_code": "000016.SZ",
+      "suspend_days": 30,
+      "coverage": {
+        "trade_days": 188,
+        "bars": 158,
+        "suspended_days": [
+          "20260429",
+          "20260824",
+          "20260825",
+          "20260826",
+          "20260827",
+          "20260904",
+          "20260907",
+          "20260908",
+          "20260909",
+          "20260910"
+        ],
+        "not_listed_days": 0,
+        "pending_delisting_days": [],
+        "upstream_missing_days": [],
+        "missing_days": [],
+        "suspend_data_missing_days": 0,
+        "adj_factor_missing_days": []
+      }
+    },
+    "financials_as_of": {
+      "ok": true,
+      "ts_code": "600519.SH",
+      "as_of": "20260801",
+      "periods": [
+        {
+          "end_date": "20260331",
+          "ann_date": "20260425",
+          "roe": 10.5687,
+          "announcements": 1
+        },
+        {
+          "end_date": "20251231",
+          "ann_date": "20260417",
+          "roe": 34.462,
+          "announcements": 1
+        },
+        {
+          "end_date": "20250930",
+          "ann_date": "20251030",
+          "roe": 26.3688,
+          "announcements": 1
+        },
+        {
+          "end_date": "20250630",
+          "ann_date": "20250813",
+          "roe": 19.2486,
+          "announcements": 1
+        },
+        {
+          "end_date": "20250331",
+          "ann_date": "20250430",
+          "roe": 10.9255,
+          "announcements": 1
+        },
+        {
+          "end_date": "20241231",
+          "ann_date": "20250403",
+          "roe": 38.4283,
+          "announcements": 1
+        },
+        {
+          "end_date": "20240930",
+          "ann_date": "20241026",
+          "roe": 26.833,
+          "announcements": 1
+        },
+        {
+          "end_date": "20240630",
+          "ann_date": "20240809",
+          "roe": 19.2038,
+          "announcements": 1
+        },
+        {
+          "end_date": "20240331",
+          "ann_date": "20240427",
+          "roe": 10.5688,
+          "announcements": 1
+        },
+        {
+          "end_date": "20231231",
+          "ann_date": "20240403",
+          "roe": 36.1755,
+          "announcements": 1
+        }
+      ],
+      "hidden_after_as_of": 1
+    },
+    "financials_anomaly": {
+      "ok": true,
+      "as_of_20260501_latest": {
+        "end_date": "20260331",
+        "ann_date": "20260420"
+      },
+      "anomalies": [
+        {
+          "end_date": "20260630",
+          "ann_date": "20260422",
+          "issue": "ann_date_before_period_end",
+          "handling": "公告日早于报告期末，视为上游异常，不参与 as-of 选择"
+        }
+      ],
+      "as_of_20260901_latest": {
+        "end_date": "20260630",
+        "ann_date": "20260803"
+      }
+    },
+    "market_matches_live_report": {
+      "ok": true,
+      "report_id": "ASR-20261016-20261016163620-ddd0d0",
+      "tool": {
+        "stocks_traded": 5567,
+        "up": 3301,
+        "down": 2128,
+        "flat": 138,
+        "limit_up": 63,
+        "limit_down": 12,
+        "limit_price_coverage": 1,
+        "limit_counts_complete": true,
+        "amount": 1569066001.48027,
+        "amount_yi": 15690.66,
+        "listed": 5577,
+        "suspended": 10
+      },
+      "report": {
+        "up": 3301,
+        "down": 2128,
+        "limit_up": 63,
+        "limit_down": 12,
+        "amount_yi": 15690.66
+      },
+      "index_closes": {
+        "000001.SH": 3716.2842,
+        "000300.SH": 4170.6131,
+        "000688.SH": 1358.647,
+        "000852.SH": 6681.9444,
+        "000905.SH": 6772.7532,
+        "399001.SZ": 11802.459,
+        "399006.SZ": 2772.3836,
+        "899050.BJ": 949.9952
+      }
+    },
+    "market_range_and_limit": {
+      "ok": true,
+      "range_days": 28,
+      "too_long_error": "区间含 188 个交易日，单次最多 60 个，请缩小日期范围或分段查询"
+    },
+    "stock_basic": {
+      "ok": true,
+      "stocks": [
+        {
+          "ts_code": "600519.SH",
+          "name": "贵州茅台",
+          "list_date": "20010827",
+          "delist_date": null,
+          "list_status": "L"
+        },
+        {
+          "ts_code": "920211.BJ",
+          "name": "新睿电子",
+          "list_date": "20260605",
+          "delist_date": null,
+          "list_status": "L"
+        },
+        {
+          "ts_code": "002808.SZ",
+          "name": "恒久退",
+          "list_date": "20160812",
+          "delist_date": "20260714",
+          "list_status": "D"
+        },
+        {
+          "ts_code": "000016.SZ",
+          "name": "*ST康佳A",
+          "list_date": "19920327",
+          "delist_date": null,
+          "list_status": "L"
+        }
+      ],
+      "not_found": [
+        "300114.SZ"
+      ]
+    },
+    "code_change_disclosed": {
+      "ok": true,
+      "rows": 26,
+      "warnings": [
+        "300114.SZ 不在当前 stock_basic 中（可能为代码变更或已从清单移除），名称、行业与上市日期不可得"
+      ]
+    },
+    "deterministic_and_read_only": {
+      "ok": true,
+      "write_error": "attempt to write a readonly database"
+    }
+  },
+  "finished_at": "2026-10-17T13:54:02.636Z",
+  "passed": true
+}

@@ -1,0 +1,187 @@
+{
+  "status": "PASS",
+  "checks": {
+    "live_db_bytes_unchanged": true,
+    "live_db_size_unchanged": true,
+    "container_identity_unchanged": true,
+    "image_unchanged": true,
+    "table_row_counts_unchanged": true,
+    "container_build_unchanged": true,
+    "scheduling_host_unchanged": true,
+    "user_manager_available": true,
+    "a_share_timers_found": true,
+    "ashare_timer_inventory_unchanged": true,
+    "ashare_timer_scope": true,
+    "ashare_timer_enabled": true,
+    "ashare_timer_schedule_unchanged": true,
+    "ashare_timer_exec_start_unchanged": true,
+    "ashare_timer_script_unchanged": true,
+    "ashare_timer_armed": true
+  },
+  "baseline": {
+    "captured_at": "2026-10-18T01:08:07.057Z",
+    "live_db_sha256": "0f071b4f73a8de45dd74ba60a420df75f5b02b7c1f269cd35fcfde3071756d19",
+    "container": "67af9eda414d57f7045a6bcd1f6b26de55759d54d0148fff5b0eef77b90eea51|sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|running|healthy|2026-10-17T13:59:25.611496291Z|0",
+    "tables": {
+      "report": 75,
+      "watchlist": 2847,
+      "watchlist_change": 366,
+      "stock_score": 138195,
+      "quality_check": 673,
+      "signal_evidence": 108,
+      "data_audit": 3
+    },
+    "scheduling": {
+      "host": "foodfactory-vm",
+      "user": "jcshi",
+      "linger": "yes",
+      "user_manager_available": true,
+      "a_share_timers_found": true,
+      "timer_count": 1,
+      "scope": "user",
+      "timer_unit": "finance-ashare-daily.timer",
+      "service_unit": "finance-ashare-daily.service",
+      "enabled": "enabled",
+      "active_state": "active",
+      "next_elapse": "Mon 2026-10-19 10:41:17 UTC",
+      "next_elapse_iso": "2026-10-19T10:41:17.000Z",
+      "last_trigger": null,
+      "last_trigger_iso": null,
+      "on_calendar": [
+        "Mon..Fri *-*-* 21:10:00 Asia/Shanghai",
+        "Mon..Fri *-*-* 18:40:00 Asia/Shanghai"
+      ],
+      "unit_file_path": "/home/jcshi/.config/systemd/user/finance-ashare-daily.timer",
+      "exec_start": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+      "exec_start_argv": [
+        "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh"
+      ],
+      "working_directory": "/home/jcshi",
+      "working_directory_defaulted": true,
+      "script_path": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+      "script_exists": true,
+      "script_sha256": "a15ba73022271b54930bccb71199294f7efa5d92dfae6d17581b4e9a21c1176a",
+      "timer_inventory": [
+        {
+          "scope": "user",
+          "unit": "finance-ashare-daily.timer",
+          "activates": "finance-ashare-daily.service",
+          "enabled": "enabled",
+          "active": "active",
+          "next_elapse": "Mon 2026-10-19 10:41:17 UTC",
+          "last_trigger": null,
+          "on_calendar": [
+            "Mon..Fri *-*-* 21:10:00 Asia/Shanghai",
+            "Mon..Fri *-*-* 18:40:00 Asia/Shanghai"
+          ],
+          "exec_start": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+          "script_path": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+          "script_sha256": "a15ba73022271b54930bccb71199294f7efa5d92dfae6d17581b4e9a21c1176a"
+        }
+      ],
+      "unit_files": {
+        "user": [
+          {
+            "unit": "finance-ashare-daily.service",
+            "state": "static",
+            "preset": "-"
+          },
+          {
+            "unit": "finance-ashare-daily.timer",
+            "state": "enabled",
+            "preset": "enabled"
+          }
+        ],
+        "system": []
+      },
+      "errors": []
+    }
+  },
+  "observed": {
+    "captured_at": "2026-10-18T01:08:09.693Z",
+    "live_dir": "/home/jcshi/.local/share/finance-mcp-ashare",
+    "live_db": {
+      "path": "/home/jcshi/.local/share/finance-mcp-ashare/ashare.sqlite",
+      "size": 1685577728,
+      "sha256": "0f071b4f73a8de45dd74ba60a420df75f5b02b7c1f269cd35fcfde3071756d19"
+    },
+    "container": "67af9eda414d57f7045a6bcd1f6b26de55759d54d0148fff5b0eef77b90eea51|sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|running|healthy|2026-10-17T13:59:25.611496291Z|0",
+    "image": "sha256:7c4b8d90d7f10c63c6808ff32b0adcb45bb8ad9afafe722943f01b80ea85970e|2026-10-17T13:59:12.964616828Z",
+    "tables": {
+      "report": 75,
+      "watchlist": 2847,
+      "watchlist_change": 366,
+      "stock_score": 138195,
+      "quality_check": 673,
+      "signal_evidence": 108,
+      "data_audit": 3
+    },
+    "container_build_files": "acceptance.js analysis.js audit.js bars.js cli.js commands.js data.js db.js definitions.js evidence.js fetch.js fundamentals.js indicators.js ingest.js market.js report.js signals.js sync.js tools.js watchlist.js",
+    "scheduling": {
+      "host": "foodfactory-vm",
+      "user": "jcshi",
+      "linger": "yes",
+      "user_manager_available": true,
+      "a_share_timers_found": true,
+      "timer_count": 1,
+      "scope": "user",
+      "timer_unit": "finance-ashare-daily.timer",
+      "service_unit": "finance-ashare-daily.service",
+      "enabled": "enabled",
+      "active_state": "active",
+      "next_elapse": "Mon 2026-10-19 10:41:17 UTC",
+      "next_elapse_iso": "2026-10-19T10:41:17.000Z",
+      "last_trigger": null,
+      "last_trigger_iso": null,
+      "on_calendar": [
+        "Mon..Fri *-*-* 21:10:00 Asia/Shanghai",
+        "Mon..Fri *-*-* 18:40:00 Asia/Shanghai"
+      ],
+      "unit_file_path": "/home/jcshi/.config/systemd/user/finance-ashare-daily.timer",
+      "exec_start": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+      "exec_start_argv": [
+        "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh"
+      ],
+      "working_directory": "/home/jcshi",
+      "working_directory_defaulted": true,
+      "script_path": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+      "script_exists": true,
+      "script_sha256": "a15ba73022271b54930bccb71199294f7efa5d92dfae6d17581b4e9a21c1176a",
+      "timer_inventory": [
+        {
+          "scope": "user",
+          "unit": "finance-ashare-daily.timer",
+          "activates": "finance-ashare-daily.service",
+          "enabled": "enabled",
+          "active": "active",
+          "next_elapse": "Mon 2026-10-19 10:41:17 UTC",
+          "last_trigger": null,
+          "on_calendar": [
+            "Mon..Fri *-*-* 21:10:00 Asia/Shanghai",
+            "Mon..Fri *-*-* 18:40:00 Asia/Shanghai"
+          ],
+          "exec_start": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+          "script_path": "/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh",
+          "script_sha256": "a15ba73022271b54930bccb71199294f7efa5d92dfae6d17581b4e9a21c1176a"
+        }
+      ],
+      "unit_files": {
+        "user": [
+          {
+            "unit": "finance-ashare-daily.service",
+            "state": "static",
+            "preset": "-"
+          },
+          {
+            "unit": "finance-ashare-daily.timer",
+            "state": "enabled",
+            "preset": "enabled"
+          }
+        ],
+        "system": []
+      },
+      "errors": []
+    }
+  },
+  "note": "Read-only evidence. systemd user and system scopes are queried separately: the A-share timer lives in the user manager (~/.config/systemd/user, linger enabled), so a system-scope-only query would wrongly report no timer. The timer must still exist in the same scope, enabled, with the same OnCalendar and ExecStart; a missing timer is a FAIL. The next elapse is recorded but not compared (it moves as the timer fires). The container is inspected, the SQLite file is only hashed, and row counts are queried with a read-only connection. No deploy, restart, timer, notification or ChatGPT task was changed in this round."
+}

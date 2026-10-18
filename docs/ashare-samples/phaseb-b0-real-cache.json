@@ -1,0 +1,947 @@
+{
+  "data_dir": "/home/jcshi/ashare-research/b0",
+  "pristine": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
+  "started_at": "2026-10-17T16:00:30.932Z",
+  "checks": {
+    "b0_1_reclassification": {
+      "ok": true,
+      "days_changed": 32,
+      "reclassified": [
+        {
+          "trade_date": "20250430",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250616",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250627",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250630",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250701",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250702",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250703",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250707",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250708",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250709",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250710",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250711",
+          "old": {
+            "pending": 2,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 2,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ",
+            "920305.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250717",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250718",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250721",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250722",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250723",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250724",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250725",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250728",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250729",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250730",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250828",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250829",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250901",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250902",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250903",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250904",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250905",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250908",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250909",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        },
+        {
+          "trade_date": "20250910",
+          "old": {
+            "pending": 1,
+            "unexplained": 0
+          },
+          "new": {
+            "pending": 0,
+            "unexplained": 1,
+            "upstream": 0
+          },
+          "sample": [
+            "920680.BJ"
+          ]
+        }
+      ]
+    },
+    "b0_1_pending_only_after_last_bar": {
+      "ok": true,
+      "pending_stock_days": 0,
+      "mismatched_days": []
+    },
+    "b0_2_unrelated_rows_unchanged": {
+      "ok": true,
+      "changed_rows": {
+        "daily": 0,
+        "daily_basic": 0,
+        "adj_factor": 0,
+        "stk_limit": 0
+      },
+      "repaired_stock_days": 38,
+      "whole_day_refreshes": {},
+      "unexpected": []
+    },
+    "b0_2_no_derived_state_written": {
+      "ok": true,
+      "watchlist": {
+        "rows": 2847,
+        "changed_rows": 0
+      },
+      "watchlist_change": {
+        "rows": 366,
+        "changed_rows": 0
+      },
+      "report": {
+        "rows": 75,
+        "changed_rows": 0
+      },
+      "stock_score": {
+        "rows": 138195,
+        "changed_rows": 0
+      },
+      "signal_evidence": {
+        "rows": 108,
+        "changed_rows": 0
+      }
+    },
+    "b0_3_no_future_metadata": {
+      "ok": true,
+      "queries": 1812,
+      "leaks": [],
+      "sample_603400_20260501_anomalies": []
+    },
+    "b0_4_suspend_refresh_failure": {
+      "ok": true,
+      "trade_date": "20261016",
+      "before": "READY",
+      "suspend_rows": 10,
+      "kept_after_failure": 10,
+      "during": {
+        "status": "DEGRADED",
+        "cache_status": "READY",
+        "reasons": [
+          "最新一次刷新 suspend_d 请求失败（Tushare API错误 (suspend_d): 参数异常：模拟失败（verify-b0）；沿用已有缓存，2026-10-17T16:05:52.484Z）"
+        ],
+        "market_suspended_source": "stale_cache",
+        "history_warning": "1 个交易日停牌数据最新一次刷新失败，停牌分类沿用旧缓存（或未知）: 20261016"
+      },
+      "after_real_refresh": {
+        "refresh_status": "REFRESH_OK",
+        "rows": 10,
+        "status": "READY"
+      }
+    }
+  },
+  "audit_before": {
+    "status": "GAP",
+    "counts": {
+      "OK": 608,
+      "WARN": 33,
+      "GAP": 32
+    },
+    "totals": {
+      "suspended_stock_days": 8700,
+      "pending_delisting_stock_days": 0,
+      "upstream_missing_stock_days": 29,
+      "upstream_check_expired_stock_days": 0,
+      "unexplained_missing_stock_days": 38,
+      "days_without_suspend_data": 0,
+      "missing_adj_factor": 0,
+      "missing_daily_basic": 0,
+      "missing_stk_limit": 0,
+      "invalid_bars": 0,
+      "pct_chg_inconsistent": 0,
+      "pre_close_conflicts": 1,
+      "factor_revision_boundaries": 325
+    },
+    "seconds": 78
+  },
+  "audit_old_rules": {
+    "status": "WARN",
+    "counts": {
+      "OK": 640,
+      "WARN": 33,
+      "GAP": 0
+    },
+    "totals": {
+      "suspended_stock_days": 8700,
+      "pending_delisting_stock_days": 38,
+      "upstream_missing_stock_days": 29,
+      "unexplained_missing_stock_days": 0,
+      "days_without_suspend_data": 0,
+      "missing_adj_factor": 0,
+      "missing_daily_basic": 0,
+      "missing_stk_limit": 0,
+      "invalid_bars": 0,
+      "pct_chg_inconsistent": 0,
+      "pre_close_conflicts": 1,
+      "factor_revision_boundaries": 325
+    }
+  },
+  "fix": {
+    "actions": 38,
+    "sample": [
+      {
+        "trade_date": "20250430",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250430",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250616",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250627",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250630",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250701",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250702",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250703",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250707",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250707",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250708",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250708",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250709",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250709",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250710",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250710",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250711",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250711",
+        "action": "repair_stock 920305.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250717",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250718",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250721",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250722",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250723",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250724",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250725",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250728",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250729",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250730",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250828",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250829",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250901",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250902",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250903",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250904",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250905",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250908",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250909",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      },
+      {
+        "trade_date": "20250910",
+        "action": "repair_stock 920680.BJ",
+        "result": {
+          "daily": 0,
+          "suspended": 0
+        }
+      }
+    ],
+    "seconds": 121
+  },
+  "audit_after": {
+    "status": "WARN",
+    "counts": {
+      "OK": 608,
+      "WARN": 65,
+      "GAP": 0
+    },
+    "totals": {
+      "suspended_stock_days": 8700,
+      "pending_delisting_stock_days": 0,
+      "upstream_missing_stock_days": 67,
+      "upstream_check_expired_stock_days": 0,
+      "unexplained_missing_stock_days": 0,
+      "days_without_suspend_data": 0,
+      "missing_adj_factor": 0,
+      "missing_daily_basic": 0,
+      "missing_stk_limit": 0,
+      "invalid_bars": 0,
+      "pct_chg_inconsistent": 0,
+      "pre_close_conflicts": 1,
+      "factor_revision_boundaries": 325
+    }
+  },
+  "finished_at": "2026-10-17T16:05:56.897Z",
+  "ok": true
+}

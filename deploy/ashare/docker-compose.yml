@@ -1,0 +1,60 @@
+# FinanceMCP A-share daily research service (single long-running container).
+# Data updates run inside this same container via `docker exec`, triggered by
+# the systemd user timer in this directory; there is no second service.
+name: finance-mcp-ashare
+
+services:
+  finance-mcp:
+    build:
+      context: ../..
+    image: finance-mcp-ashare:local
+    container_name: finance-mcp-ashare
+    restart: unless-stopped
+    # Schema creation/migration happens here, once, with a writable connection; the MCP
+    # server itself only ever opens the cache read-only.
+    command: ["sh", "-c", "node build/ashare/cli.js migrate && exec node build/httpServer.js"]
+    # Same uid as the host data directory owner so the SQLite cache is writable.
+    user: "${ASHARE_UID:-1003}:${ASHARE_GID:-1003}"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      MCP_HTTP_HOST: 0.0.0.0
+      ASHARE_DATA_DIR: /data
+      # Expose only the five A-share tools to ChatGPT.
+      FINANCE_TOOL_PROFILE: ashare_daily
+      # Never take data-source credentials from requests; Tushare comes from TUSHARE_TOKEN in .env.
+      MCP_ACCEPT_REQUEST_CREDENTIALS: "0"
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-share.shijingchang.cn,localhost,127.0.0.1}
+      MCP_RATE_LIMIT: ${MCP_RATE_LIMIT:-30}
+      # Anonymous endpoint: tool calls are tiny, so reject large bodies and bound the session map.
+      MCP_BODY_LIMIT: ${MCP_BODY_LIMIT:-64kb}
+      MCP_MAX_SESSIONS: ${MCP_MAX_SESSIONS:-1000}
+      # Caddy reaches the container through the Docker bridge; trust it for X-Forwarded-For.
+      MCP_TRUST_PROXY: loopback,uniquelocal
+    volumes:
+      - ${ASHARE_HOST_DATA_DIR:-/home/jcshi/.local/share/finance-mcp-ashare}:/data
+    # Loopback only: the public entry point is the existing Caddy :443 listener.
+    ports:
+      - "127.0.0.1:8130:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 3g
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

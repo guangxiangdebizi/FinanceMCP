@@ -1,0 +1,1032 @@
+{
+  "report_id": "ASR-20261016-20261016163620-ddd0d0",
+  "as_of_trade_date": "20261016",
+  "versions": {
+    "score": "score-1.0.0",
+    "watchlist": "wl-1.0.0"
+  },
+  "count": 40,
+  "industry_distribution": {
+    "煤炭开采": 4,
+    "医疗保健": 4,
+    "水运": 4,
+    "化工原料": 3,
+    "石油开采": 3,
+    "影视音像": 2,
+    "白酒": 2,
+    "水力发电": 2,
+    "火力发电": 1,
+    "广告包装": 1,
+    "电气设备": 1,
+    "红黄酒": 1,
+    "造纸": 1,
+    "生物制药": 1,
+    "港口": 1,
+    "船舶": 1,
+    "仓储物流": 1,
+    "乳制品": 1,
+    "电信运营": 1,
+    "百货": 1,
+    "出版业": 1,
+    "化学制药": 1,
+    "通信设备": 1,
+    "软件服务": 1
+  },
+  "track_record": {
+    "horizon": 5,
+    "dates": 60,
+    "mean_excess_pct": -1.86,
+    "hit_rate": 0.183,
+    "t_stat_overlapping": -7.08,
+    "note": "股票池为启发式评分结果；样本短且持有期重叠，不能据此推断盈利概率",
+    "method": "近 60 个交易日内每个股票池日期：成员次日开盘至第 5 个交易日收盘的等权收益，减去全市场等权收益"
+  },
+  "added": [],
+  "removed": [],
+  "members": [
+    {
+      "ts_code": "600938.SH",
+      "name": "中国海油",
+      "industry": "石油开采",
+      "score": 86.73,
+      "rank": 1,
+      "status": "kept",
+      "entered_on": "20260824",
+      "close": 34.74,
+      "pct_chg": 2.27,
+      "trend": "up",
+      "signals_today": [
+        "布林收口突破"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 32.29）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600941.SH",
+      "name": "中国移动",
+      "industry": "电信运营",
+      "score": 85.69,
+      "rank": 2,
+      "status": "kept",
+      "entered_on": "20260930",
+      "close": 101.4,
+      "pct_chg": -0.1,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 95.18）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601225.SH",
+      "name": "陕西煤业",
+      "industry": "煤炭开采",
+      "score": 85.42,
+      "rank": 3,
+      "status": "kept",
+      "entered_on": "20260824",
+      "close": 28.28,
+      "pct_chg": 0.64,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 25.78）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002292.SZ",
+      "name": "奥飞娱乐",
+      "industry": "影视音像",
+      "score": 84.45,
+      "rank": 4,
+      "status": "kept",
+      "entered_on": "20261009",
+      "close": 9.14,
+      "pct_chg": 0.11,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 8.35）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600519.SH",
+      "name": "贵州茅台",
+      "industry": "白酒",
+      "score": 84.22,
+      "rank": 5,
+      "status": "kept",
+      "entered_on": "20261015",
+      "close": 1329,
+      "pct_chg": 1.22,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 1296.91）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601857.SH",
+      "name": "中国石油",
+      "industry": "石油开采",
+      "score": 83.18,
+      "rank": 6,
+      "status": "kept",
+      "entered_on": "20260908",
+      "close": 12.76,
+      "pct_chg": 1.35,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [
+        "RSI14 过热 (82)"
+      ],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 10.93）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601919.SH",
+      "name": "中远海控",
+      "industry": "水运",
+      "score": 82.71,
+      "rank": 7,
+      "status": "kept",
+      "entered_on": "20260724",
+      "close": 16.88,
+      "pct_chg": -0.3,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 16.15）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600900.SH",
+      "name": "长江电力",
+      "industry": "水力发电",
+      "score": 82.23,
+      "rank": 8,
+      "status": "kept",
+      "entered_on": "20261008",
+      "close": 29.38,
+      "pct_chg": -0.74,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 28.46）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "300760.SZ",
+      "name": "迈瑞医疗",
+      "industry": "医疗保健",
+      "score": 81.9,
+      "rank": 9,
+      "status": "kept",
+      "entered_on": "20260928",
+      "close": 167.3,
+      "pct_chg": 0.18,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 157.59）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002027.SZ",
+      "name": "分众传媒",
+      "industry": "广告包装",
+      "score": 80.96,
+      "rank": 10,
+      "status": "kept",
+      "entered_on": "20261012",
+      "close": 5.16,
+      "pct_chg": -1.34,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 4.98）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600887.SH",
+      "name": "伊利股份",
+      "industry": "乳制品",
+      "score": 80.96,
+      "rank": 11,
+      "status": "kept",
+      "entered_on": "20260929",
+      "close": 28.2,
+      "pct_chg": 0.36,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 26.64）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600674.SH",
+      "name": "川投能源",
+      "industry": "水力发电",
+      "score": 80.68,
+      "rank": 12,
+      "status": "kept",
+      "entered_on": "20261014",
+      "close": 17.4,
+      "pct_chg": -0.46,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 15.84）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601900.SH",
+      "name": "南方传媒",
+      "industry": "出版业",
+      "score": 80.63,
+      "rank": 13,
+      "status": "kept",
+      "entered_on": "20261012",
+      "close": 13.26,
+      "pct_chg": -2.21,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 12.12）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601088.SH",
+      "name": "中国神华",
+      "industry": "煤炭开采",
+      "score": 80.23,
+      "rank": 14,
+      "status": "kept",
+      "entered_on": "20261013",
+      "close": 50.98,
+      "pct_chg": 0.75,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 46.57）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601898.SH",
+      "name": "中煤能源",
+      "industry": "煤炭开采",
+      "score": 79.78,
+      "rank": 16,
+      "status": "kept",
+      "entered_on": "20261014",
+      "close": 14.93,
+      "pct_chg": -0.2,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 14.24）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600018.SH",
+      "name": "上港集团",
+      "industry": "港口",
+      "score": 79.62,
+      "rank": 17,
+      "status": "kept",
+      "entered_on": "20261015",
+      "close": 5.46,
+      "pct_chg": -0.18,
+      "trend": "up",
+      "signals_today": [
+        "MACD顶背离"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 5.26）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600809.SH",
+      "name": "山西汾酒",
+      "industry": "白酒",
+      "score": 79.58,
+      "rank": 18,
+      "status": "kept",
+      "entered_on": "20261015",
+      "close": 116.7,
+      "pct_chg": 0.52,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 117.68）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "688111.SH",
+      "name": "金山办公",
+      "industry": "软件服务",
+      "score": 78.8,
+      "rank": 19,
+      "status": "kept",
+      "entered_on": "20261014",
+      "close": 231.44,
+      "pct_chg": -0.46,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 240.27）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "003006.SZ",
+      "name": "百亚股份",
+      "industry": "造纸",
+      "score": 78.71,
+      "rank": 20,
+      "status": "kept",
+      "entered_on": "20261008",
+      "close": 24.09,
+      "pct_chg": 5.57,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 16.66）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002246.SZ",
+      "name": "北化股份",
+      "industry": "化工原料",
+      "score": 78.61,
+      "rank": 21,
+      "status": "kept",
+      "entered_on": "20260924",
+      "close": 24.81,
+      "pct_chg": 3.81,
+      "trend": "up",
+      "signals_today": [
+        "多头趋势"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 21.78）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "300770.SZ",
+      "name": "新媒股份",
+      "industry": "影视音像",
+      "score": 78.38,
+      "rank": 22,
+      "status": "kept",
+      "entered_on": "20261015",
+      "close": 36.6,
+      "pct_chg": -3.63,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 33.83）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002074.SZ",
+      "name": "国轩高科",
+      "industry": "电气设备",
+      "score": 78.36,
+      "rank": 23,
+      "status": "kept",
+      "entered_on": "20261012",
+      "close": 27.78,
+      "pct_chg": -1.35,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 27.33）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "688617.SH",
+      "name": "惠泰医疗",
+      "industry": "医疗保健",
+      "score": 78.33,
+      "rank": 24,
+      "status": "kept",
+      "entered_on": "20261015",
+      "close": 249.3,
+      "pct_chg": -3.6,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 234.65）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600256.SH",
+      "name": "广汇能源",
+      "industry": "石油开采",
+      "score": 78.21,
+      "rank": 25,
+      "status": "kept",
+      "entered_on": "20260910",
+      "close": 7.07,
+      "pct_chg": 1.73,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 6.33）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "603259.SH",
+      "name": "药明康德",
+      "industry": "化学制药",
+      "score": 78.06,
+      "rank": 27,
+      "status": "kept",
+      "entered_on": "20260701",
+      "close": 144.3,
+      "pct_chg": -6.6,
+      "trend": "range",
+      "signals_today": [
+        "跌破中期均线"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 151.35）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002128.SZ",
+      "name": "电投能源",
+      "industry": "煤炭开采",
+      "score": 77.95,
+      "rank": 28,
+      "status": "kept",
+      "entered_on": "20261008",
+      "close": 27.57,
+      "pct_chg": 1.51,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 27.56）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600026.SH",
+      "name": "中远海能",
+      "industry": "水运",
+      "score": 77.8,
+      "rank": 29,
+      "status": "kept",
+      "entered_on": "20260903",
+      "close": 20.07,
+      "pct_chg": -4.11,
+      "trend": "range",
+      "signals_today": [
+        "MACD顶背离"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 19.03）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "603127.SH",
+      "name": "昭衍新药",
+      "industry": "医疗保健",
+      "score": 77.69,
+      "rank": 30,
+      "status": "kept",
+      "entered_on": "20260924",
+      "close": 48.71,
+      "pct_chg": -3.83,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 47.12）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "000690.SZ",
+      "name": "宝新能源",
+      "industry": "火力发电",
+      "score": 77.59,
+      "rank": 33,
+      "status": "kept",
+      "entered_on": "20261014",
+      "close": 5.55,
+      "pct_chg": -1.07,
+      "trend": "up",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 5.04）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600233.SH",
+      "name": "圆通速递",
+      "industry": "仓储物流",
+      "score": 77.46,
+      "rank": 34,
+      "status": "kept",
+      "entered_on": "20260929",
+      "close": 17.6,
+      "pct_chg": 0.8,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 17.73）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601872.SH",
+      "name": "招商轮船",
+      "industry": "水运",
+      "score": 77.2,
+      "rank": 37,
+      "status": "kept",
+      "entered_on": "20260820",
+      "close": 18.19,
+      "pct_chg": -5.9,
+      "trend": "range",
+      "signals_today": [
+        "MACD顶背离",
+        "跌破中期均线"
+      ],
+      "risks": [
+        "波动率高 (ATR/价格 7.8%)"
+      ],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 18.68）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "300765.SZ",
+      "name": "石药创新",
+      "industry": "生物制药",
+      "score": 76.82,
+      "rank": 44,
+      "status": "kept",
+      "entered_on": "20260921",
+      "close": 44.1,
+      "pct_chg": 2.61,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 42.82）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "688002.SH",
+      "name": "睿创微纳",
+      "industry": "通信设备",
+      "score": 76.35,
+      "rank": 49,
+      "status": "kept",
+      "entered_on": "20260807",
+      "close": 164.77,
+      "pct_chg": -1.64,
+      "trend": "range",
+      "signals_today": [
+        "跌破中期均线"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 165.56）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600150.SH",
+      "name": "中国船舶",
+      "industry": "船舶",
+      "score": 76.34,
+      "rank": 50,
+      "status": "kept",
+      "entered_on": "20260904",
+      "close": 35.77,
+      "pct_chg": 0.9,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 35.93）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002648.SZ",
+      "name": "卫星化学",
+      "industry": "化工原料",
+      "score": 75.69,
+      "rank": 56,
+      "status": "kept",
+      "entered_on": "20260817",
+      "close": 24.9,
+      "pct_chg": 0.36,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 26.28）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601086.SH",
+      "name": "国芳集团",
+      "industry": "百货",
+      "score": 75.62,
+      "rank": 58,
+      "status": "kept",
+      "entered_on": "20260908",
+      "close": 12.14,
+      "pct_chg": 0.25,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [
+        "波动率高 (ATR/价格 10.9%)"
+      ],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 10.83）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "600989.SH",
+      "name": "宝丰能源",
+      "industry": "化工原料",
+      "score": 75.48,
+      "rank": 61,
+      "status": "kept",
+      "entered_on": "20260902",
+      "close": 22.4,
+      "pct_chg": 1.73,
+      "trend": "down",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 23.19）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "002568.SZ",
+      "name": "百润股份",
+      "industry": "红黄酒",
+      "score": 75.32,
+      "rank": 63,
+      "status": "kept",
+      "entered_on": "20260929",
+      "close": 18.59,
+      "pct_chg": -0.21,
+      "trend": "range",
+      "signals_today": [],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 18.59）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "601975.SH",
+      "name": "招商南油",
+      "industry": "水运",
+      "score": 72.24,
+      "rank": 119,
+      "status": "kept",
+      "entered_on": "20260904",
+      "close": 3.9,
+      "pct_chg": -3.94,
+      "trend": "range",
+      "signals_today": [
+        "MACD顶背离"
+      ],
+      "risks": [
+        "波动率高 (ATR/价格 7.1%)"
+      ],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 4.08）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    },
+    {
+      "ts_code": "300358.SZ",
+      "name": "楚天科技",
+      "industry": "医疗保健",
+      "score": 71.73,
+      "rank": 128,
+      "status": "kept",
+      "entered_on": "20260929",
+      "close": 8.68,
+      "pct_chg": -2.36,
+      "trend": "range",
+      "signals_today": [
+        "跌破中期均线"
+      ],
+      "risks": [],
+      "watch_invalidation": [
+        "收盘价跌破 MA60（约 8.76）视为趋势条件失效",
+        "评分排名跌出前 150 或不再满足准入条件时移出股票池"
+      ]
+    }
+  ],
+  "history": [
+    {
+      "trade_date": "20261015",
+      "ts_code": "688617.SH",
+      "name": "惠泰医疗",
+      "action": "add",
+      "score": 80.72,
+      "rank": 16,
+      "reason": "排名 16 进入前 40"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "600809.SH",
+      "name": "山西汾酒",
+      "action": "add",
+      "score": 78.56,
+      "rank": 27,
+      "reason": "排名 27 进入前 40"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "600519.SH",
+      "name": "贵州茅台",
+      "action": "add",
+      "score": 83.27,
+      "rank": 8,
+      "reason": "排名 8 进入前 40"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "600018.SH",
+      "name": "上港集团",
+      "action": "add",
+      "score": 79.59,
+      "rank": 20,
+      "reason": "排名 20 进入前 40"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "300770.SZ",
+      "name": "新媒股份",
+      "action": "add",
+      "score": 78.61,
+      "rank": 26,
+      "reason": "排名 26 进入前 40"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "603268.SH",
+      "name": "松发股份",
+      "action": "remove",
+      "score": 69.82,
+      "rank": 180,
+      "reason": "排名降至 180，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "300917.SZ",
+      "name": "特发服务",
+      "action": "remove",
+      "score": null,
+      "rank": null,
+      "reason": "不再满足准入条件：流通市值 < 50 亿或缺失"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "002011.SZ",
+      "name": "盾安环境",
+      "action": "remove",
+      "score": 69.56,
+      "rank": 184,
+      "reason": "排名降至 184，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "000933.SZ",
+      "name": "神火股份",
+      "action": "remove",
+      "score": 69.34,
+      "rank": 191,
+      "reason": "排名降至 191，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261015",
+      "ts_code": "000807.SZ",
+      "name": "云铝股份",
+      "action": "remove",
+      "score": 70.71,
+      "rank": 157,
+      "reason": "排名降至 157，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "688111.SH",
+      "name": "金山办公",
+      "action": "add",
+      "score": 81.88,
+      "rank": 15,
+      "reason": "排名 15 进入前 40"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "601898.SH",
+      "name": "中煤能源",
+      "action": "add",
+      "score": 83.21,
+      "rank": 12,
+      "reason": "排名 12 进入前 40"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "600674.SH",
+      "name": "川投能源",
+      "action": "add",
+      "score": 80.4,
+      "rank": 24,
+      "reason": "排名 24 进入前 40"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "000690.SZ",
+      "name": "宝新能源",
+      "action": "add",
+      "score": 81.17,
+      "rank": 19,
+      "reason": "排名 19 进入前 40"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "601168.SH",
+      "name": "西部矿业",
+      "action": "remove",
+      "score": 71.28,
+      "rank": 152,
+      "reason": "排名降至 152，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "300850.SZ",
+      "name": "新强联",
+      "action": "remove",
+      "score": 69.66,
+      "rank": 194,
+      "reason": "排名降至 194，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "300759.SZ",
+      "name": "康龙化成",
+      "action": "remove",
+      "score": 68.67,
+      "rank": 225,
+      "reason": "排名降至 225，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261014",
+      "ts_code": "002768.SZ",
+      "name": "国恩股份",
+      "action": "remove",
+      "score": 67.46,
+      "rank": 262,
+      "reason": "排名降至 262，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261013",
+      "ts_code": "601088.SH",
+      "name": "中国神华",
+      "action": "add",
+      "score": 82.51,
+      "rank": 13,
+      "reason": "排名 13 进入前 40"
+    },
+    {
+      "trade_date": "20261013",
+      "ts_code": "603893.SH",
+      "name": "瑞芯微",
+      "action": "remove",
+      "score": 65.09,
+      "rank": 362,
+      "reason": "排名降至 362，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "601900.SH",
+      "name": "南方传媒",
+      "action": "add",
+      "score": 80.12,
+      "rank": 21,
+      "reason": "排名 21 进入前 40"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "002074.SZ",
+      "name": "国轩高科",
+      "action": "add",
+      "score": 80.28,
+      "rank": 20,
+      "reason": "排名 20 进入前 40"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "002027.SZ",
+      "name": "分众传媒",
+      "action": "add",
+      "score": 80.38,
+      "rank": 19,
+      "reason": "排名 19 进入前 40"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "600354.SH",
+      "name": "敦煌种业",
+      "action": "remove",
+      "score": null,
+      "rank": null,
+      "reason": "不再满足准入条件：流通市值 < 50 亿或缺失"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "300628.SZ",
+      "name": "亿联网络",
+      "action": "remove",
+      "score": 68.17,
+      "rank": 268,
+      "reason": "排名降至 268，超出保留阈值 150"
+    },
+    {
+      "trade_date": "20261012",
+      "ts_code": "002440.SZ",
+      "name": "闰土股份",
+      "action": "remove",
+      "score": 69.99,
+      "rank": 204,
+      "reason": "排名降至 204，超出保留阈值 150"
+    }
+  ],
+  "disclaimer": "评分为启发式规则排序，不代表盈利概率。"
+}

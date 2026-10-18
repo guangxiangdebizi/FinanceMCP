@@ -102,7 +102,8 @@ flowchart TD
 
 ## 6. MCP 接口：当前能力与下一阶段扩展
 
-功能分支当前提供五个只读工具：
+Phase B 功能分支提供十个只读工具：原有五个结果工具、四个标准数据工具，以及独立因子快照。生产容器在此次研究期间仍保留 Phase A 九个工具。
+数据工具的参数、返回字段与示例见 [`ashare-data-service.md`](ashare-data-service.md)。
 
 | 已实现工具 | 用途 |
 | --- | --- |
@@ -111,15 +112,16 @@ flowchart TD
 | `ashare_watchlist` | 读取正式股票池及近期增减 |
 | `ashare_stock_analysis` | 读取单股指标、基本面及信号解释 |
 | `ashare_sector_rank` | 读取行业强弱排名 |
+| `ashare_stock_history` | 单股受限区间的原始/复权行情、成交量、可选估值，停牌与缺口分类（阶段 A 已实现） |
+| `ashare_financial_data` | 单股按公告日可得的财务历史、修订字段与上游异常（阶段 A 已实现） |
+| `ashare_market_data` | 指定日期/区间（≤ 60 交易日）的核心指数与全市场宽度、数据质量（阶段 A 已实现） |
+| `ashare_stock_basic` | 股票基础信息（当前口径），按代码或受限检索（阶段 A 已实现） |
 
-下一阶段可在现有模块上增加**候选查询接口**（名称、字段和分页规则仍需设计，不代表已经实现）：
+Phase B 新增接口（见 [版本化分析契约](ashare-analysis-v2.md)）：
 
-| 候选接口 | 优先返回的信息 |
+| 已实现接口 | 返回的信息 |
 | --- | --- |
-| `ashare_market_data` | 指定日期/区间的市场行情与宽度 |
-| `ashare_stock_history` | 指定股票在受限区间的复权行情、成交量和估值 |
-| `ashare_financial_data` | 按公告日可得的财务历史 |
-| `ashare_factor_snapshot` | 某日指定股票集的标准化特征 |
+| `ashare_factor_snapshot` | 指定日期 1–20 只股票的原始/标准化因子、单位版本、准入、V1/V2 贡献与排名、信号及质量；只读、RESEARCH_ONLY |
 
 接口应限制股票数量、日期区间和响应体积。全市场历史事件统计应在 VPS 执行，只向 ChatGPT 返回统计摘要、样本范围、版本和必要明细；不应将全部历史 K 线发送给大模型。避免与当前工具重复定义相同字段的另一套口径。
 
@@ -174,7 +176,9 @@ ChatGPT 不应直接写正式股票池，不应修改评分版本，不应把 `e
 | 代码 | 当前职责 | 长期边界 |
 | --- | --- | --- |
 | `src/ashare/fetch.ts`、`ingest.ts`、`sync.ts` | 数据源调用、日历、同步及质量检查 | 模块 A |
-| `src/ashare/db.ts`、`bars.ts` | SQLite、研究库隔离及行情序列 | A 与 B 之间的标准数据访问边界 |
+| `src/ashare/data.ts` | 数据访问契约：代码/日期/单位、复权公式、公告日约束、市场宽度、基础信息、来源与同步时间 | A 与 B 之间的标准数据访问边界（引擎与 MCP 数据工具共用） |
+| `src/ashare/audit.ts` | 历史缓存缺口审计与安全补齐 | 模块 A |
+| `src/ashare/db.ts`、`bars.ts` | SQLite、研究库隔离及行情序列（`bars.ts` 使用 `data.ts` 的复权定义） | A 与 B 之间的标准数据访问边界 |
 | `src/ashare/indicators.ts`、`signals.ts` | 指标和信号 | 模块 B |
 | `src/ashare/analysis.ts`、`watchlist.ts`、`evidence.ts` | 评分、股票池、研究统计 | 模块 B |
 | `src/ashare/report.ts`、`tools.ts`、`definitions.ts` | 报告和 MCP 查询 | 结果发布及访问接口 |
@@ -189,3 +193,5 @@ ChatGPT 不应直接写正式股票池，不应修改评分版本，不应把 `e
 - **数据时间一致性：** 财务公告日期与历史可得性不等价于所有来源都具有完整 PIT 历史；不得声称未具备的历史还原能力。
 - **版本兼容：** 现有五个工具保持稳定。新增数据接口应优先补足缺失查询能力，而不是重复已有报告和股票池工具。
 - **避免过度设计：** 无证据表明单容器/SQLite 是瓶颈前，不增加额外数据库、队列、专用服务或通用回测平台。
+
+Phase B 的实现、固定切分与评价局限见 [ashare-analysis-v2.md](ashare-analysis-v2.md)，本轮实际结果和验收证据见 [ashare-phaseb-acceptance.md](ashare-phaseb-acceptance.md)。

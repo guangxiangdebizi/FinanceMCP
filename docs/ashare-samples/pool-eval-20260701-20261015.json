@@ -1,0 +1,479 @@
+{
+  "horizon": 5,
+  "dates": 67,
+  "mean_excess_pct": -2.11,
+  "hit_rate": 0.164,
+  "t_stat_overlapping": -7.66,
+  "note": "股票池为启发式评分结果；样本短且持有期重叠，不能据此推断盈利概率",
+  "per_date": [
+    {
+      "trade_date": "20260701",
+      "members": 40,
+      "pool_ret": -10.6,
+      "market_ret": -4.15,
+      "excess": -6.45
+    },
+    {
+      "trade_date": "20260702",
+      "members": 40,
+      "pool_ret": -4.16,
+      "market_ret": -3.96,
+      "excess": -0.2
+    },
+    {
+      "trade_date": "20260703",
+      "members": 40,
+      "pool_ret": -9.5,
+      "market_ret": -4.08,
+      "excess": -5.42
+    },
+    {
+      "trade_date": "20260706",
+      "members": 40,
+      "pool_ret": -10.16,
+      "market_ret": -6.39,
+      "excess": -3.77
+    },
+    {
+      "trade_date": "20260707",
+      "members": 40,
+      "pool_ret": -5.1,
+      "market_ret": -2.74,
+      "excess": -2.36
+    },
+    {
+      "trade_date": "20260708",
+      "members": 34,
+      "pool_ret": -3.32,
+      "market_ret": -0.91,
+      "excess": -2.41
+    },
+    {
+      "trade_date": "20260709",
+      "members": 33,
+      "pool_ret": -11,
+      "market_ret": -1.75,
+      "excess": -9.25
+    },
+    {
+      "trade_date": "20260710",
+      "members": 33,
+      "pool_ret": -12.59,
+      "market_ret": -6.66,
+      "excess": -5.93
+    },
+    {
+      "trade_date": "20260713",
+      "members": 34,
+      "pool_ret": -9.88,
+      "market_ret": -5.44,
+      "excess": -4.44
+    },
+    {
+      "trade_date": "20260714",
+      "members": 37,
+      "pool_ret": -7.53,
+      "market_ret": -5.71,
+      "excess": -1.82
+    },
+    {
+      "trade_date": "20260715",
+      "members": 39,
+      "pool_ret": -4.91,
+      "market_ret": -6.22,
+      "excess": 1.31
+    },
+    {
+      "trade_date": "20260716",
+      "members": 40,
+      "pool_ret": -2.37,
+      "market_ret": -4.47,
+      "excess": 2.1
+    },
+    {
+      "trade_date": "20260717",
+      "members": 39,
+      "pool_ret": 0.22,
+      "market_ret": -3.47,
+      "excess": 3.69
+    },
+    {
+      "trade_date": "20260720",
+      "members": 39,
+      "pool_ret": -0.43,
+      "market_ret": 2.58,
+      "excess": -3.01
+    },
+    {
+      "trade_date": "20260721",
+      "members": 40,
+      "pool_ret": -2.81,
+      "market_ret": 1.16,
+      "excess": -3.97
+    },
+    {
+      "trade_date": "20260722",
+      "members": 40,
+      "pool_ret": -1.76,
+      "market_ret": 2.92,
+      "excess": -4.68
+    },
+    {
+      "trade_date": "20260723",
+      "members": 40,
+      "pool_ret": -0.9,
+      "market_ret": 0.03,
+      "excess": -0.93
+    },
+    {
+      "trade_date": "20260724",
+      "members": 40,
+      "pool_ret": 1.83,
+      "market_ret": 4.66,
+      "excess": -2.83
+    },
+    {
+      "trade_date": "20260727",
+      "members": 40,
+      "pool_ret": -0.23,
+      "market_ret": 3.41,
+      "excess": -3.63
+    },
+    {
+      "trade_date": "20260728",
+      "members": 40,
+      "pool_ret": -0.23,
+      "market_ret": 4.98,
+      "excess": -5.21
+    },
+    {
+      "trade_date": "20260729",
+      "members": 40,
+      "pool_ret": 1,
+      "market_ret": 5.98,
+      "excess": -4.98
+    },
+    {
+      "trade_date": "20260730",
+      "members": 40,
+      "pool_ret": 1.68,
+      "market_ret": 6.85,
+      "excess": -5.16
+    },
+    {
+      "trade_date": "20260731",
+      "members": 40,
+      "pool_ret": 2.07,
+      "market_ret": 6.57,
+      "excess": -4.5
+    },
+    {
+      "trade_date": "20260803",
+      "members": 40,
+      "pool_ret": 3.07,
+      "market_ret": 6.15,
+      "excess": -3.08
+    },
+    {
+      "trade_date": "20260804",
+      "members": 40,
+      "pool_ret": 1.84,
+      "market_ret": 4.31,
+      "excess": -2.48
+    },
+    {
+      "trade_date": "20260805",
+      "members": 40,
+      "pool_ret": 0.1,
+      "market_ret": 3.98,
+      "excess": -3.88
+    },
+    {
+      "trade_date": "20260806",
+      "members": 40,
+      "pool_ret": -0.06,
+      "market_ret": 1.98,
+      "excess": -2.05
+    },
+    {
+      "trade_date": "20260807",
+      "members": 40,
+      "pool_ret": -1.65,
+      "market_ret": 0.92,
+      "excess": -2.56
+    },
+    {
+      "trade_date": "20260810",
+      "members": 40,
+      "pool_ret": -2.58,
+      "market_ret": 2.01,
+      "excess": -4.59
+    },
+    {
+      "trade_date": "20260811",
+      "members": 40,
+      "pool_ret": -0.28,
+      "market_ret": 2.03,
+      "excess": -2.31
+    },
+    {
+      "trade_date": "20260812",
+      "members": 40,
+      "pool_ret": -2.34,
+      "market_ret": -3.7,
+      "excess": 1.36
+    },
+    {
+      "trade_date": "20260813",
+      "members": 39,
+      "pool_ret": 0.85,
+      "market_ret": -1.21,
+      "excess": 2.06
+    },
+    {
+      "trade_date": "20260814",
+      "members": 39,
+      "pool_ret": -0.42,
+      "market_ret": -1.47,
+      "excess": 1.05
+    },
+    {
+      "trade_date": "20260817",
+      "members": 39,
+      "pool_ret": -3.5,
+      "market_ret": -4.07,
+      "excess": 0.57
+    },
+    {
+      "trade_date": "20260818",
+      "members": 39,
+      "pool_ret": -2.59,
+      "market_ret": -1.66,
+      "excess": -0.93
+    },
+    {
+      "trade_date": "20260819",
+      "members": 39,
+      "pool_ret": -2.22,
+      "market_ret": 0.92,
+      "excess": -3.14
+    },
+    {
+      "trade_date": "20260820",
+      "members": 40,
+      "pool_ret": 0.42,
+      "market_ret": 2.18,
+      "excess": -1.77
+    },
+    {
+      "trade_date": "20260821",
+      "members": 40,
+      "pool_ret": 0.36,
+      "market_ret": 1.94,
+      "excess": -1.58
+    },
+    {
+      "trade_date": "20260824",
+      "members": 39,
+      "pool_ret": 2.99,
+      "market_ret": 4.63,
+      "excess": -1.64
+    },
+    {
+      "trade_date": "20260825",
+      "members": 40,
+      "pool_ret": 2.38,
+      "market_ret": 2.99,
+      "excess": -0.61
+    },
+    {
+      "trade_date": "20260826",
+      "members": 40,
+      "pool_ret": 0.37,
+      "market_ret": 2.17,
+      "excess": -1.8
+    },
+    {
+      "trade_date": "20260827",
+      "members": 40,
+      "pool_ret": -0.86,
+      "market_ret": 0.42,
+      "excess": -1.28
+    },
+    {
+      "trade_date": "20260828",
+      "members": 40,
+      "pool_ret": -0.58,
+      "market_ret": 0.61,
+      "excess": -1.19
+    },
+    {
+      "trade_date": "20260831",
+      "members": 40,
+      "pool_ret": -3.94,
+      "market_ret": 0.03,
+      "excess": -3.97
+    },
+    {
+      "trade_date": "20260901",
+      "members": 40,
+      "pool_ret": -1.57,
+      "market_ret": 0.79,
+      "excess": -2.35
+    },
+    {
+      "trade_date": "20260902",
+      "members": 40,
+      "pool_ret": -1.39,
+      "market_ret": 0.07,
+      "excess": -1.46
+    },
+    {
+      "trade_date": "20260903",
+      "members": 40,
+      "pool_ret": -2.9,
+      "market_ret": -1.01,
+      "excess": -1.89
+    },
+    {
+      "trade_date": "20260904",
+      "members": 40,
+      "pool_ret": -2.94,
+      "market_ret": -2.45,
+      "excess": -0.49
+    },
+    {
+      "trade_date": "20260907",
+      "members": 40,
+      "pool_ret": -3.27,
+      "market_ret": -2.7,
+      "excess": -0.56
+    },
+    {
+      "trade_date": "20260908",
+      "members": 40,
+      "pool_ret": -3.85,
+      "market_ret": -4.49,
+      "excess": 0.64
+    },
+    {
+      "trade_date": "20260909",
+      "members": 40,
+      "pool_ret": -4.8,
+      "market_ret": -2.37,
+      "excess": -2.44
+    },
+    {
+      "trade_date": "20260910",
+      "members": 40,
+      "pool_ret": -3.49,
+      "market_ret": -0.56,
+      "excess": -2.93
+    },
+    {
+      "trade_date": "20260911",
+      "members": 40,
+      "pool_ret": -0.54,
+      "market_ret": 2.66,
+      "excess": -3.2
+    },
+    {
+      "trade_date": "20260914",
+      "members": 40,
+      "pool_ret": 1.04,
+      "market_ret": 3.76,
+      "excess": -2.72
+    },
+    {
+      "trade_date": "20260915",
+      "members": 40,
+      "pool_ret": 1.39,
+      "market_ret": 5.43,
+      "excess": -4.03
+    },
+    {
+      "trade_date": "20260916",
+      "members": 40,
+      "pool_ret": 0.75,
+      "market_ret": 3.8,
+      "excess": -3.05
+    },
+    {
+      "trade_date": "20260917",
+      "members": 40,
+      "pool_ret": -1.24,
+      "market_ret": 1.46,
+      "excess": -2.7
+    },
+    {
+      "trade_date": "20260918",
+      "members": 40,
+      "pool_ret": -3.83,
+      "market_ret": -2.02,
+      "excess": -1.81
+    },
+    {
+      "trade_date": "20260921",
+      "members": 40,
+      "pool_ret": -5.04,
+      "market_ret": -3.34,
+      "excess": -1.7
+    },
+    {
+      "trade_date": "20260922",
+      "members": 40,
+      "pool_ret": -4.45,
+      "market_ret": -3.21,
+      "excess": -1.24
+    },
+    {
+      "trade_date": "20260923",
+      "members": 40,
+      "pool_ret": -4.03,
+      "market_ret": -3.61,
+      "excess": -0.42
+    },
+    {
+      "trade_date": "20260924",
+      "members": 40,
+      "pool_ret": -1.63,
+      "market_ret": -1.99,
+      "excess": 0.35
+    },
+    {
+      "trade_date": "20260928",
+      "members": 40,
+      "pool_ret": -2.13,
+      "market_ret": -1.2,
+      "excess": -0.93
+    },
+    {
+      "trade_date": "20260929",
+      "members": 40,
+      "pool_ret": -1.77,
+      "market_ret": -2.17,
+      "excess": 0.41
+    },
+    {
+      "trade_date": "20260930",
+      "members": 40,
+      "pool_ret": -3.14,
+      "market_ret": -3.53,
+      "excess": 0.39
+    },
+    {
+      "trade_date": "20261008",
+      "members": 40,
+      "pool_ret": -5.21,
+      "market_ret": -4.99,
+      "excess": -0.22
+    },
+    {
+      "trade_date": "20261009",
+      "members": 40,
+      "pool_ret": -6.41,
+      "market_ret": -5.22,
+      "excess": -1.19
+    }
+  ]
+}

@@ -21,7 +21,8 @@ import {
   formatIndicatorParams,
   calculateRequiredDays,
   calculateExtendedStartDate,
-  filterDataToUserRange
+  filterDataToUserRange,
+  filterRowsAndIndicators
 } from './stockDataDetail/index.js';
 
 export const stockData = {
@@ -273,7 +274,7 @@ export const stockData = {
             }
           });
           // 过滤到用户指定区间
-          stockData = filterDataToUserRange(stockData, userStartDate, userEndDate);
+          stockData = filterRowsAndIndicators(stockData, indicators, userStartDate, userEndDate);
           console.log(`过滤到用户请求时间范围，剩余${stockData.length}条记录`);
         }
         
@@ -578,6 +579,9 @@ export const stockData = {
           }
         }
         
+        // 指标计算假定行按交易日倒序排列；不同 Tushare 接口的默认排序不一致，这里显式排序。
+        stockData.sort((a: any, b: any) => String(b.trade_date ?? '').localeCompare(String(a.trade_date ?? '')));
+
         // 计算技术指标
         let indicators: Record<string, any> = {};
         
@@ -671,7 +675,7 @@ export const stockData = {
          
          // 过滤数据到用户请求的时间范围
          if (requestedIndicators.length > 0) {
-           stockData = filterDataToUserRange(stockData, userStartDate, userEndDate);
+           stockData = filterRowsAndIndicators(stockData, indicators, userStartDate, userEndDate);
            console.log(`过滤到用户请求时间范围，剩余${stockData.length}条记录`);
          }
         

@@ -1,0 +1,354 @@
+{
+  "data_dir": "/home/jcshi/ashare-verify/data",
+  "started_at": "2026-10-17T07:34:47.923Z",
+  "checks": {
+    "report_20261016_read": {
+      "ok": true,
+      "served": "ASR-20261016-20261016163620-ddd0d0",
+      "latest": "ASR-20261016-20261016163620-ddd0d0",
+      "tool_report_id": "ASR-20261016-20261016163620-ddd0d0",
+      "status": "READY",
+      "watchlist": 40,
+      "tools": {
+        "ashare_data_status": {
+          "chars": 7309,
+          "head": "# A股数据状态 20261016 - 数据质量：**READY** - 日线 5567 条（前一交易日 5565），每日指标覆盖 1，复权因子覆盖 1 - 核"
+        },
+        "ashare_daily_report": {
+          "chars": 92642,
+          "head": "{   \"report_id\": \"ASR-20261016-20261016163620-ddd0d0\",   \"schema\": \"ashare-repor"
+        },
+        "ashare_watchlist": {
+          "chars": 23005,
+          "head": "{   \"report_id\": \"ASR-20261016-20261016163620-ddd0d0\",   \"as_of_trade_date\": \"20"
+        },
+        "ashare_stock_analysis": {
+          "chars": 4847,
+          "head": "{   \"ts_code\": \"600519.SH\",   \"name\": \"贵州茅台\",   \"industry\": \"白酒\",   \"as_of_trade"
+        },
+        "ashare_sector_rank": {
+          "chars": 487,
+          "head": "# 行业强弱排名 20261016（报告 ASR-20261016-20261016163620-ddd0d0） 行业为 Tushare stock_basic"
+        }
+      }
+    },
+    "quality_states": {
+      "ok": true,
+      "states": {
+        "20261016": "READY",
+        "20261017": "NOT_READY",
+        "20261019": "NOT_READY"
+      },
+      "degraded": {
+        "status": "DEGRADED",
+        "reasons": [
+          "涨跌停价覆盖率 0.8362 < 0.95，涨跌停统计不完整"
+        ]
+      }
+    },
+    "same_day_resync": {
+      "ok": true,
+      "baseline": {
+        "daily": 5567,
+        "daily_basic": 5567,
+        "adj_factor": 5577,
+        "stk_limit": 5655
+      },
+      "original_close": 11.5,
+      "restored_close": 11.5,
+      "bogus_rows_left": 0,
+      "corrupted": {
+        "daily": 5568,
+        "daily_basic": 5517,
+        "adj_factor": 5577,
+        "stk_limit": 4655
+      },
+      "after_first": {
+        "daily": 5567,
+        "daily_basic": 5567,
+        "adj_factor": 5577,
+        "stk_limit": 5655
+      },
+      "after_second": {
+        "daily": 5567,
+        "daily_basic": 5567,
+        "adj_factor": 5577,
+        "stk_limit": 5655
+      },
+      "as_of_writes": {
+        "daily": "replaced",
+        "daily_basic": "replaced",
+        "adj_factor": "replaced",
+        "stk_limit": "replaced"
+      },
+      "refreshed": [
+        "20261016"
+      ],
+      "older_days_refetched": [],
+      "sync_history": [
+        {
+          "dataset": "adj_factor",
+          "n": 2
+        },
+        {
+          "dataset": "daily",
+          "n": 2
+        },
+        {
+          "dataset": "daily_basic",
+          "n": 2
+        },
+        {
+          "dataset": "stk_limit",
+          "n": 2
+        }
+      ],
+      "tushare": {
+        "calls": 34,
+        "retries": 0,
+        "rows": 57452
+      }
+    },
+    "replay_isolation": {
+      "ok": true,
+      "before": {
+        "watchlist": "906c8453b95c0418",
+        "changes": "de7cf1be656ae9e6",
+        "scores": "860a0beb8992b267",
+        "reports": "92ec586b18518490",
+        "latest_json": {
+          "20261009": "659f5c2fa48050b3",
+          "20261012": "487ef0d8a9aced92",
+          "20261013": "1990d49f8917ad36",
+          "20261014": "ee66dc84edaa1252",
+          "20261015": "2fc653eef3187de6",
+          "20261016": "87c8cd59cda53515"
+        }
+      },
+      "after": {
+        "watchlist": "906c8453b95c0418",
+        "changes": "de7cf1be656ae9e6",
+        "scores": "860a0beb8992b267",
+        "reports": "92ec586b18518490",
+        "latest_json": {
+          "20261009": "659f5c2fa48050b3",
+          "20261012": "487ef0d8a9aced92",
+          "20261013": "1990d49f8917ad36",
+          "20261014": "ee66dc84edaa1252",
+          "20261015": "2fc653eef3187de6",
+          "20261016": "87c8cd59cda53515"
+        }
+      },
+      "replay": [
+        {
+          "trade_date": "20261012",
+          "status": "READY",
+          "count": 40
+        },
+        {
+          "trade_date": "20261013",
+          "status": "READY",
+          "count": 40
+        },
+        {
+          "trade_date": "20261014",
+          "status": "READY",
+          "count": 40
+        },
+        {
+          "trade_date": "20261015",
+          "status": "READY",
+          "count": 40
+        },
+        {
+          "trade_date": "20261016",
+          "status": "READY",
+          "count": 40
+        }
+      ],
+      "manual": [
+        {
+          "space": "research",
+          "trade_date": "20261014",
+          "status": "READY",
+          "report_id": "ASR-20261014-20261017073603-d2922b",
+          "path": "/home/jcshi/ashare-verify/data/research/reports/20261014/ASR-20261014-20261017073603-d2922b.json"
+        },
+        {
+          "space": "research",
+          "trade_date": "20261016",
+          "status": "READY",
+          "report_id": "ASR-20261016-20261017073612-02f2af",
+          "path": "/home/jcshi/ashare-verify/data/research/reports/20261016/ASR-20261016-20261017073612-02f2af.json"
+        },
+        {
+          "space": "research",
+          "trade_date": "20261019",
+          "status": "NOT_READY",
+          "report_id": "ASR-20261019-20261017073620-1e8dc2",
+          "path": "/home/jcshi/ashare-verify/data/research/reports/20261019/ASR-20261019-20261017073620-1e8dc2.json"
+        }
+      ],
+      "mcp_after_reports": {
+        "report_id": "ASR-20261016-20261016163620-ddd0d0",
+        "run_mode": "live",
+        "watchlist": 40
+      },
+      "research_reports": [
+        {
+          "run_mode": "manual",
+          "n": 3
+        },
+        {
+          "run_mode": "replay",
+          "n": 5
+        }
+      ],
+      "latest_after": "ASR-20261016-20261016163620-ddd0d0"
+    },
+    "refresh_anomalies": {
+      "ok": true,
+      "short": {
+        "daily": {
+          "refresh_status": "REFRESH_INCOMPLETE",
+          "write": "kept",
+          "fetched_rows": 3000,
+          "rows": 5567
+        },
+        "cache_status": "READY",
+        "status": "DEGRADED",
+        "refresh_reasons": [
+          "最新一次刷新 daily 不完整（返回 3000 条，沿用上一次有效快照 5567 条，2026-10-17T07:36:26.316Z）"
+        ],
+        "counts": {
+          "daily": 5567,
+          "daily_basic": 5567,
+          "adj_factor": 5577,
+          "stk_limit": 5655
+        }
+      },
+      "failed": {
+        "daily": {
+          "refresh_status": "REFRESH_FAILED",
+          "write": "none",
+          "fetched_rows": 0,
+          "rows": 5567
+        },
+        "cache_status": "READY",
+        "status": "DEGRADED",
+        "refresh_reasons": [
+          "最新一次刷新 daily 请求失败（Tushare API错误 (daily): 参数异常：注入的上游错误; refresh; prev 20261015=5565；沿用已有缓存，2026-10-17T07:36:28.024Z）"
+        ],
+        "counts": {
+          "daily": 5567,
+          "daily_basic": 5567,
+          "adj_factor": 5577,
+          "stk_limit": 5655
+        }
+      },
+      "recovered": {
+        "daily": {
+          "refresh_status": "REFRESH_OK",
+          "write": "replaced",
+          "fetched_rows": 5567,
+          "rows": 5567
+        },
+        "cache_status": "READY",
+        "status": "READY",
+        "refresh_reasons": [],
+        "counts": {
+          "daily": 5567,
+          "daily_basic": 5567,
+          "adj_factor": 5577,
+          "stk_limit": 5655
+        }
+      },
+      "history": [
+        {
+          "synced_at": "2026-10-17T07:35:10.896Z",
+          "rows": 5567,
+          "status": "ok",
+          "refresh_status": "REFRESH_OK",
+          "before_rows": 5568,
+          "after_rows": 5567,
+          "write_mode": "replaced"
+        },
+        {
+          "synced_at": "2026-10-17T07:35:17.502Z",
+          "rows": 5567,
+          "status": "ok",
+          "refresh_status": "REFRESH_OK",
+          "before_rows": 5567,
+          "after_rows": 5567,
+          "write_mode": "replaced"
+        },
+        {
+          "synced_at": "2026-10-17T07:36:26.316Z",
+          "rows": 3000,
+          "status": "ok",
+          "refresh_status": "REFRESH_INCOMPLETE",
+          "before_rows": 5567,
+          "after_rows": 5567,
+          "write_mode": "kept"
+        },
+        {
+          "synced_at": "2026-10-17T07:36:28.024Z",
+          "rows": 0,
+          "status": "ok",
+          "refresh_status": "REFRESH_FAILED",
+          "before_rows": 5567,
+          "after_rows": 5567,
+          "write_mode": "none"
+        },
+        {
+          "synced_at": "2026-10-17T07:36:30.438Z",
+          "rows": 5567,
+          "status": "ok",
+          "refresh_status": "REFRESH_OK",
+          "before_rows": 5567,
+          "after_rows": 5567,
+          "write_mode": "replaced"
+        }
+      ]
+    },
+    "as_of_invariance": {
+      "ok": true,
+      "end": "20261009",
+      "as_of_dates": 62,
+      "pending_dates": 5,
+      "mean_excess_pct": -2.25,
+      "truncated_dates": 62,
+      "truncated_mean": -2.25,
+      "previous_code_equivalent": {
+        "dates": 67,
+        "mean_excess_pct": -2.11,
+        "leaked_dates": [
+          "20260928",
+          "20260929",
+          "20260930",
+          "20261008",
+          "20261009"
+        ]
+      },
+      "evidence_as_of_20260801": {
+        "start": "20240102",
+        "end": "20261016",
+        "computed_at": "2026-10-16T16:16:16.867Z",
+        "as_of": "20260801",
+        "usable_as_of": false
+      }
+    }
+  },
+  "run_mode_backfill": [
+    {
+      "run_mode": "live",
+      "n": 1
+    },
+    {
+      "run_mode": "replay",
+      "n": 74
+    }
+  ],
+  "finished_at": "2026-10-17T07:36:41.392Z",
+  "passed": true
+}

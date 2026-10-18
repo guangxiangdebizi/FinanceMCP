@@ -1,0 +1,46 @@
+# The Caddyfile is an easy way to configure your Caddy web server.
+#
+# Unless the file starts with a global options block, the first
+# uncommented line is always the address of your site.
+#
+# To use your own domain name (with automatic HTTPS), first make
+# sure your domain's A/AAAA DNS records are properly pointed to
+# this machine's public IP, then replace ":80" below with your
+# domain name.
+
+share.shijingchang.cn {
+	# X Full Reader MCP (streamable HTTP) - local loopback upstream.
+	# Keep this handle block first: it only matches /mcp* and every other
+	# path falls through to the configuration below unchanged.
+	handle /mcp* {
+		reverse_proxy 127.0.0.1:8125
+	}
+
+	# Set this path to your site's directory.
+	root * /usr/share/caddy
+
+	# Enable the static file server.
+	file_server
+
+	# Another common task is to set up a reverse proxy:
+	reverse_proxy 127.0.0.1:3000
+
+    	encode gzip
+
+    	header {
+          X-Frame-Options SAMEORIGIN
+          X-Content-Type-Options nosniff
+          Referrer-Policy no-referrer-when-downgrade
+        }
+
+	# Or serve a PHP site through php-fpm:
+	# php_fastcgi localhost:9000
+}
+
+files.shijingchang.cn {
+    root * /home/jcshi/share
+    file_server browse
+}
+
+# Refer to the Caddy docs for more information:
+# https://caddyserver.com/docs/caddyfile

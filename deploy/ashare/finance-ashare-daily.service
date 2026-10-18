@@ -1,0 +1,8 @@
+[Unit]
+Description=FinanceMCP A-share daily sync, analysis and report snapshot
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/workspace/FinanceMCP/deploy/ashare/run-daily.sh
+TimeoutStartSec=3600

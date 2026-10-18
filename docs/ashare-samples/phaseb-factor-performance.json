@@ -1,0 +1,300 @@
+{
+  "schema_version": "factor-performance-evidence-1.0.0",
+  "status": "PASS",
+  "date": "20261016",
+  "command": "node deploy/ashare/verify-factor-performance.mjs '/home/jcshi/ashare-research/ashare-20261016.sqlite' '/home/jcshi/workspace/FinanceMCP/docs/ashare-samples/phaseb-factor-performance.json' '20261016'",
+  "node_version": "v24.16.0",
+  "platform": "linux/arm64",
+  "cpu_model": "Neoverse-N1",
+  "method": {
+    "warmup_runs": 1,
+    "measured_runs": 3,
+    "statistic": "median of measured runs",
+    "cpu": "process.cpuUsage() delta (user + system) around each call; single-threaded Node process",
+    "peak_rss": "process.resourceUsage().maxRSS high-water mark of this process (Linux: KiB -> MB)",
+    "response_bytes": "UTF-8 byte length of the MCP tool result text (JSON, include_components=true)",
+    "caveat": "Each call recomputes the full-market scan and normalization (~5.5k stocks) before filtering to the requested codes; per-call cost is therefore dominated by the universe, not the requested count."
+  },
+  "snapshot": {
+    "path": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
+    "file": "ashare-20261016.sqlite",
+    "bytes": 1685577728,
+    "sha256_before": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+    "sha256_after": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+    "sidecar": {
+      "recorded": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1"
+    }
+  },
+  "requests": [
+    {
+      "count": 1,
+      "ts_codes": [
+        "000001.SZ"
+      ],
+      "warmup": [
+        {
+          "measured": false,
+          "wall_ms": 8943.76,
+          "cpu_ms": 9171.53,
+          "cpu_user_ms": 8920.81,
+          "cpu_system_ms": 250.71,
+          "rss_mb_before": 85.83,
+          "rss_peak_mb": 1044.93,
+          "response_bytes": 8988,
+          "response_sha256": "81cbac1ae590c61e24b1724fe34a388283c6420c3a359be435eb76e63f66132b",
+          "returned": 1
+        }
+      ],
+      "runs": [
+        {
+          "measured": true,
+          "wall_ms": 8673.02,
+          "cpu_ms": 8853.8,
+          "cpu_user_ms": 8763.75,
+          "cpu_system_ms": 90.06,
+          "rss_mb_before": 1044.93,
+          "rss_peak_mb": 1134.51,
+          "response_bytes": 8988,
+          "response_sha256": "81cbac1ae590c61e24b1724fe34a388283c6420c3a359be435eb76e63f66132b",
+          "returned": 1
+        },
+        {
+          "measured": true,
+          "wall_ms": 8611.57,
+          "cpu_ms": 8703.69,
+          "cpu_user_ms": 8640.91,
+          "cpu_system_ms": 62.79,
+          "rss_mb_before": 1134.51,
+          "rss_peak_mb": 1168.89,
+          "response_bytes": 8988,
+          "response_sha256": "81cbac1ae590c61e24b1724fe34a388283c6420c3a359be435eb76e63f66132b",
+          "returned": 1
+        },
+        {
+          "measured": true,
+          "wall_ms": 8580.34,
+          "cpu_ms": 8696.97,
+          "cpu_user_ms": 8641.14,
+          "cpu_system_ms": 55.83,
+          "rss_mb_before": 1168.89,
+          "rss_peak_mb": 1169.22,
+          "response_bytes": 8988,
+          "response_sha256": "81cbac1ae590c61e24b1724fe34a388283c6420c3a359be435eb76e63f66132b",
+          "returned": 1
+        }
+      ],
+      "median": {
+        "wall_ms": 8611.57,
+        "cpu_ms": 8703.69,
+        "response_bytes": 8988,
+        "wall_ms_min": 8580.34,
+        "wall_ms_max": 8673.02,
+        "peak_rss_mb": 1169.22
+      },
+      "deterministic": true,
+      "returned_matches": true
+    },
+    {
+      "count": 5,
+      "ts_codes": [
+        "000001.SZ",
+        "000017.SZ",
+        "000019.SZ",
+        "000020.SZ",
+        "000021.SZ"
+      ],
+      "warmup": [
+        {
+          "measured": false,
+          "wall_ms": 8424.31,
+          "cpu_ms": 8499.48,
+          "cpu_user_ms": 8467.88,
+          "cpu_system_ms": 31.6,
+          "rss_mb_before": 1169.22,
+          "rss_peak_mb": 1169.22,
+          "response_bytes": 15308,
+          "response_sha256": "aa5291a408566d5f10f8a6faa01c0a0bc09cae3273a67ddfad8bdbcacc009f23",
+          "returned": 5
+        }
+      ],
+      "runs": [
+        {
+          "measured": true,
+          "wall_ms": 8410.72,
+          "cpu_ms": 8500,
+          "cpu_user_ms": 8454.56,
+          "cpu_system_ms": 45.44,
+          "rss_mb_before": 1169.22,
+          "rss_peak_mb": 1169.22,
+          "response_bytes": 15308,
+          "response_sha256": "aa5291a408566d5f10f8a6faa01c0a0bc09cae3273a67ddfad8bdbcacc009f23",
+          "returned": 5
+        },
+        {
+          "measured": true,
+          "wall_ms": 8388.94,
+          "cpu_ms": 8464.79,
+          "cpu_user_ms": 8423.08,
+          "cpu_system_ms": 41.71,
+          "rss_mb_before": 1169.22,
+          "rss_peak_mb": 1169.22,
+          "response_bytes": 15308,
+          "response_sha256": "aa5291a408566d5f10f8a6faa01c0a0bc09cae3273a67ddfad8bdbcacc009f23",
+          "returned": 5
+        },
+        {
+          "measured": true,
+          "wall_ms": 8294.4,
+          "cpu_ms": 8359.24,
+          "cpu_user_ms": 8322.46,
+          "cpu_system_ms": 36.78,
+          "rss_mb_before": 1169.22,
+          "rss_peak_mb": 1169.22,
+          "response_bytes": 15308,
+          "response_sha256": "aa5291a408566d5f10f8a6faa01c0a0bc09cae3273a67ddfad8bdbcacc009f23",
+          "returned": 5
+        }
+      ],
+      "median": {
+        "wall_ms": 8388.94,
+        "cpu_ms": 8464.79,
+        "response_bytes": 15308,
+        "wall_ms_min": 8294.4,
+        "wall_ms_max": 8410.72,
+        "peak_rss_mb": 1169.22
+      },
+      "deterministic": true,
+      "returned_matches": true
+    },
+    {
+      "count": 20,
+      "ts_codes": [
+        "000001.SZ",
+        "000017.SZ",
+        "000019.SZ",
+        "000020.SZ",
+        "000021.SZ",
+        "000025.SZ",
+        "000026.SZ",
+        "000027.SZ",
+        "000028.SZ",
+        "000030.SZ",
+        "000034.SZ",
+        "000035.SZ",
+        "000036.SZ",
+        "000037.SZ",
+        "000045.SZ",
+        "000049.SZ",
+        "000058.SZ",
+        "000060.SZ",
+        "000061.SZ",
+        "000062.SZ"
+      ],
+      "warmup": [
+        {
+          "measured": false,
+          "wall_ms": 8315.15,
+          "cpu_ms": 8417.76,
+          "cpu_user_ms": 8372.87,
+          "cpu_system_ms": 44.89,
+          "rss_mb_before": 1169.22,
+          "rss_peak_mb": 1170.53,
+          "response_bytes": 43383,
+          "response_sha256": "bd0e62bf209036054660daf6a25039a2d9b4a71588f6ee0a736435e371b0fdf0",
+          "returned": 20
+        }
+      ],
+      "runs": [
+        {
+          "measured": true,
+          "wall_ms": 8320.53,
+          "cpu_ms": 8397.35,
+          "cpu_user_ms": 8363.28,
+          "cpu_system_ms": 34.07,
+          "rss_mb_before": 1170.53,
+          "rss_peak_mb": 1170.53,
+          "response_bytes": 43383,
+          "response_sha256": "bd0e62bf209036054660daf6a25039a2d9b4a71588f6ee0a736435e371b0fdf0",
+          "returned": 20
+        },
+        {
+          "measured": true,
+          "wall_ms": 8313.14,
+          "cpu_ms": 8370.1,
+          "cpu_user_ms": 8322.18,
+          "cpu_system_ms": 47.92,
+          "rss_mb_before": 1170.53,
+          "rss_peak_mb": 1170.53,
+          "response_bytes": 43383,
+          "response_sha256": "bd0e62bf209036054660daf6a25039a2d9b4a71588f6ee0a736435e371b0fdf0",
+          "returned": 20
+        },
+        {
+          "measured": true,
+          "wall_ms": 8304.52,
+          "cpu_ms": 8453.17,
+          "cpu_user_ms": 8412.16,
+          "cpu_system_ms": 41.01,
+          "rss_mb_before": 1170.53,
+          "rss_peak_mb": 1170.53,
+          "response_bytes": 43383,
+          "response_sha256": "bd0e62bf209036054660daf6a25039a2d9b4a71588f6ee0a736435e371b0fdf0",
+          "returned": 20
+        }
+      ],
+      "median": {
+        "wall_ms": 8313.14,
+        "cpu_ms": 8397.35,
+        "response_bytes": 43383,
+        "wall_ms_min": 8304.52,
+        "wall_ms_max": 8320.53,
+        "peak_rss_mb": 1170.53
+      },
+      "deterministic": true,
+      "returned_matches": true
+    }
+  ],
+  "checks": {
+    "deterministic:1": true,
+    "returned_count:1": true,
+    "deterministic:5": true,
+    "returned_count:5": true,
+    "deterministic:20": true,
+    "returned_count:20": true,
+    "bounded_max_codes": true,
+    "no_database_writes": true,
+    "write_refused": true,
+    "source_sha256_unchanged": true,
+    "snapshot_matches_recorded_sha256": true
+  },
+  "failures": [],
+  "versions": {
+    "score_version": "score-1.0.0",
+    "engine_version": "engine-1.0.0",
+    "factor_version": "factor-1.0.0"
+  },
+  "universe": {
+    "priced_on_date": 3933
+  },
+  "acceptance": {
+    "full_market_recompute": "Every call scans and normalizes the full market before filtering; a 20-code request is not 20x a 1-code request.",
+    "wall_ms_by_count": {
+      "1": 8611.57,
+      "5": 8388.94,
+      "20": 8313.14
+    },
+    "cpu_ms_by_count": {
+      "1": 8703.69,
+      "5": 8464.79,
+      "20": 8397.35
+    },
+    "response_bytes_by_count": {
+      "1": 8988,
+      "5": 15308,
+      "20": 43383
+    },
+    "flatness_ratio_20_over_1": 0.965,
+    "judgement": "ACCEPTABLE for an interactive research tool: worst measured median stays under 15 s, and the 20-code call costs about the same as a 1-code call because the full market is always recomputed. No cache layer is warranted for this research-only interface."
+  },
+  "completed_at": "2026-10-17T18:27:35.475Z"
+}

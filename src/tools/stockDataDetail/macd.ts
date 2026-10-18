@@ -29,21 +29,13 @@ export function calculateMACD(prices: number[], fastPeriod = 12, slowPeriod = 26
   const emaSlow = calculateEMA(prices, slowPeriod);
   
   const dif = emaFast.map((fast, i) => fast - emaSlow[i]);
-  const dea = calculateEMA(dif.filter(x => !isNaN(x)), signalPeriod);
-  
-  // 为了保持数组长度一致，在DEA前面填充NaN
-  const fullDea: number[] = [];
-  const nanCount = slowPeriod - 1;
-  for (let i = 0; i < nanCount; i++) {
-    fullDea.push(NaN);
-  }
-  fullDea.push(...dea);
-  
-  const macd = dif.map((d, i) => (d - fullDea[i]) * 2);
+  // DEA 与 DIF 必须逐日对齐：直接对完整 DIF 序列做 EMA，不能额外前置填充。
+  const dea = calculateEMA(dif, signalPeriod);
+  const macd = dif.map((d, i) => (d - dea[i]) * 2);
   
   return {
     dif,
-    dea: fullDea,
+    dea,
     macd
   };
 } 
