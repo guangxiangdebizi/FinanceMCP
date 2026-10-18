@@ -202,6 +202,31 @@ df -h ~ ; ls -la ~/.local/share/finance-mcp-ashare/reports/<YYYYMMDD>/
    次日查看任务输出中的报告 ID 与生成时间，同样与数据库比对。
 4. 在 21:10 之前调用会得到 `PENDING`/旧的 18:40 版本或 `NOT_READY`，属预期行为，不算失败。
 
+### 8.4 调度核验范围（2026-10-18）
+
+**timer 在 systemd 用户级作用域，不在系统级。** 实际安装位置是 `~/.config/systemd/user/finance-ashare-daily.timer`
+（`timers.target.wants/` 中的符号链接指向同一文件），用户 `jcshi` 的 linger 已启用（`loginctl show-user jcshi -p Linger` → `yes`），
+因此用户管理器在未登录时也会启动 timer。`deploy/ashare/verify-production-untouched.mjs` 的旧版本只执行 `systemctl`
+（系统级），由此得出“不存在 A 股 timer”的结论是**错误的**：系统级确实为零，但用户级有一个且已启用。
+`check-schedule.sh` 一直使用 `journalctl --user`，所以调度证据本身没有受这个错误影响。
+
+核验方式已改为分别记录两个作用域（`systemctl --user` 与 `systemctl`），并断言同一 timer 仍存在于同一作用域、仍为 `enabled`、
+`OnCalendar` 与 `ExecStart` 未变；timer 消失是 FAIL，不会静默通过。2026-10-18 实测：
+
+```
+host=foodfactory-vm user=jcshi scope=user linger=yes
+unit=finance-ashare-daily.timer  enabled=enabled  active=active
+next_elapse=Mon 2026-10-19 10:41:17 UTC（= 18:41:17 CST，含 RandomizedDelaySec=120）
+last_trigger=（空，timer 尚未自动触发过）
+OnCalendar=Mon..Fri 18:40:00 / 21:10:00 Asia/Shanghai
+service=finance-ashare-daily.service
+ExecStart=/home/jcshi/workspace/FinanceMCP/deploy/ashare/run-daily.sh
+script_sha256=a15ba73022271b54930bccb71199294f7efa5d92dfae6d17581b4e9a21c1176a
+系统级 A 股 timer：0（不是“没有任何定时任务”）
+```
+
+2026-10-19 / 10-20 / 10-21 的连续交易日验收仍为 **PENDING**，见 §8.2。
+
 ## 9. 第二轮正确性修复（2026-10-17，goal `docs/goal/1017-v1-fix.md`）
 
 审阅基线 `371c2c4`。修复提交 `55b2b09`（分支 `ashare-v1-fix`，基于 `ashare-daily`）。修复前已将正式库备份为
