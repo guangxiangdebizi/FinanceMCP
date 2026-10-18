@@ -579,7 +579,7 @@ test('R2-A2-2. 对账一致时决策正常；每个决策都披露完整性与�
   assert.equal(d.account_status.unreported_trade_risk, false);
 });
 
-test('R2-A1-3. 未声明完整性 → 不可执行；声明存在未上报风险 → 可执行但必须披露', () => {
+test('R2-A1-3. 未声明完整性 → 不可执行；声明存在未上报风险 → 只能示意，不得 executable', () => {
   ledger.initBaseline(portfolio, 'r2-nocompleteness', { asOf: LAST, snapshotId: 'r2-current', note: 'fixture' });
   ledger.confirmRealAccount(portfolio, 'r2-nocompleteness', { confirm: true, note: 'r2 test fixture' });
   try {
@@ -587,16 +587,36 @@ test('R2-A1-3. 未声明完整性 → 不可执行；声明存在未上报风险
     assert.equal(status.ok, false);
     assert.ok(status.reasons.some(r => r.code === 'account_completeness_undeclared'), JSON.stringify(status.reasons));
 
+    // 声明"覆盖到决策日"，但缺省 unreported_trade_risk=true。
     ledger.setAccountCompleteness(portfolio, 'r2-nocompleteness', { as_of: LAST }, { confirm: true, recordedBy: 'test-fixture' });
     const risky = decision.evaluateAccountStatus(portfolio, current, 'r2-nocompleteness', LAST);
     assert.equal(risky.ok, true, JSON.stringify(risky.reasons));
     assert.equal(risky.unreported_trade_risk, true, '缺省即存在未上报交易风险');
     assert.equal(risky.state_basis, 'same_day_snapshot');
 
+    // 可执行腿是对"当前现金/份额"的承诺，而未上报成交可能已改变它们：
+    // 交易类表达必须降级为 ILLUSTRATIVE，且所有腿 executable:false。
     const d = rotation({ account_id: 'r2-nocompleteness' });
-    assert.equal(d.status, 'ACTIONABLE', JSON.stringify(d.reasons));
+    assert.equal(d.status, 'ILLUSTRATIVE', JSON.stringify(d.reasons));
     assert.equal(d.account_status.unreported_trade_risk, true);
     assert.ok(d.warnings.some(w => /unreported_trade_risk/.test(w)), JSON.stringify(d.warnings));
+    assert.ok(d.reasons.some(r => r.code === 'unreported_trade_risk'), JSON.stringify(d.reasons));
+    const rotate = rotateOf(d);
+    assert.equal(rotate.executable, false);
+    assert.deepEqual(rotate.legs, []);
+    assert.ok(rotate.illustrative_legs.every(l => l.executable === false));
+
+    // 研究类（HOLD）不受影响：它不承诺任何数量。
+    const hold = buildDecision(base({ account_id: 'r2-nocompleteness', action: { type: 'HOLD' } }));
+    assert.ok(hold.warnings.some(w => /unreported_trade_risk/.test(w)));
+
+    // 用户显式声明"已录入到决策日、无未上报风险"后才恢复可执行。
+    ledger.setAccountCompleteness(portfolio, 'r2-nocompleteness', {
+      as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false,
+    }, { confirm: true, recordedBy: 'test-fixture' });
+    const clean = rotation({ account_id: 'r2-nocompleteness' });
+    assert.equal(clean.status, 'ACTIONABLE', JSON.stringify(clean.reasons));
+    assert.equal(clean.account_status.unreported_trade_risk, false);
   } finally {
     portfolio.prepare('DELETE FROM account_completeness WHERE account_id = ?').run('r2-nocompleteness');
   }

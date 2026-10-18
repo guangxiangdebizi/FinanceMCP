@@ -422,6 +422,7 @@ export type DecisionReasonCode =
   | 'account_reconstruction_unavailable'
   | 'account_completeness_undeclared'
   | 'account_reconciliation_mismatch'
+  | 'unreported_trade_risk'
   | 'as_of_not_trading_day'
   | 'risk_budget_exceeded'
   | 'stock_not_cached'
@@ -1163,7 +1164,18 @@ export function buildDecision(input: DecisionInput): DecisionResult {
   // warnings 输出约定是"无空格的原因码"，细节在 account_status 里完整保留。
   for (const w of accountStatus.warnings) warnings.push(w.code);
   // 未上报交易风险：必须随结果一起披露，且不得声称与券商实时一致。
-  if (accountStatus.unreported_trade_risk) warnings.push('unreported_trade_risk');
+  // 交易类表达额外降级为软性原因：可执行腿是对"当前现金/份额"的承诺，而未上报的
+  // 成交可能已经改变它们。研究/示意仍可计算，但 executable 必须为 false。
+  if (accountStatus.unreported_trade_risk) {
+    warnings.push('unreported_trade_risk');
+    if (tradeRequested) {
+      reasons.push({
+        code: 'unreported_trade_risk',
+        detail: '账户存在未上报交易的风险（完整性声明未覆盖决策日或声明为存在风险）：'
+          + '可执行数量依赖当前现金与份额，未上报成交可能已使其失效，因此只给示意。',
+      });
+    }
+  }
 
   const before = buildState(input, quotes);
   const evidence = normalizeEvidence(input.evidence, {
@@ -1186,9 +1198,18 @@ export function buildDecision(input: DecisionInput): DecisionResult {
   options.push(hold);
 
   const reduceSpec = reduceLegOf(input);
-  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk, accountStatus));
+  // 未上报交易风险必须进入**选项级**原因，否则选项自己算出的状态仍会是 ACTIONABLE
+  // （顶层 reasons 只影响主请求状态，不影响单个选项的 executable）。
+  const accountIssuesForOptions: Reason[] = accountStatus.reasons.slice();
+  if (tradeRequested && accountStatus.unreported_trade_risk) {
+    accountIssuesForOptions.push({
+      code: 'unreported_trade_risk',
+      detail: '账户存在未上报交易的风险：可执行数量依赖当前现金与份额，未上报成交可能已使其失效，因此只给示意。',
+    });
+  }
+  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, accountStatus));
 
-  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk, evidence, accountStatus);
+  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, evidence, accountStatus);
   options.push(rotate);
 
   options.push(optionNoAction(before, input.action.type === 'NO_ACTION' ? (input.action.reason ?? '调用方选择不操作') : '保留现金与现有持仓，不产生交易', stressRules, fees));
@@ -1483,6 +1504,8 @@ const SOFT_REASONS = new Set<string>([
   'account_reconstruction_unavailable', 'account_completeness_undeclared',
   // 传入快照与账户库/账本自相矛盾：绝不能被"未列入任何集合"的默认分支放行成 ACTIONABLE。
   'account_snapshot_mismatch',
+  // 存在未上报交易风险：交易类表达只给示意，executable 必须为 false。
+  'unreported_trade_risk',
 ]);
 
 function statusOfReasons(reasons: Reason[], canCompute: boolean): DecisionStatus {
