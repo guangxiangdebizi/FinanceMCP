@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   RESEARCH_SCORE_VERSION, SCORE_RULES, SCORE_VERSION, scanMarket, scoreRows,
@@ -86,10 +86,61 @@ export function openLiveReadOnly(path = ashareDbPath()): DatabaseSync {
   return db;
 }
 
-function openSnapshotDb(path: string): DatabaseSync {
-  if (path === ashareDbPath()) throw new Error('研究快照数据库不能与正式数据库相同');
-  mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
+/**
+ * Resolve a path to an absolute path with every existing component symlink-free.
+ * The tail below the deepest existing ancestor is appended unchanged, so a
+ * research database that does not exist yet is still compared through symlinked
+ * parent directories.
+ */
+function realPathOfNearestAncestor(path: string): string {
+  const absolute = resolve(path);
+  const tail: string[] = [];
+  let current = absolute;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return absolute;
+    tail.unshift(basename(current));
+    current = parent;
+  }
+  let base: string;
+  try { base = realpathSync.native(current); } catch { base = current; }
+  return tail.length ? join(base, ...tail) : base;
+}
+
+/** `dev:ino` of an existing file; null when it cannot be stat'ed (missing path). */
+function fileIdentity(path: string): string | null {
+  try {
+    const stat = statSync(path, { bigint: true });
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refuse a research database that is the live database under any alias: a
+ * relative path, `.`/`..` segments, a symlink, a hard link, or a symlinked
+ * parent directory. Returns the resolved research path. Runs before anything is
+ * created or opened writable on the research path.
+ */
+export function assertSeparateFromLive(researchPath: string, livePath: string = ashareDbPath()): string {
+  const research = realPathOfNearestAncestor(researchPath);
+  const live = realPathOfNearestAncestor(livePath);
+  const reject = () => new Error(`研究快照数据库与正式数据库指向同一文件（${research}），拒绝执行`);
+  if (research === live) throw reject();
+  // A hard link has a different path but the same inode. Symlinks are already
+  // resolved above; the identity check also covers case-insensitive filesystems,
+  // where a differently-cased path opens the live file. A missing research path
+  // cannot be a hard link, so identity is only compared when both stat succeed.
+  const researchId = fileIdentity(research);
+  if (researchId !== null && researchId === fileIdentity(live)) throw reject();
+  return research;
+}
+
+function openSnapshotDb(path: string, livePath: string = ashareDbPath()): DatabaseSync {
+  const resolved = assertSeparateFromLive(path, livePath);
+  mkdirSync(dirname(resolved), { recursive: true });
+  const db = new DatabaseSync(resolved);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000;');
   db.exec(SNAPSHOT_SCHEMA);
   return db;
@@ -432,6 +483,8 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
   const horizon = horizonOf(options.horizon);
   const livePath = options.liveDbPath ?? ashareDbPath();
   const dbPath = options.dbPath ?? researchSnapshotDbPath();
+  // Refuse a research path that aliases the live database before opening either file.
+  assertSeparateFromLive(dbPath, livePath);
   const live = openLiveReadOnly(livePath);
   let snap: DatabaseSync | undefined;
   try {
@@ -452,7 +505,7 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
     const report = liveReport(live, date);
     if (!report) return { status: 'PENDING', date, reason: 'no_live_report', data_cutoff: cutoff, quality_status: quality.status };
 
-    snap = openSnapshotDb(dbPath);
+    snap = openSnapshotDb(dbPath, livePath);
     const existing = snap.prepare('SELECT snapshot_id, status, revises, created_at, content_digest, content FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
 
     if (existing.length && !options.revise) {
@@ -540,9 +593,12 @@ export function runResearchEvaluate(options: ResearchEvaluateOptions) {
   const horizon = horizonOf(options.horizon);
   const livePath = options.liveDbPath ?? ashareDbPath();
   const dbPath = options.dbPath ?? researchSnapshotDbPath();
+  // Path identity is checked first: an alias of the live database must be
+  // rejected even though the file exists.
+  assertSeparateFromLive(dbPath, livePath);
   if (!existsSync(dbPath)) throw new Error(`快照数据库不存在: ${dbPath}（请先运行 research-snapshot）`);
   const live = openLiveReadOnly(livePath);
-  const snap = openSnapshotDb(dbPath);
+  const snap = openSnapshotDb(dbPath, livePath);
   try {
     const rows = snap.prepare('SELECT snapshot_id, status, revises, created_at, content FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
     if (!rows.length) return { status: 'PENDING', reason: 'no_snapshot_for_date', trade_date: date, db: dbPath };
