@@ -143,8 +143,12 @@ test('2. 部分卖出：数量减少、成本按比例减少、已实现盈亏�
   assert.equal(p.cost_milli_avg, 1103);
   // 净收入 74,500 − 成本 55,150 = 19,350
   assert.equal(p.realized_pnl_cents, 19350);
-  assert.equal(s.cash.balance_cents, 953900);          // 879,400 + 74,500（ETF 当日交收）
-  assert.equal(s.cash.unsettled_cents, 0);
+  assert.equal(s.cash.balance_cents, 953900);          // 879,400 + 74,500
+  // 159999.SZ 是股票/权益 ETF：卖出 T+1，当日仍在未交收池（R2 A3 修复）。
+  assert.equal(s.cash.settled_cents, 879400);
+  assert.equal(s.cash.unsettled_cents, 74500);
+  assert.equal(s.cash.withdrawable_cents, 879400);
+  assert.equal(s.cash.buying_power_cents, 953900);
 });
 
 test('3. 全部卖出：持仓清零、现金正确、零持仓行不出现', () => {
@@ -264,6 +268,7 @@ test('14. 最大回撤：只在基线之后、按单位净值计算', () => {
   assert.equal(series.performance_available, false);
   assert.deepEqual(series.max_drawdown, {
     available: true, value: -0.25, from: '20261020', to: '20261021',
+    valuation_quality: 'exact', incomplete_dates: [], note: null,
   });
   // 1.20 → 0.90 = −25%，后段 0.983333 未创新低
   assert.equal(series.points[series.points.length - 1].nav_per_unit, 0.983333);
@@ -370,7 +375,8 @@ test('10. 撤销错误买入：状态回到买入前、原记录保留、重复�
 
 openAccount('syn-t1', '20261016', 200000, [
   position('600000.SH', '合成股票', 1000, 12000, 10000),
-  position('159999.SZ', '合成ETF', 1000, 1000, 1000),
+  position('159999.SZ', '合成权益ETF', 1000, 1000, 1000),
+  position('518880.SH', '合成黄金ETF', 1000, 5000, 5000),
 ], '2026-10-16');
 const stockSell = recordEvent(db, event({
   event_id: 'T1-STOCK', account_id: 'syn-t1', event_type: 'TRADE_SELL', occurred_on: '20261016',
@@ -380,24 +386,38 @@ const etfSell = recordEvent(db, event({
   event_id: 'T1-ETF', account_id: 'syn-t1', event_type: 'TRADE_SELL', occurred_on: '20261016',
   ts_code: '159999.SZ', quantity: 500, price_milli: 1000, fee_cents: 500,
 }));
+const goldSell = recordEvent(db, event({
+  event_id: 'T1-GOLD', account_id: 'syn-t1', event_type: 'TRADE_SELL', occurred_on: '20261016',
+  ts_code: '518880.SH', quantity: 500, price_milli: 5000, fee_cents: 500,
+}));
 
-test('13. 股票卖出 T+1 未交收，ETF 卖出当日交收（模型假设）', () => {
-  assert.equal(nextBusinessDay('20261016'), '20261019', '周五 → 下周一');
+test('13. 股票与权益 ETF T+1；债券/黄金 ETF T+0（按品种分类，不再全局当日交收）', () => {
+  assert.equal(nextBusinessDay('20261016'), '20261019', '周五 → 下周一（未接节假日日历）');
   assert.equal(stockSell.settled_on, '20261019');
-  assert.equal(etfSell.settled_on, '20261016');
+  assert.equal(stockSell.settlement.rule, 'T+1');
+  assert.equal(etfSell.settled_on, '20261019', '股票/权益 ETF 不再默认当日交收');
+  assert.equal(etfSell.settlement.rule, 'T+1');
+  assert.equal(goldSell.settled_on, '20261016', '黄金 ETF 支持 T+0');
+  assert.equal(goldSell.settlement.rule, 'T+0');
   assert.equal(isEtfCode('159999.SZ'), true);
   assert.equal(isEtfCode('600000.SH'), false);
 
   const sameDay = replayAccount(db, 'syn-t1', { asOf: '20261016' });
-  // 股票 500×12.000 = 6,000.00 元 − 600 − 600 = 598,800 分未交收
-  assert.equal(sameDay.cash.unsettled_cents, 598800);
-  assert.equal(sameDay.cash.settled_cents, 249500);    // 200,000 + ETF 49,500
-  assert.equal(sameDay.cash.balance_cents, 848300);
-  assert.deepEqual(sameDay.pending_settlement, [{ ts_code: '600000.SH', cents: 598800, settles_on: '20261019' }]);
+  // 股票 500×12.000 = 6,000.00 元 − 600 − 600 = 598,800 分未交收；
+  // 权益 ETF 500×1.000 − 500 = 49,500 分未交收；黄金 ETF 500×5.000 − 500 = 249,500 分当日交收。
+  assert.equal(sameDay.cash.unsettled_cents, 648300);
+  assert.equal(sameDay.cash.settled_cents, 449500);    // 200,000 + 黄金 ETF 249,500
+  assert.equal(sameDay.cash.withdrawable_cents, 449500);
+  assert.equal(sameDay.cash.buying_power_cents, 1097800);
+  assert.equal(sameDay.cash.balance_cents, 1097800);
+  assert.deepEqual(sameDay.pending_settlement, [
+    { ts_code: '159999.SZ', cents: 49500, settles_on: '20261019', settlement_rule: 'T+1', settlement_rule_assumed: false },
+    { ts_code: '600000.SH', cents: 598800, settles_on: '20261019', settlement_rule: 'T+1', settlement_rule_assumed: false },
+  ]);
 
   const nextDay = replayAccount(db, 'syn-t1', { asOf: '20261019' });
   assert.equal(nextDay.cash.unsettled_cents, 0);
-  assert.equal(nextDay.cash.settled_cents, 848300);
+  assert.equal(nextDay.cash.settled_cents, 1097800);
   assert.deepEqual(nextDay.pending_settlement, []);
 });
 

@@ -7,8 +7,10 @@ import { readSnapshot, round, valueCents } from './account.js';
  * P2 最小真实账户账本（PRD §8）。
  *
  * 设计边界：
- * - **只追加**。成交/出入金/分红/费用/拆分一经记录永不改写；纠错只能追加一条
- *   REVERSE 撤销分录，原记录保留并在 `reversed_by` 上留下指向。
+ * - **事实行只追加**。成交/出入金/分红/费用/拆分一经记录永不删除、永不覆盖经济字段；
+ *   纠错只能追加一条 REVERSE 撤销分录。注意：撤销时会更新**原记录**的 `reversed_by`
+ *   列，这是"状态索引更新"，不是追加一行；因此不要声称整张表每一列都完全不可变。
+ *   追加式事件行、`event_id` 幂等、冲突表留痕与撤销语义保持不变。
  * - **派生而非存储**。持仓、可用现金、成本、已实现盈亏全部由
  *   `account_baseline + account_event` 确定性重放得出，库里不存余额，避免两份真相。
  * - **幂等**。`event_id` 由调用方（券商流水号/导入行号）提供；同一 id 同一内容
@@ -19,8 +21,12 @@ import { readSnapshot, round, valueCents } from './account.js';
  * 明确不是：事件溯源框架、撮合引擎、券商对接。就是几张表和几个纯函数。
  *
  * 未与券商核对的假设（输出中逐条带 `assumptions`）：
- * - 股票卖出 T+1 交收，`settled_on` 默认取下一个工作日（只跳周末，未接节假日日历）。
- * - ETF 卖出按当日交收处理（见 `ETF_SAME_DAY_SETTLEMENT`）。
+ * - 交收规则按品种分类：股票、股票/权益 ETF → T+1；债券 ETF、黄金 ETF 与规则内
+ *   跨境 QDII ETF → T+0；无法分类的标的保守按 T+1 并标注 `settlement_rule_assumed`。
+ * - 交收日优先取本地 `trade_cal` 的下一个开市日；日历缺失时退回"只跳周末"的
+ *   `nextBusinessDay` 并标注 `calendar_assumed:true`。
+ * - 卖出款在交收前可用于买入但不可提取（A 股常见规则，模型假设）：
+ *   `buying_power_cents` 含未交收，`withdrawable_cents` 只含已交收。
  * - 平均成本法：买入费用计入成本；卖出费用与税费冲减卖出收入。
  * - 撤销按已结算现金立即回退。
  */
@@ -41,11 +47,13 @@ export const REAL_ACCOUNT_VERIFIED = 'REAL_ACCOUNT_VERIFIED' as const;
 export type RealAccountStatus = typeof REAL_ACCOUNT_PENDING | typeof REAL_ACCOUNT_VERIFIED;
 
 export const ASSUMPTIONS: readonly string[] = [
-  '股票卖出资金 T+1 交收：settled_on 默认取下一个工作日，仅跳过周末，未接入交易所节假日日历',
-  'ETF 卖出按当日交收（本模型假设，未与券商交割单核对）',
+  '交收规则：股票与股票/权益 ETF 卖出 T+1；债券 ETF、黄金 ETF 及规则内的跨境 QDII ETF 卖出 T+0（未与券商交割单核对）',
+  '交收日优先取本地 trade_cal 的下一个开市日；日历缺失时退回只跳周末的下一个工作日并标注 calendar_assumed',
+  'A 股卖出款在交收前通常可用于买入但不可提取：buying_power 含未交收，withdrawable 只含已交收（模型假设）',
+  '无法识别的标的按保守的 T+1 处理，并标注 settlement_rule_assumed',
   '成本采用平均成本法：买入佣金与税费计入成本，卖出费用与印花税冲减卖出收入',
-  '撤销（REVERSE）立即按已结算现金回退，不恢复原卖出的未交收状态',
-  '净值按单位净值法（unitisation）处理外部现金流，初始单位净值为 1.00 元',
+  '撤销（REVERSE）立即按已结算现金回退，不恢复原卖出的未交收状态；reversed_by 是对原行的状态索引更新',
+  '净值按单位净值法（unitisation）处理外部现金流：采用日终现金流口径，按当日扣流前估值折算，初始单位净值 1.00 元',
 ];
 
 /** 事件输入：派生字段可省略，由 `normalizeEvent` 校验后补齐。 */
@@ -90,10 +98,31 @@ export interface NormalizedEvent {
   note: string;
   source: EventSource;
   recorded_at: string;
+  /**
+   * TRADE_SELL 的交收推导元数据（规则、是否假设、日历是否假设）。
+   * 仅用于记录/输出，**不参与内容哈希**，也不写入事件表（事件表只存最终 `settled_on`）。
+   */
+  settlement_info?: SettlementInfo;
+}
+
+/** 卖出交收的推导结果，随 `RecordResult` 返回；重放时按代码重新推导规则部分。 */
+export interface SettlementInfo {
+  rule: SettlementRule;
+  kind: SettlementInstrumentKind;
+  /** settlement_rule_assumed：品种无法可靠分类，按保守 T+1。 */
+  assumed: boolean;
+  /** calendar_assumed：未使用真实 trade_cal，而是退回只跳周末的工作日。 */
+  calendar_assumed: boolean;
+  reason: string;
 }
 
 export type RecordResult =
-  | { status: 'RECORDED'; event_id: string; event_type: LedgerEventType; cash_delta_cents: number; settled_on: string | null; content_hash: string }
+  | {
+    status: 'RECORDED'; event_id: string; event_type: LedgerEventType; cash_delta_cents: number;
+    settled_on: string | null; content_hash: string;
+    /** TRADE_SELL 才有：交收规则与假设标注。 */
+    settlement?: SettlementInfo;
+  }
   | { status: 'DUPLICATE'; event_id: string; event_type: LedgerEventType; content_hash: string }
   | { status: 'CONFLICT'; event_id: string; reason: string; existing_hash: string; incoming_hash: string };
 
@@ -122,7 +151,23 @@ export interface ReplayResult {
   data_source: 'synthetic' | 'broker_statement' | 'mixed' | 'baseline_only';
   baseline: { as_of: string; snapshot_id: string; cash_cents: number; note: string };
   positions: PositionState[];
-  cash: { balance_cents: number; settled_cents: number; unsettled_cents: number };
+  cash: {
+    balance_cents: number;
+    /** 已交收现金（模型里等价于可提取基数）。 */
+    settled_cents: number;
+    /** 已卖出但尚未到交收日的现金。 */
+    unsettled_cents: number;
+    /**
+     * 可提取现金 = 已交收。未交收的卖出款不能提取（模型假设，未考虑冻结/在途）。
+     * 现金为负时如实返回负数，由 validateLedger 报出。
+     */
+    withdrawable_cents: number;
+    /**
+     * 可用于买入的现金 = 已交收 + 未交收卖出款。A 股卖出款在交收前通常可用于
+     * 继续买入（模型假设）；实际券商规则可能不同。
+     */
+    buying_power_cents: number;
+  };
   totals: {
     securities_cost_cents: number;
     realized_pnl_cents: number;
@@ -131,7 +176,13 @@ export interface ReplayResult {
     taxes_cents: number;
     external_flow_cents: number;
   };
-  pending_settlement: { ts_code: string; cents: number; settles_on: string }[];
+  pending_settlement: {
+    ts_code: string; cents: number; settles_on: string;
+    /** 由代码重新推导的交收规则（事件表只存 settled_on）。 */
+    settlement_rule: SettlementRule;
+    /** 品种无法可靠分类时为 true。 */
+    settlement_rule_assumed: boolean;
+  }[];
   events_applied: number;
   last_event_date: string | null;
   /** 账本数据是否已被用户确认为真实账户；未确认时为 REAL_ACCOUNT_PENDING。 */
@@ -154,12 +205,26 @@ export type PriceTable = Record<string, Record<string, number>>;
 
 export interface NavPoint {
   date: string;
-  /** 元/份，保留 6 位小数。 */
+  /** 元/份，保留 6 位小数；无法可靠估值时为 null（绝不编造）。 */
   nav_per_unit: number | null;
   total_value_cents: number;
   units: number;
   cash_cents: number;
-  status: 'ok' | 'no_price' | 'unitisation_skipped';
+  /**
+   * - `ok`：全部持仓当日有价；
+   * - `no_price`：有持仓缺当日价，按最近已知价/成本兜底（见 confidence）；
+   * - `unitisation_skipped`：当日有外部现金流，但扣流前估值 <= 0 或份额为 0，无法可靠折算；
+   * - `insufficient_valuation`：总估值 <= 0 或份额 <= 0，无法给出单位净值。
+   */
+  status: 'ok' | 'no_price' | 'unitisation_skipped' | 'insufficient_valuation';
+  /**
+   * 该估值点的可信程度：
+   * - `exact`：每个持仓当日都有真实价格；
+   * - `carried_forward`：部分持仓沿用最近已知价（缺价/停牌）；
+   * - `cost_fallback`：部分持仓从未有过价格，按成本兜底；
+   * - `incomplete`：无法可靠估值（单位净值不可计算）。
+   */
+  confidence: 'exact' | 'carried_forward' | 'cost_fallback' | 'incomplete';
   no_price_codes: string[];
   carried_forward_codes: string[];
   /** 从未有过价格、只能按成本兜底估值的代码（估值不是市价，单独标出）。 */
@@ -180,9 +245,17 @@ export interface NavSeries {
   /**
    * 最大回撤：只用基线之后的估值点。少于两个点 → `insufficient_history`（绝不回填历史）。
    * 该数值是所给价格与事件的算术结果，是否可当作"真实账户业绩"由上面的 status 决定。
+   * `valuation_quality` 只在所有参与点都是 `exact` 时为 `exact`；任一缺价、
+   * 沿用价格或成本兜底都降级为 `incomplete` 并列出日期，绝不把不完整估值
+   * 报告成精确真实回撤。
    */
   max_drawdown:
-    | { available: true; value: number; from: string | null; to: string | null }
+    | {
+      available: true; value: number; from: string | null; to: string | null;
+      valuation_quality: 'exact' | 'incomplete';
+      incomplete_dates: string[];
+      note: string | null;
+    }
     | { available: false; reason: 'insufficient_history' | 'no_baseline' };
   assumptions: readonly string[];
   note: string;
@@ -191,13 +264,131 @@ export interface NavSeries {
 // ---------------------------------------------------------------- 基础校验
 
 const YMD = /^\d{8}$/;
-const ETF_SAME_DAY_SETTLEMENT = true;
 
 /** 6 位代码按前缀识别 ETF。识别不出来时按股票（T+1）处理，属于保守方向。 */
 export function isEtfCode(tsCode: string): boolean {
   const digits = tsCode.split('.')[0].replace(/[^0-9]/g, '');
   if (digits.length !== 6) return false;
   return /^(15|16|18|50|51|52|56|58)/.test(digits);
+}
+
+/**
+ * 卖出交收规则（T+0 / T+1）。
+ *
+ * 口径（最小、可复核的规则，不是完整交易所规则库）：
+ * - 债券 ETF（511xxx）、黄金 ETF（518xxx、159934/159937）、规则内的跨境 QDII ETF
+ *   （513xxx、159920、159941）→ T+0；
+ * - 其余股票/权益 ETF（15/16/18/50/51/52/56/58 前缀）与所有股票 → T+1；
+ * - 无法分类 → T+1（保守方向），并置 `assumed:true`。
+ *
+ * `kind`/`name` 只是**无法由代码判定时**的兜底提示；已识别的代码永远优先，
+ * 避免把名称含"恒生"的境内权益 ETF 误判为跨境（A2 的同类陷阱）。
+ */
+export type SettlementRule = 'T+0' | 'T+1';
+export type SettlementInstrumentKind =
+  | 'STOCK' | 'EQUITY_ETF' | 'BOND_ETF' | 'GOLD_ETF' | 'CROSS_BORDER_ETF' | 'UNKNOWN';
+
+export interface SettlementDecision {
+  ts_code: string;
+  rule: SettlementRule;
+  kind: SettlementInstrumentKind;
+  /** 是否因无法可靠分类而按保守 T+1 假设（settlement_rule_assumed）。 */
+  assumed: boolean;
+  reason: string;
+}
+
+const GOLD_ETF_CODES = new Set(['159934', '159937']);
+const CROSS_BORDER_ETF_CODES = new Set(['159920', '159941']);
+
+function digitsOf(tsCode: string): string {
+  return (tsCode.split('.')[0] ?? '').replace(/[^0-9]/g, '');
+}
+
+/** 股票代码前缀（沪深主板、科创板、创业板、北交所）。全部 T+1。 */
+const STOCK_PREFIX = /^(600|601|603|605|688|689|000|001|002|003|300|301|4\d{2}|8\d{2}|920)/;
+
+function kindFromHint(hint: string | undefined): SettlementInstrumentKind | null {
+  const text = (hint ?? '').trim().toUpperCase();
+  if (!text) return null;
+  if (/^(STOCK|SHARE|EQUITY_STOCK)$/.test(text) || text === '股票') return 'STOCK';
+  if (/^(BOND|BOND_ETF|FIXED_INCOME)$/.test(text) || /债/.test(hint!)) return 'BOND_ETF';
+  if (/^(GOLD|GOLD_ETF|COMMODITY)$/.test(text) || /黄金|白银/.test(hint!)) return 'GOLD_ETF';
+  if (/^(CROSS_BORDER|QDII|CROSS_BORDER_ETF)$/.test(text) || /跨境|QDII/i.test(hint!)) return 'CROSS_BORDER_ETF';
+  if (/^(EQUITY|EQUITY_ETF|ETF|FUND)$/.test(text) || /ETF|基金/.test(hint!)) return 'EQUITY_ETF';
+  return null;
+}
+
+function decision(
+  tsCode: string, kind: SettlementInstrumentKind, rule: SettlementRule, assumed: boolean, reason: string,
+): SettlementDecision {
+  return { ts_code: tsCode, rule, kind, assumed, reason };
+}
+
+/** 由代码前缀（必要时用 kind/name 兜底）判定卖出交收规则。纯函数。 */
+export function settlementRuleFor(
+  tsCode: string, hints: { kind?: string; name?: string } = {},
+): SettlementDecision {
+  const digits = digitsOf(tsCode);
+  if (digits.length !== 6) {
+    return decision(tsCode, 'UNKNOWN', 'T+1', true, '代码不是 6 位数字，无法分类，按保守 T+1 处理');
+  }
+
+  if (isEtfCode(tsCode)) {
+    if (/^511/.test(digits)) return decision(tsCode, 'BOND_ETF', 'T+0', false, '债券 ETF（511 前缀）支持 T+0 回转');
+    if (/^518/.test(digits) || GOLD_ETF_CODES.has(digits)) {
+      return decision(tsCode, 'GOLD_ETF', 'T+0', false, '黄金 ETF 支持 T+0 回转');
+    }
+    if (/^513/.test(digits) || CROSS_BORDER_ETF_CODES.has(digits)) {
+      return decision(tsCode, 'CROSS_BORDER_ETF', 'T+0', false, '规则内跨境 QDII ETF 支持 T+0 回转');
+    }
+    // 其余 15/16/18/50/51/52/56/58 前缀按权益 ETF 处理；已知代码分类成立，不算假设。
+    return decision(tsCode, 'EQUITY_ETF', 'T+1', false, '股票/权益 ETF 按 T+1 交收');
+  }
+
+  if (STOCK_PREFIX.test(digits)) {
+    return decision(tsCode, 'STOCK', 'T+1', false, '股票按 T+1 交收');
+  }
+
+  // 代码无法判定时才看调用方的声明；声明也不足则保守 T+1。
+  const hinted = kindFromHint(hints.kind) ?? kindFromHint(hints.name);
+  if (hinted) {
+    const rule: SettlementRule = hinted === 'EQUITY_ETF' || hinted === 'STOCK' ? 'T+1' : 'T+0';
+    const Chinese = hinted === 'BOND_ETF' ? '债券 ETF' : hinted === 'GOLD_ETF' ? '黄金 ETF'
+      : hinted === 'CROSS_BORDER_ETF' ? '跨境 QDII ETF' : hinted === 'STOCK' ? '股票' : '权益 ETF';
+    return decision(tsCode, hinted, rule, true, `代码无法分类，按调用方声明的${Chinese}推断 ${rule}`);
+  }
+  return decision(tsCode, 'UNKNOWN', 'T+1', true, '代码与声明都无法分类，按保守 T+1 处理');
+}
+
+/** 交易日历的最小抽象：只要"下一个开市日"。缺失/无法回答时返回 undefined。 */
+export interface SettlementCalendar {
+  nextOpenDay(ymd: string): string | undefined;
+}
+
+/**
+ * 从只读市场库的 `trade_cal` 构造交收日历。库内没有 `trade_cal` 或查询失败时
+ * 一律返回 undefined，由 `normalizeEvent` 退回 `nextBusinessDay` 并标注假设。
+ */
+export function settlementCalendarFromDb(db: DatabaseSync): SettlementCalendar {
+  let ready = false;
+  try {
+    ready = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trade_cal'").get();
+  } catch {
+    ready = false;
+  }
+  return {
+    nextOpenDay(ymd: string): string | undefined {
+      if (!ready) return undefined;
+      try {
+        const row = db.prepare(
+          'SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date > ? ORDER BY cal_date ASC LIMIT 1',
+        ).get(ymd) as any;
+        return row?.cal_date ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  };
 }
 
 /** 下一个工作日（只跳周末，不跳节假日）。纯函数，不读当前时间。 */
@@ -241,11 +432,19 @@ function nonNegative(value: number | null, label: string): number {
 
 // ---------------------------------------------------------------- 归一化与哈希
 
+export interface NormalizeOptions {
+  /** 真实交易日历；缺失时退回 `nextBusinessDay` 并标注 calendar_assumed。 */
+  calendar?: SettlementCalendar;
+}
+
 /**
  * 把调用方输入整理成唯一确定的事件形态：补齐派生金额、推导交收日、统一 null。
  * 任何不合规输入都在这里拒绝，写库前就不会有半成品。
+ *
+ * 卖出交收：T+0 当日交收；T+1 优先用真实 `trade_cal` 的下一个开市日，
+ * 日历缺失时退回 `nextBusinessDay`（只跳周末）并在 `settlement_info.calendar_assumed` 标注。
  */
-export function normalizeEvent(input: LedgerEventInput): NormalizedEvent {
+export function normalizeEvent(input: LedgerEventInput, options: NormalizeOptions = {}): NormalizedEvent {
   const eventId = requireText(input.event_id, 'event_id');
   const accountId = requireText(input.account_id, 'account_id');
   const eventType = input.event_type as LedgerEventType;
@@ -268,6 +467,7 @@ export function normalizeEvent(input: LedgerEventInput): NormalizedEvent {
   let settledOn: string | null = input.settled_on ? assertYmd(input.settled_on, 'settled_on') : null;
   let cashDelta: number;
   let gross: number | null = grossInput;
+  let settlementInfo: SettlementInfo | undefined;
 
   const forbid = (fields: [unknown, string][]) => {
     for (const [value, label] of fields) {
@@ -305,8 +505,29 @@ export function normalizeEvent(input: LedgerEventInput): NormalizedEvent {
       cashDelta = input.cash_delta_cents === undefined || input.cash_delta_cents === null
         ? derived : intOrNull(input.cash_delta_cents, 'cash_delta_cents')!;
       if (cashDelta !== derived) throw new Error(`TRADE_SELL 的 cash_delta_cents 必须等于 gross-fee-tax=${derived}`);
-      if (!settledOn) settledOn = isEtfCode(tsCode!) && ETF_SAME_DAY_SETTLEMENT ? occurredOn : nextBusinessDay(occurredOn);
+      const decisionInfo = settlementRuleFor(tsCode!);
+      let calendarAssumed = false;
+      if (!settledOn) {
+        if (decisionInfo.rule === 'T+0') {
+          settledOn = occurredOn;
+        } else {
+          const fromCalendar = options.calendar?.nextOpenDay(occurredOn);
+          if (fromCalendar) {
+            settledOn = fromCalendar;
+          } else {
+            settledOn = nextBusinessDay(occurredOn);
+            calendarAssumed = true;
+          }
+        }
+      }
       if (settledOn < occurredOn) throw new Error('settled_on 不能早于 occurred_on');
+      settlementInfo = {
+        rule: decisionInfo.rule,
+        kind: decisionInfo.kind,
+        assumed: decisionInfo.assumed,
+        calendar_assumed: decisionInfo.rule === 'T+0' ? false : calendarAssumed,
+        reason: decisionInfo.reason,
+      };
       break;
     }
     case 'CASH_DEPOSIT': {
@@ -386,6 +607,7 @@ export function normalizeEvent(input: LedgerEventInput): NormalizedEvent {
     note,
     source,
     recorded_at: input.recorded_at ?? new Date().toISOString(),
+    ...(settlementInfo ? { settlement_info: settlementInfo } : {}),
   };
 }
 
@@ -581,6 +803,7 @@ function recordOne(db: DatabaseSync, event: NormalizedEvent): RecordResult {
   return {
     status: 'RECORDED', event_id: event.event_id, event_type: event.event_type,
     cash_delta_cents: event.cash_delta_cents, settled_on: event.settled_on, content_hash: incomingHash,
+    ...(event.settlement_info ? { settlement: event.settlement_info } : {}),
   };
 }
 
@@ -589,9 +812,10 @@ function recordOne(db: DatabaseSync, event: NormalizedEvent): RecordResult {
  * 三种结果：RECORDED / DUPLICATE（同 id 同内容）/ CONFLICT（同 id 不同内容，原记录不动）。
  */
 export function recordEvent(
-  db: DatabaseSync, input: LedgerEventInput, options: { mode?: RecordMode } = {},
+  db: DatabaseSync, input: LedgerEventInput,
+  options: { mode?: RecordMode; calendar?: SettlementCalendar } = {},
 ): RecordResult {
-  const event = normalizeEvent(input);
+  const event = normalizeEvent(input, { calendar: options.calendar });
   const mode = options.mode ?? 'live';
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -620,7 +844,7 @@ export interface ImportResult {
  */
 export function importEvents(
   db: DatabaseSync, accountId: string, inputs: LedgerEventInput[],
-  options: { continueOnConflict?: boolean; mode?: RecordMode } = {},
+  options: { continueOnConflict?: boolean; mode?: RecordMode; calendar?: SettlementCalendar } = {},
 ): ImportResult {
   const id = requireText(accountId, 'account_id');
   const continueOnConflict = options.continueOnConflict === true;
@@ -631,7 +855,7 @@ export function importEvents(
       throw new Error(`第 ${index + 1} 条事件的 account_id=${input.account_id} 与 --account ${id} 不一致`);
     }
     try {
-      normalized.push(normalizeEvent({ ...input, account_id: id }));
+      normalized.push(normalizeEvent({ ...input, account_id: id }, { calendar: options.calendar }));
     } catch (error: any) {
       throw new Error(`第 ${index + 1} 条事件校验失败：${error?.message ?? error}`);
     }
@@ -689,6 +913,9 @@ interface CashSettlement {
   remaining: number;
   settles_on: string;
   released: boolean;
+  /** 记录时/重放时推导的交收规则，用于输出标注。 */
+  rule: SettlementRule;
+  rule_assumed: boolean;
 }
 
 interface AppliedEffect {
@@ -850,11 +1077,13 @@ class LedgerRunner {
         let settlementId: string | null = null;
         let settledDelta = proceeds;
         if (row.settled_on && row.settled_on > row.occurred_on) {
+          const ruleInfo = settlementRuleFor(code!);
           settlementId = row.event_id;
           settledDelta = 0;
           this.settlements.set(row.event_id, {
             event_id: row.event_id, ts_code: code, original_cents: proceeds,
             settled_part: 0, remaining: proceeds, settles_on: row.settled_on, released: false,
+            rule: ruleInfo.rule, rule_assumed: ruleInfo.assumed,
           });
         } else {
           this.settled += proceeds;
@@ -982,15 +1211,21 @@ class LedgerRunner {
     }
     const pending = [...this.settlements.values()]
       .filter(s => s.remaining > 0)
-      .map(s => ({ ts_code: s.ts_code ?? '', cents: s.remaining, settles_on: s.settles_on }))
+      .map(s => ({
+        ts_code: s.ts_code ?? '', cents: s.remaining, settles_on: s.settles_on,
+        settlement_rule: s.rule, settlement_rule_assumed: s.rule_assumed,
+      }))
       .sort((a, b) => (a.settles_on === b.settles_on ? a.ts_code.localeCompare(b.ts_code) : a.settles_on < b.settles_on ? -1 : 1));
     const securitiesCost = positions.reduce((sum, p) => sum + p.cost_milli_total, 0);
+    const unsettled = this.unsettledTotal();
     return {
       positions,
       cash: {
-        balance_cents: this.settled + this.unsettledTotal(),
+        balance_cents: this.settled + unsettled,
         settled_cents: this.settled,
-        unsettled_cents: this.unsettledTotal(),
+        unsettled_cents: unsettled,
+        withdrawable_cents: this.settled,
+        buying_power_cents: this.settled + unsettled,
       },
       totals: {
         securities_cost_cents: Math.round(securitiesCost / 10),
@@ -1203,11 +1438,21 @@ function divRoundHalfUp(a: bigint, b: bigint): bigint {
 }
 
 /**
- * 构建基线之后的单位净值序列。外部现金流按单位净值法处理，
- * 出入金本身不改变单位净值；最大回撤只在基线之后、且至少两个估值点时才给出。
+ * 构建基线之后的单位净值序列。
  *
- * 停牌/缺价：该日价格沿用上一已知价，并把点标记为 `no_price`，
- * 绝不按成本价或插值伪造一个"当天价格"（成本兜底会单独标记）。
+ * 外部现金流口径（**日终现金流**）：
+ * - 把当日全部出入金视为发生在日终，按**当日扣流前估值**折算份额；
+ * - `nav_before = (value − flow) / units`，`new_units = flow / nav_before`，
+ *   等价于 `delta_units = flow × units / (value − flow)`；
+ * - 因此资金流本身不改变同一时点的单位净值（同一日价格涨跌仍会体现）。
+ *
+ * 无法可靠折算时不编造净值：扣流前估值 <= 0、份额为 0 或折算后份额 <= 0 时，
+ * 该点标记 `unitisation_skipped` / `insufficient_valuation`，`nav_per_unit = null`，
+ * 外部现金流仍保留在 `external_flow_cents` 中。
+ *
+ * 停牌/缺价：沿用上一已知价并标记 `no_price`/`carried_forward`；从未有价时按成本
+ * 兜底并标记 `cost_fallback`。绝不插值。最大回撤在所有参与点都精确时才标
+ * `valuation_quality:'exact'`，否则标 `incomplete` 并列出不精确日期。
  */
 export function buildNavSeries(
   db: DatabaseSync, accountId: string,
@@ -1222,7 +1467,7 @@ export function buildNavSeries(
     max_drawdown: { available: false, reason: 'no_baseline' },
     assumptions,
     note: gate.verified
-      ? '口径：单位净值法，外部现金流不改变单位净值；回撤仅覆盖基线之后。'
+      ? '口径：单位净值法（日终现金流，按当日扣流前估值折算），外部现金流不改变单位净值；回撤仅覆盖基线之后，估值不完整时标注 valuation_quality。'
       : 'REAL_ACCOUNT_PENDING：账本数据尚未经用户确认为真实账户；序列只是已记录数据的算术结果，不构成真实账户业绩。',
   };
 
@@ -1253,7 +1498,6 @@ export function buildNavSeries(
   let index = 0;
   let currentDate: string | null = null;
   let units = 0n;
-  let prevValue = 0;
   let first = true;
   const dataSource = dataSourceOf(rows, Boolean(baseline.snapshot_id));
 
@@ -1302,49 +1546,85 @@ export function buildNavSeries(
     }
     const value = state.cash.balance_cents + securities;
     const flow = runner.flowOn(date);
+    const isFirstPoint = first;
 
     if (first) {
-      units = BigInt(value) * UNITS_SCALE / INITIAL_NAV_CENTS;
+      // 初始单位净值 1.00 元；总估值 <= 0 时不折算份额（不编造净值）。
+      units = value > 0 ? BigInt(value) * UNITS_SCALE / INITIAL_NAV_CENTS : 0n;
       first = false;
-    } else if (flow !== 0 && prevValue > 0 && units > 0n) {
-      // 按上一估值点的单位净值折算新增份额：出入金本身不改变单位净值。
-      const delta = divRoundHalfUp(BigInt(flow) * units, BigInt(prevValue));
-      if (units + delta > 0n) units += delta;
     }
 
-    const navPerUnit = units > 0n ? round(Number(BigInt(value) * UNITS_SCALE) / Number(units) / 100, 6) : null;
+    let unitisationSkipped = false;
+    if (!isFirstPoint && flow !== 0) {
+      const preFlowValue = value - flow;
+      if (units > 0n && preFlowValue > 0 && value > 0) {
+        // 日终现金流：按当日扣流前单位净值折算。资金流本身不改变单位净值。
+        const delta = divRoundHalfUp(BigInt(flow) * units, BigInt(preFlowValue));
+        if (units + delta > 0n) units += delta;
+        else unitisationSkipped = true;
+      } else {
+        unitisationSkipped = true;
+      }
+    }
+
+    let status: NavPoint['status'];
+    if (value <= 0) status = 'insufficient_valuation';
+    else if (units <= 0n) status = unitisationSkipped ? 'unitisation_skipped' : 'insufficient_valuation';
+    else if (unitisationSkipped) status = 'unitisation_skipped';
+    else if (noPrice.length > 0) status = 'no_price';
+    else status = 'ok';
+
+    const confidence: NavPoint['confidence'] = status === 'insufficient_valuation' || status === 'unitisation_skipped'
+      ? 'incomplete'
+      : costFallback.length > 0 ? 'cost_fallback'
+        : carried.length > 0 ? 'carried_forward'
+          : 'exact';
+
+    const navPerUnit = (status === 'ok' || status === 'no_price') && units > 0n
+      ? round(Number(BigInt(value) * UNITS_SCALE) / Number(units) / 100, 6)
+      : null;
     points.push({
       date,
       nav_per_unit: navPerUnit,
       total_value_cents: value,
       units: round(Number(units) / 1e6, 6),
       cash_cents: state.cash.balance_cents,
-      status: units > 0n ? (noPrice.length > 0 ? 'no_price' : 'ok') : 'unitisation_skipped',
+      status,
+      confidence,
       no_price_codes: noPrice.sort(),
       carried_forward_codes: carried.sort(),
       cost_fallback_codes: costFallback.sort(),
       external_flow_cents: flow,
     });
-    prevValue = value;
   }
 
   let maxDrawdown: NavSeries['max_drawdown'];
-  if (points.length < 2) maxDrawdown = { available: false, reason: 'insufficient_history' };
+  const usable = points.filter(p => p.nav_per_unit !== null);
+  if (usable.length < 2) maxDrawdown = { available: false, reason: 'insufficient_history' };
   else {
     let peak = Number.NEGATIVE_INFINITY;
     let peakDate: string | null = null;
     let worst = 0;
     let ddFrom: string | null = null;
     let ddTo: string | null = null;
-    for (const p of points) {
-      if (p.nav_per_unit === null) continue;
-      if (p.nav_per_unit > peak) { peak = p.nav_per_unit; peakDate = p.date; }
+    for (const p of usable) {
+      if (p.nav_per_unit! > peak) { peak = p.nav_per_unit!; peakDate = p.date; }
       if (peak > 0) {
-        const dd = round(p.nav_per_unit / peak - 1, 6);
+        const dd = round(p.nav_per_unit! / peak - 1, 6);
         if (dd < worst) { worst = dd; ddFrom = peakDate; ddTo = p.date; }
       }
     }
-    maxDrawdown = { available: true, value: worst, from: ddFrom, to: ddTo };
+    const incompleteDates = points.filter(p => p.confidence !== 'exact').map(p => p.date);
+    const valuationQuality = incompleteDates.length === 0 ? 'exact' : 'incomplete';
+    maxDrawdown = {
+      available: true, value: worst, from: ddFrom, to: ddTo,
+      valuation_quality: valuationQuality,
+      incomplete_dates: incompleteDates,
+      note: incompleteDates.length === 0
+        ? null
+        : `含 ${incompleteDates.length} 个非精确估值点（缺价沿用/成本兜底/无法估值）；`
+          + '回撤数值只是现有价格与事件的算术结果，不代表精确真实回撤',
+    };
   }
 
   return {
