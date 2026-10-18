@@ -628,6 +628,14 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       asOf,
     );
     for (const reason of accountEvaluation.reasons) gateReasons.push({ code: reason.code, detail: reason.detail });
+    // 与 decision.ts 同口径：未上报交易风险下，可执行腿是对当前现金/份额的承诺，
+    // 未上报成交可能已使其失效。日报与决策必须给出一致的 executable。
+    if (accountEvaluation.unreported_trade_risk) {
+      gateReasons.push({
+        code: 'unreported_trade_risk',
+        detail: '账户存在未上报交易的风险：可执行数量依赖当前现金与份额，未上报成交可能已使其失效，因此只给示意。',
+      });
+    }
   } else {
     gateReasons.push({ code: 'account_gate_unavailable', detail: '账户库中没有任何快照' });
   }

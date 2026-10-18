@@ -29,6 +29,7 @@ const account = await import('../build/portfolio/account.js');
 const { openPortfolioDb } = await import('../build/portfolio/db.js');
 const { confirmRealAccount, initBaseline, setAccountCompleteness } = await import('../build/portfolio/ledger.js');
 const { PLAN_TRACKING_SCHEMA, buildDailyReport } = await import('../build/portfolio/dailyReport.js');
+const { buildDecision } = await import('../build/portfolio/decision.js');
 
 const DAYS = weekdays('20261005', 10);
 const LAST = DAYS.at(-1);
@@ -445,4 +446,49 @@ test('D1-9 只读：生成日报不修改账户库（行数与文件大小不变
   const after = new DatabaseSync(PORTFOLIO, { readOnly: true });
   assert.deepEqual(count(after), beforeCounts);
   after.close();
+});
+
+// ---------------------------------------------------------------- 10. 与决策同口径
+
+test('D1-10 未上报交易风险时，日报与决策给出一致的 executable=false', () => {
+  // 已确认真实账户，但完整性声明为"存在未上报交易风险"（缺省即如此）。
+  const riskyPortfolio = openPortfolioDb(join(dir, 'portfolio-risky.sqlite'), { marketPath: MARKET_MAIN });
+  const snapshotId = 'synthetic-risky-2026-10-16';
+  account.importSnapshot(riskyPortfolio, { ...SYNTH, snapshot_id: snapshotId });
+  initBaseline(riskyPortfolio, 'risky-account', { asOf: LAST, snapshotId });
+  account.markSnapshotCurrent(riskyPortfolio, snapshotId, { confirmedBy: 'test-fixture' });
+  confirmRealAccount(riskyPortfolio, 'risky-account', { confirm: true, note: 'synthetic fixture' });
+  setAccountCompleteness(riskyPortfolio, 'risky-account', { as_of: LAST }, { confirm: true, recordedBy: 'test-fixture' });
+
+  const report = buildDailyReport({
+    portfolioDb: riskyPortfolio,
+    marketDb: marketMain,
+    accountId: 'risky-account',
+    asOfTradeDate: LAST,
+    generatedAt: '2026-10-16T21:55:00+08:00',
+  });
+  // 日报必须承认门控未满足，且没有任何可执行腿。
+  assert.equal(report.gate.satisfied, false, JSON.stringify(report.gate));
+  assert.equal(report.gate.unreported_trade_risk, true);
+  assert.ok(report.gate.reasons.some(r => r.code === 'unreported_trade_risk'), JSON.stringify(report.gate.reasons));
+  assert.equal(report.actionable, false);
+  assert.notEqual(report.status, 'ACTIONABLE');
+  for (const action of report.first_section.actions) {
+    for (const leg of action.legs) assert.equal(leg.executable, false, `${action.code} 的腿不得可执行`);
+  }
+
+  // 决策工具对同一账户必须给出一致的结论。
+  const decision = buildDecision({
+    account_id: 'risky-account',
+    snapshot: account.accountSummary(account.readSnapshot(riskyPortfolio, snapshotId)),
+    as_of_trade_date: LAST,
+    market_db: marketMain,
+    portfolio_db: riskyPortfolio,
+    action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', buy_kind: 'ETF' },
+  });
+  assert.notEqual(decision.status, 'ACTIONABLE');
+  for (const option of decision.options) {
+    if (option.status !== 'ACTIONABLE') assert.deepEqual(option.legs, []);
+  }
+  assert.ok(decision.warnings.some(w => /unreported_trade_risk/.test(w)), JSON.stringify(decision.warnings));
 });
