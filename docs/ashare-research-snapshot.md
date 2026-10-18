@@ -239,10 +239,10 @@ data/snapshot）、`build_sha256`（`build/ashare/*.js` 排序后逐文件 SHA25
 
 `deploy/ashare/verify-research-snapshot.mjs` 在冻结快照
 `~/ashare-research/ashare-20261016.sqlite`（sha256 `ac31a9eb…4dd1`）上运行，输出
-`docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`（`ok=true`，17/17 通过；`snapshot_id` 含 `build_sha256`，本轮 `fwd-snapshot-1.1.0` 构建 `8449cadb…5804` 下重新采集）：
+`docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`（`ok=true`，17/17 通过；`snapshot_id` 含 `build_sha256`，合并本轮修复后的 `fwd-snapshot-1.1.0` 构建 `52a8e472…3b71` 下重新采集）：
 
 - 源文件 sha256、大小与 mtime 前后不变；只读连接上的写操作被拒绝。
-- 20261016 快照：`FWD-20261016-c7ce82506cdd21e5`，引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，
+- 20261016 快照：`FWD-20261016-ca27b46ca33faac1`，引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，
   质量 `READY`，扫描 5567 只、可评分 1756 只、因子行 1756。
 - 观察属性：`BACKFILLED / before_prospective_start`（交易日早于 `20261019`），报告生成时间
   `2026-10-17T00:36:20.909+08:00` 已记录；该快照保留为历史研究，不计入前瞻统计。

@@ -2,7 +2,7 @@
   "snapshot": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
   "expected_sha256": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
   "seed_date": "20261016",
-  "started_at": "2026-10-18T00:39:45.036Z",
+  "started_at": "2026-10-18T00:58:33.420Z",
   "method": "对每对相邻交易日 D -> D+1：读取正式 watchlist(D) 作为初始状态，用 score-1.0.0 扫描 D+1 并调用未修改的 updateWatchlist()，与正式 watchlist(D+1) 逐成员比较（成员集合、score、rank、entered_on）。",
   "pairs": [
     {
@@ -1128,6 +1128,6 @@
   },
   "snapshot_sha256_after": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
   "ok": true,
-  "finished_at": "2026-10-18T00:48:36.659Z",
-  "reproduce": "node deploy/ashare/verify-common-start.mjs /home/jcshi/ashare-research/ashare-20261016.sqlite /tmp/common-start.json"
+  "finished_at": "2026-10-18T01:07:31.666Z",
+  "reproduce": "node deploy/ashare/verify-common-start.mjs /home/jcshi/ashare-research/ashare-20261016.sqlite /home/jcshi/workspace/FinanceMCP/docs/ashare-samples/phaseb-common-start-real-cache.json"
 }
