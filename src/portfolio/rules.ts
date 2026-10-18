@@ -51,6 +51,7 @@ export const DEFAULT_LOT_RULES: LotRules = {
 export const FEE_RULE_VERSION = 'r0-fees-1.0.0';
 export const LOT_RULE_VERSION = 'r0-lots-1.0.0';
 export const STRESS_RULE_VERSION = 'r0-stress-1.0.0';
+export const STOCK_RULE_VERSION = 'r1-stock-1.0.0';
 
 type Provenance = { assumed: true; source: string };
 
@@ -71,6 +72,75 @@ export const LOT_RULE_PROVENANCE: Record<keyof LotRules, Provenance> = {
   etf_sell_multiple: P('assumed: R0 只允许整手卖出，零股规则未核对'),
   allow_odd_lot_sell: P('assumed: R0 明确不支持零股卖出'),
 };
+
+// ---------------------------------------------------------------- 个股规则（R1）
+
+/**
+ * 个股（沪深主板 A 股）的交易规则。与 ETF 分开，**不得**把 ETF 的免印花税、
+ * 无过户费等假设沿用到个股上；但这里每一个数值仍然是假设，不是券商事实。
+ *
+ * 已知的法定/行业惯例（仅作为假设标注，未与券商对账单核对）：
+ * - 买入 100 股整数倍，卖出可以不足 100 股但必须是 100 的整数倍（R1 仍不允许零股）；
+ * - 印花税 0.05%（0.0005，仅卖出）；
+ * - 过户费 0.001%（0.00001，双边）；
+ * - T+1：当日买入的股票当日不能卖出。本模块不做日内交易，只把它作为标记输出。
+ */
+export interface StockRules {
+  /** 一手股数。 */
+  lot_size: number;
+  /** 最低买入股数。 */
+  min_buy: number;
+  /** 卖出必须是该股数的整数倍；R1 不允许零股卖出。 */
+  sell_multiple: number;
+  allow_odd_lot_sell: boolean;
+  /** 当日买入当日不可卖出的标记（T+1），仅提示，不用于撮合。 */
+  t_plus_one: boolean;
+  /** 个股费用假设。 */
+  fees: FeeRules;
+  version: string;
+}
+
+export const DEFAULT_STOCK_RULES: StockRules = {
+  lot_size: 100,
+  min_buy: 100,
+  sell_multiple: 100,
+  allow_odd_lot_sell: false,
+  t_plus_one: true,
+  fees: {
+    commission_rate: 0.00025,        // 万 2.5（与 ETF 相同的假设佣金率）
+    commission_min_cents: 500,       // 5 元
+    transfer_fee_rate: 0.00001,      // 十万分之一（双边，假设）
+    stamp_duty_rate: 0.0005,         // 万分之五（仅卖出，假设）
+    slippage_rate_per_side: 0.0005,  // 万 5（估计值）
+  },
+  version: STOCK_RULE_VERSION,
+};
+
+export const STOCK_RULE_PROVENANCE = {
+  lot_size: P('assumed: A 股按 100 股一手；PRD §14 未与券商核对'),
+  min_buy: P('assumed: 最低买入 100 股；未与券商核对'),
+  sell_multiple: P('assumed: R1 只允许 100 股整数倍卖出，零股规则未核对'),
+  allow_odd_lot_sell: P('assumed: R1 明确不支持零股卖出'),
+  t_plus_one: P('assumed: T+1 为现行 A 股制度假设，未与券商交割规则核对；本模块不撮合'),
+  commission_rate: P('assumed: 与 ETF 相同的假设佣金率，PRD §14 待确认'),
+  commission_min_cents: P('assumed: 最低佣金 5 元为假设，PRD §14 待确认'),
+  transfer_fee_rate: P('assumed: 过户费 0.00001 为假设，未与券商对账单核对'),
+  stamp_duty_rate: P('assumed: 印花税 0.0005 仅卖出为假设，未与券商对账单核对'),
+  slippage_rate_per_side: P('assumed: 滑点为估计值，非真实成交价差'),
+} satisfies Record<string, Provenance>;
+
+/** 个股规则的输出快照：数值 + assumed 标记 + 来源。 */
+export function describeStockRules(rules: StockRules = DEFAULT_STOCK_RULES) {
+  return {
+    version: rules.version,
+    kind: 'STOCK' as const,
+    assumed: true as const,
+    t_plus_one: rules.t_plus_one,
+    values: { ...rules, fees: { ...rules.fees } },
+    provenance: STOCK_RULE_PROVENANCE,
+    note: '个股费用、交易单位与 T+1 均为假设值，不是券商事实；本模块不撮合、不预测成交。',
+  };
+}
 
 /** 情景压力假设：对所有权益 ETF 统一施加的静态冲击，不是预测。 */
 export interface StressRules {
@@ -95,12 +165,14 @@ export function describeRules(
   fees: FeeRules = DEFAULT_FEE_RULES,
   lots: LotRules = DEFAULT_LOT_RULES,
   stress: StressRules = DEFAULT_STRESS_RULES,
+  stock: StockRules = DEFAULT_STOCK_RULES,
 ) {
   return {
     fees: { version: FEE_RULE_VERSION, assumed: true as const, values: { ...fees }, provenance: FEE_RULE_PROVENANCE },
     lots: { version: LOT_RULE_VERSION, assumed: true as const, values: { ...lots }, provenance: LOT_RULE_PROVENANCE },
+    stock: describeStockRules(stock),
     stress: { version: STRESS_RULE_VERSION, assumed: true as const, values: { ...stress }, provenance: STRESS_RULE_PROVENANCE },
-    note: '以上费率、交易单位与冲击幅度均为假设值，未与券商或交易所规则核对；输出中的费用不是真实成交成本。',
+    note: '以上费率、交易单位与冲击幅度均为假设值，未与券商或交易所规则核对；输出中的费用不是真实成交成本。个股不使用 ETF 的免印花税/免过户费假设。',
   };
 }
 

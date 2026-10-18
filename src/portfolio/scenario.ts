@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { AccountSummary, PositionWeight, SnapshotPosition } from './account.js';
 import { THEME_BY_CODE, THEME_LABELS, round, valueCents } from './account.js';
+import type { ResolvedInstrument } from './instrument.js';
+import { checkInstrumentClaim, normalizeClaimKind } from './instrument.js';
 import {
-  DEFAULT_FEE_RULES, DEFAULT_LOT_RULES, DEFAULT_STRESS_RULES,
-  describeRules, tradabilityOf, type FeeRules, type InstrumentInfo, type InstrumentKind,
-  type LotRules, type StressRules,
+  DEFAULT_FEE_RULES, DEFAULT_LOT_RULES, DEFAULT_STOCK_RULES, DEFAULT_STRESS_RULES,
+  describeRules, describeStockRules, inferBoard, tradabilityOf,
+  type FeeRules, type InstrumentInfo, type InstrumentKind,
+  type LotRules, type StockRules, type StressRules,
 } from './rules.js';
 
 /**
@@ -44,6 +47,8 @@ export interface EtfQuoteInput {
   status?: string;
   /** 当日是否停牌。 */
   suspended?: boolean;
+  /** 报价来源。只有 `market_cache` 才是服务端可信报价；缺省按调用方自填处理。 */
+  source?: QuoteSource;
 }
 
 export interface NormalizedQuote {
@@ -56,15 +61,30 @@ export interface NormalizedQuote {
   quality: QuoteQuality;
   list_status: string | null;
   suspended: boolean;
+  /** 报价来源。缺省视为调用方自填（不可信）。 */
+  source: QuoteSource;
   /** 质量不是 READING 时的可读说明。 */
   detail?: string;
 }
 
+/** 报价来源：服务端只读缓存 vs 调用方自填。 */
+export type QuoteSource = 'market_cache' | 'caller_supplied';
+
+/**
+ * 相对优势证据（PRD §6）。布尔 `advantage` 本身不是信号：
+ * 只有 `source:'RESEARCH_VERIFIED'` 且带非空 `evidence_id` 才可能支持可执行预案；
+ * 其余一律按 UNVERIFIED 处理，结果最多是 NO_ACTION 或 ILLUSTRATIVE。
+ */
 export interface ScenarioEvidence {
   /** 候选标的相对现有持仓是否有可证明的相对优势。由上游研究提供，本模块不计算。 */
   advantage: boolean;
   /** 优势依据的说明，原样透传。 */
   basis: string;
+  source?: 'RESEARCH_VERIFIED' | 'UNVERIFIED';
+  /** 研究证据的唯一标识；RESEARCH_VERIFIED 时必须非空。 */
+  evidence_id?: string;
+  /** 证据对应的研究日期 YYYYMMDD。 */
+  as_of?: string;
 }
 
 export type ScenarioAction =
@@ -84,14 +104,24 @@ export interface ScenarioInput {
   as_of_trade_date: string;
   quotes: Map<string, EtfQuoteInput> | Record<string, EtfQuoteInput>;
   action: ScenarioAction;
-  rules?: { fees?: FeeRules; lots?: LotRules; stress?: StressRules };
+  rules?: { fees?: FeeRules; lots?: LotRules; stress?: StressRules; stock?: StockRules };
   /** 候选相对优势证据；缺省视为"无证据"。 */
   evidence?: ScenarioEvidence | null;
   /** 本次情景是否读取到了 ETF 份额数据；R0 默认为 false，会写入 warning。 */
   share_data_available?: boolean;
+  /**
+   * 服务端解析的标的身份（来自 instrument.ts）。缺省时买入标的只能按
+   * 调用方声明 + 代码前缀处理，此时**不可能**得到 EXECUTABLE。
+   */
+  resolved?: { sell?: ResolvedInstrument; buy?: ResolvedInstrument };
+  /**
+   * 调用方（工具层）已经确认的前置原因，例如"as_of 不是交易日"或"账户快照不是当前"。
+   * 引擎把它们并入 reasons 后统一分类，避免工具层和引擎各写一套状态机。
+   */
+  preconditions?: Reason[];
 }
 
-export type ScenarioStatus = 'EXECUTABLE' | 'NO_ACTION' | 'NOT_EXECUTABLE';
+export type ScenarioStatus = 'EXECUTABLE' | 'ILLUSTRATIVE' | 'NO_ACTION' | 'NOT_EXECUTABLE' | 'DATA_INSUFFICIENT';
 
 export type ReasonCode =
   | 'hold_requested'
@@ -102,7 +132,13 @@ export type ReasonCode =
   | 'quote_stale'
   | 'instrument_not_tradable'
   | 'permission_restricted'
+  | 'instrument_unknown'
+  | 'instrument_claim_mismatch'
+  | 'account_not_current'
+  | 'caller_supplied_quote'
+  | 'evidence_unverified'
   | 'no_demonstrated_advantage'
+  | 'data_insufficient'
   | 'same_instrument'
   | 'invalid_input';
 
@@ -177,7 +213,12 @@ export interface ScenarioResult {
     quote_dates: Record<string, string | null>;
     stale_codes: string[];
     missing_codes: string[];
-    source: 'caller_supplied';
+    /** 混合来源时为 `mixed`。 */
+    source: 'market_cache' | 'caller_supplied' | 'mixed';
+    /** 逐代码来源，便于审计"价格到底来自哪里"。 */
+    per_code: Record<string, QuoteSource>;
+    /** 是否为服务端只读缓存按真实交易日取出的报价。 */
+    server_cache: boolean;
   };
   trade: {
     sell: {
@@ -203,9 +244,22 @@ export interface ScenarioResult {
     /** 卖出价与快照参考价不同带来的差额，与费用分开列出。 */
     price_effect_cents: number | null;
     fees_cents: number;
+    /** 收盘价不是下一交易日保证成交价；任何价格字段都只是参考。 */
+    execution_price_is_reference: true;
+    /** 非可执行状态下的计算演示值（executable:false），trade.buy/sell 已归零。 */
+    illustrative?: {
+      executable: false;
+      lots: number;
+      price_milli: number | null;
+      gross_cents: number;
+      total_cost_cents: number;
+      sell?: { ts_code: string; quantity: number; price_milli: number | null; gross_cents: number | null; net_proceeds_cents: number | null };
+    };
   };
   before: ScenarioSide;
   after: ScenarioSide | null;
+  /** 涉及个股时为 true（T+1 假设，仅提示，不用于撮合）。 */
+  t_plus_one: boolean;
   risk: {
     kind: 'declared_stress';
     stress: StressRules;
@@ -219,7 +273,16 @@ export interface ScenarioResult {
   };
   comparison: ComparisonRow[];
   rules: ReturnType<typeof describeRules>;
-  evidence: { supplied: boolean; advantage: boolean | null; basis: string | null; note: string };
+  evidence: {
+    supplied: boolean;
+    advantage: boolean | null;
+    basis: string | null;
+    source: 'RESEARCH_VERIFIED' | 'UNVERIFIED';
+    evidence_id: string | null;
+    as_of: string | null;
+    verified: boolean;
+    note: string;
+  };
   valuation: {
     basis: string;
     revaluation_note: string;
@@ -245,13 +308,15 @@ export function priceToMilli(price: number): number {
  */
 export function normalizeQuote(code: string, raw: EtfQuoteInput | undefined, asOfTradeDate: string): NormalizedQuote {
   if (!raw) {
-    return { ts_code: code, trade_date: null, price_milli: null, price: null, quality: 'NOT_READY', list_status: null, suspended: false, detail: 'quote absent' };
+    return { ts_code: code, trade_date: null, price_milli: null, price: null, quality: 'NOT_READY', list_status: null, suspended: false, source: 'caller_supplied', detail: 'quote absent' };
   }
   const tradeDate = raw.trade_date ?? raw.quote_date ?? null;
   const price = raw.close ?? raw.price;
   const priceMilli = typeof price === 'number' && Number.isFinite(price) && price > 0 ? priceToMilli(price) : null;
   const listStatus = raw.list_status ?? (raw.status === 'L' || raw.status === 'D' || raw.status === 'P' ? raw.status : null);
   const suspended = raw.suspended === true;
+  // 只有显式标注为 market_cache 的报价才算服务端来源；其余（含缺省）一律按调用方自填。
+  const source: QuoteSource = raw.source === 'market_cache' ? 'market_cache' : 'caller_supplied';
   let quality: QuoteQuality = raw.quality ?? 'READY';
   let detail: string | undefined;
   if (priceMilli === null) {
@@ -274,7 +339,7 @@ export function normalizeQuote(code: string, raw: EtfQuoteInput | undefined, asO
   return {
     ts_code: code, trade_date: tradeDate, price_milli: priceMilli,
     price: priceMilli === null ? null : round(priceMilli / 1000, 3),
-    quality, list_status: listStatus, suspended, detail,
+    quality, list_status: listStatus, suspended, source, detail,
   };
 }
 
@@ -443,11 +508,12 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       status: 'NO_ACTION',
       reasons: [{ code: 'hold_requested', detail: '本次情景为继续持有，不产生交易' }],
       warnings: [...new Set(warnings)],
-      quotes: { required_codes: [], quote_dates: {}, stale_codes: [], missing_codes: [], source: 'caller_supplied' },
+      quotes: { required_codes: [], quote_dates: {}, stale_codes: [], missing_codes: [], source: 'caller_supplied', per_code: {}, server_cache: false },
       trade: {
         sell: null, buy: null, budget_cents: before.cash_cents, residual_cash_cents: before.cash_cents,
-        price_effect_cents: null, fees_cents: 0,
+        price_effect_cents: null, fees_cents: 0, execution_price_is_reference: true,
       },
+      t_plus_one: false,
       before,
       after: null,
       risk: {
@@ -459,7 +525,7 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       },
       comparison,
       rules: describeRules(fees, lotsRule, stress),
-      evidence: { supplied: false, advantage: null, basis: null, note: 'HOLD 不需要相对优势证据。' },
+      evidence: { supplied: false, advantage: null, basis: null, source: 'UNVERIFIED', evidence_id: null, as_of: null, verified: false, note: 'HOLD 不需要相对优势证据。' },
       valuation: { basis: 'snapshot_reference_prices', revaluation_note: '未交易；沿用快照参考价。', price_effect_cents: null },
       historical_performance: { available: false, reason: 'no_history' },
       max_drawdown: { available: false, reason: 'no_history' },
@@ -468,24 +534,44 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
   }
 
   // ---------------- SELL_AND_BUY
+  const stockRules = input.rules?.stock ?? DEFAULT_STOCK_RULES;
   const sellShares = action.sell_shares;
   const sellPos: PositionWeight | undefined = snapshot.positions.find(p => p.ts_code === sellCode);
   const sellQuote = normalized.get(sellCode!)!;
   const buyQuote = normalized.get(buyCode!)!;
-  const buyInfo: InstrumentInfo = action.buy_instrument ?? { kind: inferInstrumentKind(buyCode!) };
+
+  /** 标的身份：服务端解析（resolved）优先；缺省时按代码前缀与调用方声明交叉核对。 */
+  const buyIdentity = identityOfBuy(buyCode!, action.buy_instrument, input.resolved?.buy);
+  const sellIdentity = identityOfHeld(sellCode!, input.resolved?.sell);
+  if (buyIdentity.unknown) notExecutable('instrument_unknown', buyIdentity.unknown);
+  if (buyIdentity.mismatch) notExecutable('instrument_claim_mismatch', buyIdentity.mismatch);
+  if (sellIdentity.unknown) notExecutable('instrument_unknown', sellIdentity.unknown);
+
+  const sellIsStock = sellIdentity.kind === 'STOCK';
+  const buyIsStock = buyIdentity.kind === 'STOCK';
+  const tPlusOne = sellIsStock || buyIsStock;
+  const sellFeeRules = sellIsStock ? stockRules.fees : fees;
+  const buyFeeRules = buyIsStock ? stockRules.fees : fees;
+  const sellLotMultiple = sellIsStock ? stockRules.sell_multiple : lotsRule.etf_sell_multiple;
+  const sellAllowOdd = sellIsStock ? stockRules.allow_odd_lot_sell : lotsRule.allow_odd_lot_sell;
+  const buyLotSize = buyIsStock ? stockRules.lot_size : lotsRule.etf_lot_size;
+  const buyMinBuy = buyIsStock ? stockRules.min_buy : lotsRule.etf_min_buy;
+  const unit = buyIsStock ? '股' : '份';
 
   /** 输入合法性（与行情无关，先判断）。 */
   const integerShares = Number.isFinite(sellShares) && Number.isInteger(sellShares);
   if (!integerShares || sellShares <= 0) {
     notExecutable('invalid_input', `sell_shares 必须为正整数，收到 ${sellShares}`);
-  } else if (sellShares % lotsRule.etf_sell_multiple !== 0 || (!lotsRule.allow_odd_lot_sell && sellShares < lotsRule.etf_sell_multiple)) {
-    notExecutable('lot_rule', `卖出 ${sellShares} 份不是 ${lotsRule.etf_sell_multiple} 份的整数倍（假设：ETF 整手卖出，零股规则未核对）`);
+  } else if (sellShares % sellLotMultiple !== 0 || (!sellAllowOdd && sellShares < sellLotMultiple)) {
+    notExecutable('lot_rule', `卖出 ${sellShares} ${sellIsStock ? '股' : '份'}不是 ${sellLotMultiple} 的整数倍（假设：整手卖出，零股规则未核对）`);
   }
   if (sellCode === buyCode) notExecutable('same_instrument', '卖出与买入为同一标的，不构成轮动');
 
-  /** 权限（PRD §4 / AC-10）。 */
-  const tradability = tradabilityOf(buyCode!, buyInfo);
-  if (!tradability.tradable) notExecutable('permission_restricted', tradability.detail ?? `${buyCode} 无交易权限`);
+  /** 权限（PRD §4 / AC-10）：只依据可信身份，绝不依据调用方声明。 */
+  if (buyIdentity.kind !== 'UNKNOWN') {
+    const tradability = tradabilityOf(buyCode!, { kind: buyIdentity.kind, board: buyIdentity.board ?? undefined });
+    if (!tradability.tradable) notExecutable('permission_restricted', tradability.detail ?? `${buyCode} 无交易权限`);
+  }
 
   /** 持仓与行情。 */
   if (!sellPos) {
@@ -493,11 +579,14 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
   } else if (integerShares && sellShares > sellPos.quantity) {
     notExecutable('insufficient_position', `拟卖出 ${sellShares} 份，超过持仓 ${sellPos.quantity} 份`);
   }
-  if (sellQuote.list_status && sellQuote.list_status !== 'L') {
-    notExecutable('instrument_not_tradable', `${sellCode} 上市状态为 ${sellQuote.list_status}，不可交易`);
+  // 上市状态以解析结果为准；解析不到时才退回报价里的字段（此时报价必为调用方自填，不会 EXECUTABLE）。
+  const sellListStatus = sellIdentity.list_status ?? sellQuote.list_status;
+  const buyListStatus = buyIdentity.list_status ?? buyQuote.list_status;
+  if (sellListStatus && sellListStatus !== 'L') {
+    notExecutable('instrument_not_tradable', `${sellCode} 上市状态为 ${sellListStatus}，不可交易`);
   }
-  if (buyQuote.list_status && buyQuote.list_status !== 'L') {
-    notExecutable('instrument_not_tradable', `${buyCode} 上市状态为 ${buyQuote.list_status}，不可交易`);
+  if (buyListStatus && buyListStatus !== 'L') {
+    notExecutable('instrument_not_tradable', `${buyCode} 上市状态为 ${buyListStatus}，不可交易`);
   }
   if (sellQuote.suspended) notExecutable('instrument_not_tradable', `${sellCode} 停牌`);
   if (buyQuote.suspended) notExecutable('instrument_not_tradable', `${buyCode} 停牌`);
@@ -510,18 +599,18 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
   /** 交易计算：有价格就计算，无论 status 如何，便于对照。 */
   const canComputeSell = !!sellPos && integerShares && sellShares > 0 && sellQuote.price_milli !== null;
   const sellGross = canComputeSell ? valueCents(sellShares, sellQuote.price_milli!) : null;
-  const sellFees = sellGross === null ? null : computeFees(sellGross, 'sell', fees);
+  const sellFees = sellGross === null ? null : computeFees(sellGross, 'sell', sellFeeRules);
   const netProceeds = sellGross === null || sellFees === null ? null : sellGross - sellFees.total_cents;
   const budget = netProceeds === null ? null : netProceeds + snapshot.totals.cash_cents;
 
   const buyPriceMilli = buyQuote.price_milli;
-  const lotCost = buyPriceMilli === null ? null : valueCents(lotsRule.etf_lot_size, buyPriceMilli);
+  const lotCost = buyPriceMilli === null ? null : valueCents(buyLotSize, buyPriceMilli);
   let buyLots = 0;
   if (budget !== null && lotCost !== null) {
-    buyLots = affordableLots(budget, lotCost, fees);
-    if (buyLots * lotsRule.etf_lot_size < lotsRule.etf_min_buy) {
+    buyLots = affordableLots(budget, lotCost, buyFeeRules);
+    if (buyLots * buyLotSize < buyMinBuy) {
       buyLots = 0;
-      notExecutable('insufficient_cash_for_one_lot', `可用资金 ${(budget / 100).toFixed(2)} 元不足买入一手 ${buyCode}（行情 ${(buyPriceMilli! / 1000).toFixed(3)} 元 × ${lotsRule.etf_lot_size} 份 = ${(lotCost / 100).toFixed(2)} 元，未计费用）`);
+      notExecutable('insufficient_cash_for_one_lot', `可用资金 ${(budget / 100).toFixed(2)} 元不足买入一手 ${buyCode}（行情 ${(buyPriceMilli! / 1000).toFixed(3)} 元 × ${buyLotSize} ${unit} = ${(lotCost / 100).toFixed(2)} 元，未计费用）`);
     }
   } else if (budget === null) {
     notExecutable('quote_missing', '卖出价格缺失，无法计算回笼资金');
@@ -529,8 +618,14 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
     notExecutable('quote_missing', '买入价格缺失，无法计算一手成本');
   }
 
-  /** 相对优势证据（PRD §6：没有足够优势不交易；不计算"胜率"）。 */
+  /**
+   * 相对优势证据（PRD §6）：布尔 `advantage` 本身不是信号。
+   * 只有 RESEARCH_VERIFIED + 非空 evidence_id 才算已证明；其余一律降级。
+   */
   const evidence = input.evidence ?? null;
+  const evidenceVerified = !!evidence && evidence.advantage === true
+    && evidence.source === 'RESEARCH_VERIFIED'
+    && typeof evidence.evidence_id === 'string' && evidence.evidence_id.trim() !== '';
   if (!evidence || evidence.advantage !== true) {
     reasons.push({
       code: 'no_demonstrated_advantage',
@@ -538,9 +633,15 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
         ? `未证明相对优势：${evidence.basis || '未提供依据'}`
         : '调用方未提供相对优势证据（evidence 缺失）',
     });
+  } else if (!evidenceVerified) {
+    reasons.push({
+      code: 'evidence_unverified',
+      detail: `优势声明未经研究验证：需要 source=RESEARCH_VERIFIED 且 evidence_id 非空，收到 source=${evidence.source ?? 'UNVERIFIED'} evidence_id=${evidence.evidence_id ?? '缺失'}`,
+    });
   }
+
   const buyGross = buyLots > 0 ? buyLots * lotCost! : 0;
-  const buyFees = buyLots > 0 ? computeFees(buyGross, 'buy', fees) : emptyFees;
+  const buyFees = buyLots > 0 ? computeFees(buyGross, 'buy', buyFeeRules) : emptyFees;
   const buyTotal = buyGross + buyFees.total_cents;
   const residual = budget === null ? null : budget - buyTotal;
   if (residual !== null && residual < 0) {
@@ -551,20 +652,61 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
 
   if (sellGross !== null && sellFees) warnings.push('fee_assumed');
   warnings.push('lot_rule_assumed');
+  if (tPlusOne) warnings.push('t_plus_one_assumed');
   if (!input.share_data_available) warnings.push('share_data_missing');
+  warnings.push('execution_price_is_reference');
 
-  // 任何不可执行原因都压过 NO_ACTION；只有"无优势"这一条时才是 NO_ACTION（PRD AC-07）。
-  const status: ScenarioStatus = reasons.some(r => r.code !== 'no_demonstrated_advantage') ? 'NOT_EXECUTABLE'
-    : reasons.some(r => r.code === 'no_demonstrated_advantage') ? 'NO_ACTION'
+  // 工具层已确认的前置条件（如 as_of 非交易日、缓存不可用）并入同一套原因分类。
+  for (const r of input.preconditions ?? []) reasons.push(r);
+  // 账户币种/时效门控（工作包 A4-3）：不是"当前"快照就永远不能 EXECUTABLE。
+  if (snapshot.is_current !== true) {
+    reasons.push({
+      code: 'account_not_current',
+      detail: `账户快照 ${snapshot.snapshot_id}（as_of ${snapshot.as_of}）未标记为当前账户，任何预案最多只能作为演示`,
+    });
+  }
+  // 报价可信级别（工作包 A4-2）：调用方自填报价只能用于研究/演示。
+  const callerQuoteCodes = [...normalized.values()].filter(q => q.source === 'caller_supplied').map(q => q.ts_code);
+  if (callerQuoteCodes.length > 0) {
+    reasons.push({
+      code: 'caller_supplied_quote',
+      detail: `${callerQuoteCodes.join(', ')} 的价格来自调用方自填，不是服务端缓存行情；仅供研究演示，不可作为可执行预案`,
+    });
+  }
+
+  /**
+   * 状态判定（互斥、按严重度降序）：
+   * NOT_EXECUTABLE（规则/权限/行情拒绝）> DATA_INSUFFICIENT（缓存无法回答）
+   * > NO_ACTION（无已验证优势）> ILLUSTRATIVE（账户/报价/证据可信度不足）> EXECUTABLE。
+   */
+  const HARD: ReasonCode[] = ['invalid_input', 'lot_rule', 'insufficient_position', 'insufficient_cash_for_one_lot',
+    'quote_missing', 'quote_stale', 'instrument_not_tradable', 'permission_restricted',
+    'instrument_unknown', 'instrument_claim_mismatch', 'same_instrument'];
+  const DATA: ReasonCode[] = ['data_insufficient'];
+  const ILLUSTRATIVE: ReasonCode[] = ['account_not_current', 'caller_supplied_quote', 'evidence_unverified'];
+  const has = (codes: ReasonCode[]) => reasons.some(r => codes.includes(r.code));
+  const status: ScenarioStatus = has(HARD) ? 'NOT_EXECUTABLE'
+    : has(DATA) ? 'DATA_INSUFFICIENT'
+    : has(['no_demonstrated_advantage']) ? 'NO_ACTION'
+    : has(ILLUSTRATIVE) ? 'ILLUSTRATIVE'
     : 'EXECUTABLE';
 
-  // NOT_EXECUTABLE 绝不能携带一份"看起来能下单"的买入单：忽略 status 的消费者
-  // 只读 trade.buy 就会读到价格与手数。买入腿因此归零，计算值单独放在
+  // 非可执行状态绝不能携带一份"看起来能下单"的买卖腿：忽略 status 的消费者只读
+  // trade.buy / trade.sell 就会读到价格与手数。两腿因此归零，计算值单独放在
   // illustrative（executable:false）里供人工对照。
   const executable = status === 'EXECUTABLE';
-  const illustrative = !executable && (buyLots > 0 || buyPriceMilli != null)
-    ? { executable: false as const, lots: buyLots, price_milli: buyPriceMilli, gross_cents: buyGross, total_cost_cents: buyTotal }
+  const illustrative = !executable
+    ? {
+        executable: false as const,
+        lots: buyLots, price_milli: buyPriceMilli, gross_cents: buyGross, total_cost_cents: buyTotal,
+        // 费用只属于演示计算；trade.fees_cents 在不可执行状态下为 0。
+        fees_cents: (sellFees?.total_cents ?? 0) + buyFees.total_cents,
+        ...(sellGross === null ? {} : {
+          sell: { ts_code: sellCode!, quantity: sellShares, price_milli: sellQuote.price_milli, gross_cents: sellGross, net_proceeds_cents: netProceeds },
+        }),
+      }
     : null;
+  const illustrativeSell = illustrative?.sell;
   if (!executable) buyLots = 0;
   const buyFeesFinal = buyLots > 0 ? buyFees : emptyFees;
   const buyTotalFinal = buyLots > 0 ? buyTotal : 0;
@@ -581,11 +723,11 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       ? { ts_code: p.ts_code, name: p.name, quantity: p.quantity - sellShares, market_value_cents: p.market_value_cents - mvSoldAtSnapshot, theme: THEME_BY_CODE[p.ts_code] ?? 'unknown' }
       : { ts_code: p.ts_code, name: p.name, quantity: p.quantity, market_value_cents: p.market_value_cents, theme: THEME_BY_CODE[p.ts_code] ?? 'unknown' });
     // 已持有买入标的时按加仓合并；R0 五只持仓均不在候选内，但保持通用。
-    // NOT_EXECUTABLE 时 buyLots 已归零，不会把受限标的写进事后投影。
+    // 非 EXECUTABLE 时 buyLots 已归零，不会把受限标的写进事后投影。
     const existing = positions.find(p => p.ts_code === buyCode);
     if (existing && buyLots > 0) existing.market_value_cents += buyGross;
     else if (buyLots > 0) positions.push({
-      ts_code: buyCode!, name: buyQuoteName(buyQuote, quotes.get(buyCode!)), quantity: buyLots * lotsRule.etf_lot_size,
+      ts_code: buyCode!, name: buyQuoteName(buyQuote, quotes.get(buyCode!)), quantity: buyLots * buyLotSize,
       market_value_cents: buyGross, theme: THEME_BY_CODE[buyCode!] ?? 'unknown',
     });
     const cash = snapshot.totals.cash_cents + (netProceeds ?? 0) - buyTotalFinal;
@@ -617,6 +759,13 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
   const reduceRow = comparisonRow('REDUCE_EQUITY', 'NOT_EXECUTABLE', reduceSide, sellFees?.total_cents ?? 0, stress,
     '只卖出、不买入：降低权益敞口，保留现金。R0 只作为情景对照，不构成建议。');
 
+  const quoteSources = [...normalized.values()].map(q => q.source);
+  const quoteSource: 'market_cache' | 'caller_supplied' | 'mixed' =
+    quoteSources.length === 0 ? 'caller_supplied'
+      : quoteSources.every(s => s === 'market_cache') ? 'market_cache'
+      : quoteSources.every(s => s === 'caller_supplied') ? 'caller_supplied'
+      : 'mixed';
+
   return {
     schema: 'ashare-portfolio-scenario/1.0',
     decision_id: decisionId(input, normalized, fees, lotsRule, stress),
@@ -632,16 +781,22 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       quote_dates: quoteDates,
       stale_codes: staleCodes,
       missing_codes: missingCodes,
-      source: 'caller_supplied',
+      source: quoteSource,
+      per_code: Object.fromEntries([...normalized.values()].map(q => [q.ts_code, q.source])),
+      server_cache: quoteSource === 'market_cache',
     },
     trade: {
-      sell: {
-        ts_code: sellCode!, quantity: sellShares, price_milli: sellQuote.price_milli,
-        gross_cents: sellGross, fees: sellFees, net_proceeds_cents: netProceeds,
-      },
+      sell: executable
+        ? {
+            ts_code: sellCode!, quantity: sellShares, price_milli: sellQuote.price_milli,
+            gross_cents: sellGross, fees: sellFees, net_proceeds_cents: netProceeds,
+          }
+        : {
+            ts_code: sellCode!, quantity: 0, price_milli: null, gross_cents: null, fees: null, net_proceeds_cents: null,
+          },
       buy: {
-        ts_code: buyCode!, lots: buyLots, lot_size: lotsRule.etf_lot_size,
-        quantity: buyLots * lotsRule.etf_lot_size,
+        ts_code: buyCode!, lots: buyLots, lot_size: buyLotSize,
+        quantity: buyLots * buyLotSize,
         // 不可执行时价格必须为 null：不能让只读 trade.buy 的消费者看到一份可下单的报价。
         price_milli: executable ? buyPriceMilli : null,
         gross_cents: buyLots > 0 ? buyGross : 0, fees: buyFeesFinal,
@@ -650,9 +805,12 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       budget_cents: budget ?? 0,
       residual_cash_cents: executable ? residual : (budget === null ? null : budget),
       price_effect_cents: priceEffect,
-      fees_cents: totalFeesFinal,
+      // 不可执行时没有交易，因此汇总费用为 0；明细见 trade.illustrative.fees_cents。
+      fees_cents: executable ? totalFeesFinal : 0,
+      execution_price_is_reference: true,
       ...(illustrative ? { illustrative } : {}),
     },
+    t_plus_one: tPlusOne,
     before,
     after,
     risk: {
@@ -664,19 +822,76 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
       note: `声明式压力假设：全部权益 ETF 下跌 ${(stress.shock_pct * 100).toFixed(0)}%。这是假设，不是预测，也不是历史回撤；真实损失可能更大。`,
     },
     comparison: [holdRow, rotateRow, reduceRow],
-    rules: describeRules(fees, lotsRule, stress),
+    rules: describeRules(fees, lotsRule, stress, stockRules),
     evidence: evidence
-      ? { supplied: true, advantage: evidence.advantage, basis: evidence.basis, note: '相对优势由调用方研究提供，本模块不计算胜率或上涨概率。' }
-      : { supplied: false, advantage: null, basis: null, note: '未提供相对优势证据；按 PRD §6 返回 NO_ACTION。' },
+      ? {
+          supplied: true, advantage: evidence.advantage, basis: evidence.basis,
+          source: evidence.source ?? 'UNVERIFIED', evidence_id: evidence.evidence_id ?? null,
+          as_of: evidence.as_of ?? null, verified: evidenceVerified,
+          note: '相对优势由调用方研究提供，本模块不计算胜率或上涨概率；只有 RESEARCH_VERIFIED 且带 evidence_id 才算已证明。',
+        }
+      : { supplied: false, advantage: null, basis: null, source: 'UNVERIFIED', evidence_id: null, as_of: null, verified: false, note: '未提供相对优势证据；按 PRD §6 返回 NO_ACTION。' },
     valuation: {
       basis: 'snapshot_reference_prices_except_new_buy',
-      revaluation_note: '交易前按快照参考价；卖出部分按快照市值等比例扣减；新买入按本次行情价计入。卖出价与快照参考价的差额单列在 price_effect_cents，不与费用混同。',
+      revaluation_note: '交易前按快照参考价；卖出部分按快照市值等比例扣减；新买入按本次行情价计入。卖出价与快照参考价的差额单列在 price_effect_cents，不与费用混同。行情收盘价不是下一交易日的保证成交价。',
       price_effect_cents: priceEffect,
     },
     historical_performance: { available: false, reason: 'no_history' },
     max_drawdown: { available: false, reason: 'no_history' },
     disclaimer: DISCLAIMER,
   };
+}
+
+// ---------------------------------------------------------------- 标的身份核对
+
+interface IdentityResult {
+  kind: InstrumentKind | 'UNKNOWN';
+  board: string | null;
+  list_status: string | null;
+  /** 调用方声明与解析结果/代码前缀矛盾。 */
+  mismatch?: string;
+  /** 无法确认品种。 */
+  unknown?: string;
+}
+
+/**
+ * 买入标的身份。`resolved`（来自 instrument.ts 的服务端解析）是权威；缺省时用代码
+ * 前缀与调用方声明交叉核对，任何与前缀矛盾的声明都被拒绝，绝不因为调用方写了
+ * `buy_kind='etf'` 就把 688/689/300/301/8/4 的个股当成 ETF。
+ */
+function identityOfBuy(code: string, claim: InstrumentInfo | undefined, resolved: ResolvedInstrument | undefined): IdentityResult {
+  const prefixKind = inferInstrumentKind(code);
+  const prefixBoard = inferBoard(code) ?? null;
+  if (resolved) {
+    if (!resolved.found || resolved.kind === 'UNKNOWN') {
+      return { kind: 'UNKNOWN', board: null, list_status: resolved.list_status, unknown: `${code} 无法从本地市场缓存确认品种：${resolved.detail}` };
+    }
+    const check = checkInstrumentClaim({ kind: claim?.kind, board: claim?.board }, resolved);
+    if (!check.ok) return { kind: resolved.kind, board: resolved.board, list_status: resolved.list_status, mismatch: check.detail };
+    return { kind: resolved.kind, board: resolved.board, list_status: resolved.list_status };
+  }
+  if (claim?.kind && claim.kind !== prefixKind) {
+    return {
+      kind: prefixKind, board: prefixBoard, list_status: null,
+      mismatch: `调用方声明 buy_kind=${claim.kind}，但 ${code} 的代码前缀表明是 ${prefixKind}（未提供服务端解析时按前缀保守判定）`,
+    };
+  }
+  if (claim?.board && prefixKind === 'STOCK' && prefixBoard && claim.board !== prefixBoard) {
+    return {
+      kind: 'STOCK', board: prefixBoard, list_status: null,
+      mismatch: `调用方声明 buy_board=${claim.board}，但 ${code} 的代码前缀属于 ${prefixBoard}`,
+    };
+  }
+  return { kind: prefixKind, board: prefixBoard, list_status: null };
+}
+
+/** 持仓标的身份：只用于选择费用/交易单位与上市状态，不涉及买入权限。 */
+function identityOfHeld(code: string, resolved: ResolvedInstrument | undefined): IdentityResult {
+  if (!resolved) return { kind: inferInstrumentKind(code), board: inferBoard(code) ?? null, list_status: null };
+  if (!resolved.found || resolved.kind === 'UNKNOWN') {
+    return { kind: 'UNKNOWN', board: null, list_status: resolved.list_status, unknown: `${code} 无法从本地市场缓存确认品种：${resolved.detail}` };
+  }
+  return { kind: resolved.kind, board: resolved.board, list_status: resolved.list_status };
 }
 
 const DISCLAIMER = '本情景为只读演示账户上的静态确定性计算，不构成投资建议、不预测收益、不代表任何策略有效；费用、交易单位与压力参数均为假设值，交易由用户本人在券商手动执行。';
@@ -723,12 +938,20 @@ function decisionId(
     schema: 'ashare-portfolio-scenario/1.0',
     snapshot_id: input.snapshot.snapshot_id,
     snapshot_totals: input.snapshot.totals,
+    snapshot_is_current: input.snapshot.is_current === true,
     positions: input.snapshot.positions.map(p => [p.ts_code, p.quantity, p.market_value_cents]),
     as_of_trade_date: input.as_of_trade_date,
     action,
     quotes: [...quotes.values()].sort((a, b) => a.ts_code.localeCompare(b.ts_code))
-      .map(q => [q.ts_code, q.trade_date, q.price_milli, q.quality, q.list_status, q.suspended]),
-    evidence: input.evidence ? { advantage: input.evidence.advantage, basis: input.evidence.basis } : null,
+      .map(q => [q.ts_code, q.trade_date, q.price_milli, q.quality, q.list_status, q.suspended, q.source]),
+    resolved: {
+      sell: input.resolved?.sell ? [input.resolved.sell.kind, input.resolved.sell.board, input.resolved.sell.list_status] : null,
+      buy: input.resolved?.buy ? [input.resolved.buy.kind, input.resolved.buy.board, input.resolved.buy.list_status] : null,
+    },
+    preconditions: (input.preconditions ?? []).map(r => r.code).sort(),
+    evidence: input.evidence
+      ? { advantage: input.evidence.advantage, basis: input.evidence.basis, source: input.evidence.source ?? 'UNVERIFIED', evidence_id: input.evidence.evidence_id ?? null }
+      : null,
     shares: input.share_data_available === true,
     rules: { fees, lots, stress },
   });

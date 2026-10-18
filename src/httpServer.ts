@@ -5,6 +5,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
 import { getAvailableToolList, dispatchTool } from "./dispatch.js";
+import { mountPrivateEndpoint, PRIVATE_ENDPOINT_PATH } from "./privateServer.js";
 import { SERVER_VERSION } from "./version.js";
 
 
@@ -416,6 +417,10 @@ app.get('/terminate', (_req: Request, res: Response) => {
   return res.status(200).json({ ok: true });
 });
 
+// 私有账户端点（A5）：只有设置了 ASHARE_PRIVATE_PORTFOLIO_TOKEN 才真正挂载处理器；
+// 未设置时 /private/mcp 返回 404，不通过 401 暴露自身。公网 /mcp 永远不提供账户工具。
+const privateEndpointMounted = mountPrivateEndpoint(app);
+
 app.listen(PORT, HOST, () => {
   console.log('\n' + '='.repeat(60));
   console.log('🚀 FinanceMCP Streamable HTTP Server Started');
@@ -425,6 +430,9 @@ app.listen(PORT, HOST, () => {
   console.log(`💚 Health Check:  http://${HOST}:${PORT}/health`);
   console.log(`📊 Active Sessions: ${sessions.size}`);
   console.log(`🔧 Available Tools: ${getAvailableToolList().length}`);
+  console.log(privateEndpointMounted
+    ? `🔐 Private Endpoint: http://${HOST}:${PORT}${PRIVATE_ENDPOINT_PATH} (bearer token required, account tools only)`
+    : '🔐 Private Endpoint: disabled (set ASHARE_PRIVATE_PORTFOLIO_TOKEN to enable)');
   console.log('='.repeat(60));
   console.log('📝 Server is ready to accept connections');
   console.log('='.repeat(60) + '\n');

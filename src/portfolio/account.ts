@@ -43,6 +43,10 @@ export interface AccountSnapshot {
   note: string;
   warnings: string[];
   is_current: boolean;
+  /** 标记为当前账户时，是谁确认的（只读记录，缺失为 null）。 */
+  is_current_confirmed_by?: string | null;
+  /** 确认时间（ISO，缺失为 null）。 */
+  is_current_confirmed_at?: string | null;
   positions: SnapshotPosition[];
   totals: SnapshotTotals;
 }
@@ -137,7 +141,6 @@ function snapshotSignature(snapshot: AccountSnapshot): string {
   });
   return createHash('sha256').update(canonical).digest('hex');
 }
-
 // ---------------------------------------------------------------- 导入
 
 export interface ImportResult {
@@ -148,26 +151,33 @@ export interface ImportResult {
 }
 
 /**
- * 幂等导入基线快照：以固定 `snapshot_id` 为主键，重复执行不会产生重复行。
- * 若已存在但内容不同，拒绝覆盖（冻结基线不能被静默改写），并报告差异。
+ * 导入一个快照（通用路径）。`is_current` 只有在 `confirmCurrent` 为 true 时才写入；
+ * 演示截图基线永远不能成为"当前账户"（PRD §3 明确它是截图，不是实时余额）。
+ * 幂等：同一 `snapshot_id` 内容相同 → 不重复插入；内容不同 → 拒绝覆盖。
  */
-export function importDemoSnapshot(db: DatabaseSync, snapshot: AccountSnapshot = DEMO_SNAPSHOT): ImportResult {
+export function importSnapshot(db: DatabaseSync, snapshot: AccountSnapshot, options: { confirmCurrent?: boolean } = {}): ImportResult {
+  if (snapshot.is_current && !options.confirmCurrent) {
+    throw new Error(`快照 ${snapshot.snapshot_id} 声明 is_current=true，但未经确认；请显式传入 confirmCurrent`);
+  }
   const signature = snapshotSignature(snapshot);
   const existing = db.prepare('SELECT snapshot_id FROM account_snapshot WHERE snapshot_id = ?').get(snapshot.snapshot_id);
   if (existing) {
     const stored = readSnapshot(db, snapshot.snapshot_id)!;
     if (snapshotSignature(stored) !== signature) {
-      throw new Error(`快照 ${snapshot.snapshot_id} 已存在且内容不同，拒绝覆盖冻结基线`);
+      throw new Error(`快照 ${snapshot.snapshot_id} 已存在且内容不同，拒绝覆盖既有快照`);
     }
     const n = (db.prepare('SELECT COUNT(*) n FROM position WHERE snapshot_id = ?').get(snapshot.snapshot_id) as any).n as number;
     return { inserted: false, snapshot_id: snapshot.snapshot_id, positions: n, db_signature: signature };
   }
   inPortfolioTransaction(db, () => {
+    // 只有一个快照可以是"当前"：先清掉旧的标记，避免出现两个当前账户。
+    if (snapshot.is_current) db.prepare('UPDATE account_snapshot SET is_current = 0').run();
     db.prepare(`INSERT INTO account_snapshot
-      (snapshot_id, as_of, source, note, warnings, is_current, total_assets_cents, securities_mv_cents, cash_cents, wealth_cents, unrealized_pnl_cents, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (snapshot_id, as_of, source, note, warnings, is_current, is_current_confirmed_by, is_current_confirmed_at, total_assets_cents, securities_mv_cents, cash_cents, wealth_cents, unrealized_pnl_cents, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       snapshot.snapshot_id, snapshot.as_of, snapshot.source, snapshot.note, JSON.stringify(snapshot.warnings),
-      snapshot.is_current ? 1 : 0, snapshot.totals.total_assets_cents, snapshot.totals.securities_mv_cents,
+      snapshot.is_current ? 1 : 0, snapshot.is_current_confirmed_by ?? null, snapshot.is_current_confirmed_at ?? null,
+      snapshot.totals.total_assets_cents, snapshot.totals.securities_mv_cents,
       snapshot.totals.cash_cents, snapshot.totals.wealth_cents, snapshot.totals.unrealized_pnl_cents,
       new Date().toISOString(),
     );
@@ -179,6 +189,39 @@ export function importDemoSnapshot(db: DatabaseSync, snapshot: AccountSnapshot =
     }
   });
   return { inserted: true, snapshot_id: snapshot.snapshot_id, positions: snapshot.positions.length, db_signature: signature };
+}
+
+/**
+ * 幂等导入基线快照：以固定 `snapshot_id` 为主键，重复执行不会产生重复行。
+ * 若已存在但内容不同，拒绝覆盖（冻结基线不能被静默改写），并报告差异。
+ */
+export function importDemoSnapshot(db: DatabaseSync, snapshot: AccountSnapshot = DEMO_SNAPSHOT): ImportResult {
+  return importSnapshot(db, snapshot);
+}
+
+/**
+ * 把一个**用户确认过**的账户快照标记为当前账户（PRD §8）。这是唯一能让
+ * `is_current` 变为 true 的路径：必须显式给出确认人与确认时间，且不能用于
+ * 演示截图基线（demo-2026-10-18 永远不是当前账户）。
+ */
+export function markSnapshotCurrent(
+  db: DatabaseSync, snapshotId: string, confirmation: { confirmedBy: string; confirmedAt?: string },
+): { snapshot_id: string; is_current: true; confirmed_by: string; confirmed_at: string } {
+  if (!confirmation.confirmedBy || !confirmation.confirmedBy.trim()) {
+    throw new Error('标记当前账户必须提供 confirmedBy（谁确认的）');
+  }
+  if (snapshotId === DEMO_SNAPSHOT_ID) {
+    throw new Error('演示截图基线不能标记为当前账户；当前账户必须来自用户确认的真实快照');
+  }
+  const row = db.prepare('SELECT snapshot_id FROM account_snapshot WHERE snapshot_id = ?').get(snapshotId);
+  if (!row) throw new Error(`账户快照 ${snapshotId} 不存在`);
+  const confirmedAt = confirmation.confirmedAt ?? new Date().toISOString();
+  inPortfolioTransaction(db, () => {
+    db.prepare('UPDATE account_snapshot SET is_current = 0').run();
+    db.prepare('UPDATE account_snapshot SET is_current = 1, is_current_confirmed_by = ?, is_current_confirmed_at = ? WHERE snapshot_id = ?')
+      .run(confirmation.confirmedBy, confirmedAt, snapshotId);
+  });
+  return { snapshot_id: snapshotId, is_current: true, confirmed_by: confirmation.confirmedBy, confirmed_at: confirmedAt };
 }
 
 /** 从账户库读回快照；不存在时返回 undefined。 */
@@ -193,6 +236,8 @@ export function readSnapshot(db: DatabaseSync, snapshotId: string): AccountSnaps
     note: row.note,
     warnings: JSON.parse(row.warnings),
     is_current: row.is_current === 1,
+    is_current_confirmed_by: row.is_current_confirmed_by ?? null,
+    is_current_confirmed_at: row.is_current_confirmed_at ?? null,
     positions: positions.map(p => ({
       ts_code: p.ts_code, name: p.name, quantity: p.quantity,
       ref_price_milli: p.ref_price_milli, ref_cost_milli: p.ref_cost_milli, market_value_cents: p.market_value_cents,
@@ -210,6 +255,15 @@ export function readSnapshot(db: DatabaseSync, snapshotId: string): AccountSnaps
 /** 最新快照（按 as_of 倒序）。R0 只有一条。 */
 export function latestSnapshot(db: DatabaseSync): AccountSnapshot | undefined {
   const row = db.prepare('SELECT snapshot_id FROM account_snapshot ORDER BY as_of DESC, created_at DESC LIMIT 1').get() as any;
+  return row ? readSnapshot(db, row.snapshot_id) : undefined;
+}
+
+/**
+ * 被标记为"当前账户"的快照（is_current=1）。没有用户确认过的快照时返回 undefined；
+ * 演示基线永远不会是当前账户。
+ */
+export function currentSnapshot(db: DatabaseSync): AccountSnapshot | undefined {
+  const row = db.prepare('SELECT snapshot_id FROM account_snapshot WHERE is_current = 1 ORDER BY as_of DESC LIMIT 1').get() as any;
   return row ? readSnapshot(db, row.snapshot_id) : undefined;
 }
 

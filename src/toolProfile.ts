@@ -59,6 +59,22 @@ export function getToolProfile(): ToolProfile {
   return value;
 }
 
+/**
+ * 私有端点（`/private/mcp`）的工具可见性。令牌本身就是"这台部署要账户工具"的显式
+ * 声明，因此这里不再要求 `ASHARE_PORTFOLIO_ENABLED=1`；只有显式 allowlist 仍然生效。
+ * 市场工具永远不满足本函数。
+ */
+export function isPrivateToolExposed(name: string): boolean {
+  if (!PORTFOLIO_TOOL_NAMES.has(name)) return false;
+  const p = getToolProfile();
+  return !p.allowlist || p.allowlist.has(name);
+}
+
+/** 私有端点是否已配置（只用于启动日志，不参与公网可见性判断）。 */
+export function privateEndpointConfigured(): boolean {
+  return (process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN ?? '').trim().length > 0;
+}
+
 /** Whether a tool name passes the configured profile (credential checks are separate). */
 export function isToolExposed(name: string): boolean {
   const p = getToolProfile();

@@ -21,7 +21,10 @@ import { routeToolCall } from './utils/dataSourceRouter.js';
 import { isToolSourceAvailable, ToolSource } from './toolAvailability.js';
 import { getConfiguredCredentialSources, getSourcePriority } from './config.js';
 import { ashareToolDefinitions, ASHARE_TOOL_NAMES, PORTFOLIO_TOOL_NAMES, portfolioToolDefinitions } from './ashare/definitions.js';
-import { isToolExposed } from './toolProfile.js';
+import { isPrivateToolExposed, isToolExposed } from './toolProfile.js';
+
+/** 条件化配置比较工具：只在私有端点提供，公网不暴露。 */
+export const DECISION_TOOL_NAME = 'ashare_portfolio_decision';
 
 export const toolList = [
   { name: timestampTool.name, description: timestampTool.description, inputSchema: timestampTool.parameters },
@@ -104,8 +107,20 @@ function contextualizeTool(tool: (typeof toolList)[number]) {
   };
 }
 
+/** 公网/本地入口对账户工具的统一拒绝原因码。 */
+export const PRIVATE_ENDPOINT_REQUIRED = 'private_endpoint_required';
+
+function privateEndpointError(name: string): Error {
+  return new Error(
+    `${PRIVATE_ENDPOINT_REQUIRED}: ${name} 是私有账户工具，只能通过已认证的私有端点调用`
+    + '（设置 ASHARE_PRIVATE_PORTFOLIO_TOKEN 后使用 /private/mcp）；公网 /mcp 永远不提供账户数据。'
+  );
+}
+
 export function isToolAvailable(name: string): boolean {
-  if (PORTFOLIO_TOOL_NAMES.has(name) || ASHARE_TOOL_NAMES.has(name)) return isToolExposed(name);
+  // 账户工具不属于任何公网/本地工具面：它们只存在于私有端点（见 getPrivateToolList）。
+  if (PORTFOLIO_TOOL_NAMES.has(name)) return false;
+  if (ASHARE_TOOL_NAMES.has(name)) return isToolExposed(name);
   return toolList.some(tool => tool.name === name)
     && isToolExposed(name)
     && isToolSourceAvailable(toolSources(name));
@@ -114,25 +129,32 @@ export function isToolAvailable(name: string): boolean {
 export function getAvailableToolList() {
   // A-share tools read the local cache only, so request credentials do not scope them.
   const ashareTools = ashareToolDefinitions.filter(tool => isToolExposed(tool.name));
-  // Private account tools are advertised only under the explicit ASHARE_PORTFOLIO_ENABLED gate.
-  const portfolioTools = portfolioToolDefinitions.filter(tool => isToolExposed(tool.name));
+  // 账户工具**永不**进入公网 tools/list：即使 ASHARE_PORTFOLIO_ENABLED=1 也只在
+  // 私有端点（getPrivateToolList）出现，避免匿名端点泄露账户数量、成本与持仓。
   return [
     ...toolList
       .filter(tool => isToolExposed(tool.name) && isToolSourceAvailable(toolSources(tool.name)))
       .map(contextualizeTool),
     ...ashareTools,
-    ...portfolioTools,
   ];
 }
 
+/**
+ * 私有端点工具清单：只包含账户工具。与 `getAvailableToolList()` 成对使用，
+ * 公网路径完全不经过这里，因此两者并发时不会互相影响（没有任何共享可变状态）。
+ */
+export function getPrivateToolList() {
+  return portfolioToolDefinitions
+    .filter(tool => isPrivateToolExposed(tool.name))
+    .map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }));
+}
+
 export function assertToolAvailable(name: string): void {
-  if (!toolList.some(tool => tool.name === name) && !ASHARE_TOOL_NAMES.has(name) && !PORTFOLIO_TOOL_NAMES.has(name)) {
+  if (PORTFOLIO_TOOL_NAMES.has(name)) throw privateEndpointError(name);
+  if (!toolList.some(tool => tool.name === name) && !ASHARE_TOOL_NAMES.has(name)) {
     throw new Error(`Unknown tool: ${name}`);
   }
   if (!isToolAvailable(name)) {
-    if (PORTFOLIO_TOOL_NAMES.has(name)) {
-      throw new Error(`Tool ${name} is a private account tool and is disabled; set ASHARE_PORTFOLIO_ENABLED=1 to enable it`);
-    }
     throw new Error(`Tool ${name} is not available for the configured API credentials or tool profile`);
   }
 }
@@ -271,12 +293,8 @@ async function dispatchNativeTool(name: string, args: Record<string, any>): Prom
 }
 
 export async function dispatchTool(name: string, args: Record<string, any>): Promise<any> {
+  // 公网/本地入口：账户工具在这里被硬拒绝（assertToolAvailable 抛 private_endpoint_required）。
   assertToolAvailable(name);
-  if (PORTFOLIO_TOOL_NAMES.has(name)) {
-    // Private account tools read the separate portfolio database only.
-    const { runPortfolioTool } = await import('./portfolio/tools.js');
-    return runPortfolioTool(name, args);
-  }
   if (ASHARE_TOOL_NAMES.has(name)) {
     // Local analysis tools never enter the external data-source fallback router.
     const { runAshareTool } = await import('./ashare/tools.js');
@@ -284,3 +302,24 @@ export async function dispatchTool(name: string, args: Record<string, any>): Pro
   }
   return routeToolCall(name, args, () => dispatchNativeTool(name, args));
 }
+
+/**
+ * 私有端点入口。与 `dispatchTool` 成对：这里**只**接受账户工具，任何市场工具都被
+ * 明确拒绝；公网入口则相反。两者没有共享可变状态，因此并发请求不会互相串工具集。
+ */
+export async function dispatchPrivateTool(name: string, args: Record<string, any>): Promise<any> {
+  if (!PORTFOLIO_TOOL_NAMES.has(name)) {
+    throw new Error(`market_tool_not_available_on_private_endpoint: ${name} 是市场工具，私有 /private/mcp 只提供账户工具`);
+  }
+  if (!isPrivateToolExposed(name)) {
+    throw new Error(`Tool ${name} is not exposed by the configured tool profile`);
+  }
+  if (name === DECISION_TOOL_NAME) {
+    const { runDecisionTool } = await import('./portfolio/decisionTool.js');
+    return runDecisionTool(args ?? {});
+  }
+  // 账户账本工具（summary/scenario 及后续新增的 ledger 工具）统一走 portfolio/tools.ts。
+  const { runPortfolioTool } = await import('./portfolio/tools.js');
+  return runPortfolioTool(name, args ?? {});
+}
+

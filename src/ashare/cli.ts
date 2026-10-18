@@ -30,7 +30,9 @@ const USAGE = `用法: finance-ashare <command> [options]
   portfolio-import                                               导入 PRD §3 基线快照（幂等）
   portfolio-summary [--snapshot ID]                              账户汇总：市值/权重/集中度/主题暴露/对账
   portfolio-scenario --action hold|sell-buy [--sell CODE --buy CODE --shares N ...]
-                                                                 静态换仓情景（确定性，不下单）`;
+                                                                 静态换仓情景（确定性，不下单）
+  portfolio-decision --account ID --action hold|reduce|sell-buy|no-action [--sell CODE --shares N]
+        [--buy CODE] [--market-db PATH]                          条件化配置比较（候选行情只来自服务端缓存）`;
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);

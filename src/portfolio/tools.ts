@@ -1,13 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
-import { accountSummary, latestSnapshot, readSnapshot, reconcile } from './account.js';
+import { accountSummary, currentSnapshot, latestSnapshot, readSnapshot, reconcile } from './account.js';
 import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
-import type { EtfQuoteInput, ScenarioAction } from './scenario.js';
+import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quotes.js';
+import type { EtfQuoteInput, ScenarioAction, ScenarioEvidence } from './scenario.js';
 import { buildScenario } from './scenario.js';
 
 /**
- * MCP 账户工具实现。与市场工具完全隔离：只打开 `portfolio.sqlite`（只读），
- * 不打开 `ashare.sqlite`，不写任何数据库，不调用外部数据源。
+ * MCP 账户工具实现。与市场工具隔离：账户数据只从 `portfolio.sqlite`（只读）读取；
+ * 换仓情景**只读**打开本地市场缓存（`ashare.sqlite`）以取得可信标的身份与行情，
+ * 绝不写入任何数据库，也不调用外部数据源。
  *
  * 默认关闭（ASHARE_PORTFOLIO_ENABLED=1 才可用）。即使工具不可见，直接调用也会
  * 得到明确拒绝而不是账户数据。
@@ -47,57 +49,99 @@ function summaryTool(args: Record<string, any>): ToolResult {
 
 function scenarioTool(args: Record<string, any>): ToolResult {
   const db = readDb();
+  const market = openMarketCache();
   try {
     const actionRaw = String(args.action ?? 'hold');
     if (actionRaw !== 'hold' && actionRaw !== 'sell-buy') throw new Error('action 需要 hold 或 sell-buy');
-    const snapshot = latestSnapshot(db);
-    if (!snapshot) throw new Error('账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
+    // 优先使用用户确认过的当前账户；没有时退回最新快照（演示基线），此时结果最多 ILLUSTRATIVE。
+    const snapshot = args.snapshot_id
+      ? readSnapshot(db, String(args.snapshot_id))
+      : (currentSnapshot(db) ?? latestSnapshot(db));
+    if (!snapshot) throw new Error(args.snapshot_id ? `账户快照 ${args.snapshot_id} 不存在` : '账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
     const summary = accountSummary(snapshot);
     const tradeDate = ymdOr(args.as_of_trade_date, snapshot.as_of.replace(/-/g, ''));
-    const quoteDate = ymdOr(args.quote_date, tradeDate);
 
-    const quotes = new Map<string, EtfQuoteInput>();
-    if (args.sell_code && Number.isFinite(Number(args.sell_price))) {
-      quotes.set(String(args.sell_code), {
-        trade_date: quoteDate, close: Number(args.sell_price), quality: 'READY',
-        list_status: args.sell_list_status ?? 'L', suspended: args.sell_suspended === true,
-      });
-    }
-    if (args.buy_code && Number.isFinite(Number(args.buy_price))) {
-      quotes.set(String(args.buy_code), {
-        trade_date: quoteDate, close: Number(args.buy_price), quality: 'READY',
-        list_status: args.buy_list_status ?? 'L', suspended: args.buy_suspended === true,
-      });
-    }
+    // 默认只信任服务端只读缓存；只有调用方显式声明 mode:'research' 才接受自填价格。
+    const mode: ScenarioMode = String(args.mode ?? 'server').toLowerCase() === 'research' ? 'research' : 'server';
 
     let action: ScenarioAction;
     if (actionRaw === 'hold') {
       action = { type: 'HOLD' };
     } else {
       if (!args.sell_code || !args.buy_code) throw new Error('sell-buy 需要 sell_code 与 buy_code');
-      const kind = String(args.buy_kind ?? 'etf').toLowerCase();
-      if (kind !== 'etf' && kind !== 'stock') throw new Error('buy_kind 需要 etf 或 stock');
       action = {
         type: 'SELL_AND_BUY',
         sell_code: String(args.sell_code),
         sell_shares: Number(args.sell_shares),
         buy_code: String(args.buy_code),
-        buy_instrument: { kind: kind === 'etf' ? 'ETF' : 'STOCK', board: args.buy_board ? String(args.buy_board) : undefined },
+        // 声明只用于核对，身份以服务端解析为准（见 scenario.ts identityOfBuy）。
+        // 未提供时不产生声明，避免用默认值去覆盖服务端判定。
+        buy_instrument: {
+          kind: (args.buy_kind ? String(args.buy_kind).toUpperCase() : undefined) as 'ETF' | 'STOCK',
+          board: args.buy_board ? String(args.buy_board) : undefined,
+        },
       };
     }
 
-    // 缺失的 quotes 由 buildScenario 归一化为 NOT_READY，因此这里不伪造价格。
-    return json(buildScenario({
+    // 研究/演示模式才读取调用方价格；这些报价被标记为 caller_supplied，结果最多 ILLUSTRATIVE。
+    const callerQuotes = new Map<string, EtfQuoteInput>();
+    if (mode === 'research') {
+      const quoteDate = ymdOr(args.quote_date, tradeDate);
+      if (args.sell_code && Number.isFinite(Number(args.sell_price))) {
+        callerQuotes.set(String(args.sell_code), { trade_date: quoteDate, close: Number(args.sell_price), quality: 'READY' });
+      }
+      if (args.buy_code && Number.isFinite(Number(args.buy_price))) {
+        callerQuotes.set(String(args.buy_code), { trade_date: quoteDate, close: Number(args.buy_price), quality: 'READY' });
+      }
+    }
+
+    const bundle = buildScenarioQuotes({
+      marketDb: market, asOf: tradeDate,
+      sellCode: action.type === 'SELL_AND_BUY' ? action.sell_code : undefined,
+      buyCode: action.type === 'SELL_AND_BUY' ? action.buy_code : undefined,
+      mode, callerQuotes,
+    });
+
+    const evidence: ScenarioEvidence | null = args.advantage === undefined && args.advantage_basis === undefined
+      && args.evidence_source === undefined && args.evidence_id === undefined
+      ? null
+      : {
+          advantage: args.advantage === undefined ? true : args.advantage === true,
+          basis: String(args.advantage_basis ?? ''),
+          source: args.evidence_source === 'RESEARCH_VERIFIED' ? 'RESEARCH_VERIFIED' : 'UNVERIFIED',
+          evidence_id: args.evidence_id === undefined ? undefined : String(args.evidence_id),
+          as_of: args.evidence_as_of === undefined ? undefined : ymdOr(args.evidence_as_of, tradeDate),
+        };
+
+    const result = buildScenario({
       snapshot: summary,
       as_of_trade_date: tradeDate,
-      quotes,
+      quotes: bundle.quotes,
       action,
-      evidence: args.advantage === undefined && args.advantage_basis === undefined
-        ? null
-        : { advantage: args.advantage === true, basis: String(args.advantage_basis ?? '') },
+      evidence,
+      resolved: bundle.resolved,
+      preconditions: bundle.preconditions,
       share_data_available: false,
-    }));
+    });
+
+    return json({
+      ...result,
+      quote_mode: bundle.mode,
+      server_quote_source: 'market_cache',
+      server_quotes: bundle.server_quotes.map(q => ({
+        ts_code: q.ts_code, found: q.found, trade_date: q.trade_date, quality: q.quality,
+        reasons: q.reasons, expected_trade_date: q.expected_trade_date, list_status: q.list_status,
+        suspended: q.suspended, adj_factor: q.adj_factor, suspension_known: q.suspension_known,
+      })),
+      account: { snapshot_id: snapshot.snapshot_id, is_current: snapshot.is_current, as_of: snapshot.as_of },
+      warnings: [...new Set([...(result.warnings ?? []), ...bundle.warnings])],
+      execution_price_is_reference: true,
+      execution_price_note: '行情收盘价只是参考价，不是下一交易日的保证成交价；实际成交价由市场决定。',
+      caller_prices_ignored: mode === 'server'
+        && (args.sell_price !== undefined || args.buy_price !== undefined),
+    });
   } finally {
+    market?.close();
     db.close();
   }
 }

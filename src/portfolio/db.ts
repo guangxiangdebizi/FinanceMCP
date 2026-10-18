@@ -14,15 +14,29 @@ import { ashareDataDir, ashareDbPath } from '../ashare/db.js';
  * - 数量用整数**份/股**。
  *
  * R0 只写入一次基线快照；`flow` 表为后续真实出入金/分红预留，本轮没有写入路径。
+ *
+ * R1 增加 P2 事件账本（账本只追加，永不改写既有事实）：
+ * - `account_event`：唯一的成交/出入金/分红/费用/拆分/撤销事实表，`event_id` 由调用方
+ *   提供作为幂等键；同一 `event_id` 内容相同 → 幂等，内容不同 → 只写冲突表、不覆盖。
+ * - `account_event_conflict`：冲突留痕，`reason` 区分内容冲突与重复撤销。
+ * - `account_baseline`：每个账户唯一的重建起点（快照或纯现金）。
+ * - `account_meta`：账户级开关，目前只用于 `real_account_verified`。
+ * 持仓、可用现金与成本一律由 `baseline + events` 确定性重放得出，不存派生余额。
  */
 
 export function portfolioDbPath(): string {
   return process.env.ASHARE_PORTFOLIO_DB_PATH?.trim() || join(ashareDataDir(), 'portfolio.sqlite');
 }
 
-/** 账户工具默认关闭：公网 ashare_daily profile 不应暴露账户数据。 */
+/**
+ * 本进程是否被授权读取账户库。注意：这只回答"能不能读"，不回答"谁能调用"——
+ * 公网 `/mcp` 与本地 stdio 工具面永远不提供账户工具（见 dispatch.ts）。
+ * - `ASHARE_PORTFOLIO_ENABLED=1`：显式开启（本地 CLI / 受信任部署）。
+ * - `ASHARE_PRIVATE_PORTFOLIO_TOKEN` 已设置：私有端点已配置，令牌本身就是授权。
+ */
 export function portfolioEnabled(): boolean {
-  return process.env.ASHARE_PORTFOLIO_ENABLED === '1';
+  return process.env.ASHARE_PORTFOLIO_ENABLED === '1'
+    || (process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN ?? '').trim().length > 0;
 }
 
 const PORTFOLIO_SCHEMA = `
@@ -33,6 +47,8 @@ CREATE TABLE IF NOT EXISTS account_snapshot (
   note TEXT NOT NULL,
   warnings TEXT NOT NULL,
   is_current INTEGER NOT NULL DEFAULT 0,
+  is_current_confirmed_by TEXT,
+  is_current_confirmed_at TEXT,
   total_assets_cents INTEGER NOT NULL,
   securities_mv_cents INTEGER NOT NULL,
   cash_cents INTEGER NOT NULL,
@@ -59,6 +75,82 @@ CREATE TABLE IF NOT EXISTS flow (
   occurred_at TEXT NOT NULL
 );
 `;
+
+/**
+ * P2 事件账本 schema（纯增量，不改动 account_snapshot/position/flow）。
+ *
+ * 与任务书 DDL 的三处差异，均为 R1 实现所必需且向后兼容（没有改名或删除任何列）：
+ * 1. `account_event.reversed_by`：撤销后必须在**原记录**上留下指向，任务书要求
+ *    "marks the original `reversed_by`"，因此新增该可空列。
+ * 2. `account_event_conflict.reason`：带默认值 `'content_mismatch'`，用于把
+ *    "同一 event_id 内容不同"与"重复撤销"两种拒绝区分开，避免重复撤销被误报成
+ *    内容冲突。旧行读取时按默认值解释。
+ * 3. `account_event_conflict.account_id`：冲突留痕需要按账户统计；重复撤销的冲突
+ *    行的 event_id 并不在 account_event 中，无法靠 join 归属。
+ */
+export const PORTFOLIO_LEDGER_SCHEMA = `
+CREATE TABLE IF NOT EXISTS account_event (
+  event_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  occurred_on TEXT NOT NULL,
+  settled_on TEXT,
+  ts_code TEXT,
+  quantity INTEGER,
+  price_milli INTEGER,
+  gross_cents INTEGER,
+  fee_cents INTEGER NOT NULL DEFAULT 0,
+  tax_cents INTEGER NOT NULL DEFAULT 0,
+  cash_delta_cents INTEGER NOT NULL,
+  ratio_num INTEGER,
+  ratio_den INTEGER,
+  reverses_event_id TEXT,
+  reversed_by TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL,
+  recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_event_conflict (
+  event_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL DEFAULT '',
+  existing_hash TEXT NOT NULL,
+  incoming_hash TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'content_mismatch',
+  recorded_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_baseline (
+  account_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  snapshot_id TEXT NOT NULL,
+  cash_cents INTEGER NOT NULL,
+  note TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS account_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_event_account_date
+  ON account_event (account_id, occurred_on);
+CREATE INDEX IF NOT EXISTS idx_account_event_reverses
+  ON account_event (reverses_event_id);
+`;
+
+/** 只读连接不会执行写 schema，因此读取前单独探测账本表是否存在。 */
+export function ledgerTablesPresent(db: DatabaseSync): boolean {
+  const row = db.prepare(
+    "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN ('account_event', 'account_baseline', 'account_meta')",
+  ).get() as { n: number };
+  return row.n >= 3;
+}
+
+/**
+ * 幂等地建立 P2 账本表。读路径只在库内已有账本表时使用（不写用户库），
+ * CLI 写路径直接调用，测试也用它在只读连接上补齐 schema。
+ */
+export function ensurePortfolioLedgerSchema(db: DatabaseSync): void {
+  db.exec(PORTFOLIO_LEDGER_SCHEMA);
+}
 
 /**
  * 把路径解析成"最深的已存在祖先的真实路径 + 未创建的后缀"，因此尚未创建的
@@ -115,6 +207,7 @@ export function openPortfolioDb(path = portfolioDbPath(), options: { writable?: 
     const db = new DatabaseSync(resolved);
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000;');
     db.exec(PORTFOLIO_SCHEMA);
+    db.exec(PORTFOLIO_LEDGER_SCHEMA);
     return db;
   }
   const db = new DatabaseSync(resolved, { readOnly: true });
