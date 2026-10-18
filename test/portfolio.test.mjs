@@ -178,50 +178,47 @@ const rotate = (overrides = {}) => buildScenario({
   evidence: ADVANTAGE, ...overrides,
 });
 
-test('6. 卖出 10,000 份 159558 → 买入 510300：手数、费用、剩余现金、前后权重', () => {
+test('6. 卖出 10,000 份 159558 → 买入 510300：手数、费用、剩余现金（演示）', () => {
   const s = rotate();
-  assert.equal(s.status, 'EXECUTABLE', JSON.stringify(s.reasons));
+  // A4：调用方自填价格 + demo 快照 + 布尔优势声明都不是可执行依据。
+  // 算术仍必须完整，但只能出现在 trade.illustrative（executable:false）。
+  assert.equal(s.status, 'ILLUSTRATIVE', JSON.stringify(s.reasons));
+  assert.ok(s.reasons.some(r => r.code === 'caller_supplied_quote'));
+  assert.ok(s.reasons.some(r => r.code === 'account_not_current'));
+  assert.ok(s.reasons.some(r => r.code === 'evidence_unverified'));
   assert.equal(s.decision_id.length, 64);
+  // 不可执行状态下，可下单格式的腿必须归零，且没有"交易后"投影。
+  assert.equal(s.trade.sell.quantity, 0);
+  assert.equal(s.trade.sell.price_milli, null);
+  assert.equal(s.trade.buy.lots, 0);
+  assert.equal(s.trade.buy.price_milli, null);
+  assert.equal(s.after, null);
+  const illus = s.trade.illustrative;
+  assert.equal(illus.executable, false);
 
-  // 卖出：10000 × 0.935 元 = 9,350.00 元
-  assert.equal(s.trade.sell.gross_cents, 935000);
-  assert.equal(s.trade.sell.fees.commission_cents, 500);   // 2.34 元 → 5 元下限
-  assert.equal(s.trade.sell.fees.slippage_estimate_cents, 468);
-  assert.equal(s.trade.sell.fees.total_cents, 968);
-  assert.equal(s.trade.sell.net_proceeds_cents, 934032);   // 935000 − 968
-  assert.equal(s.trade.budget_cents, 1075402);             // 934032 + 141370
+  // 卖出：10000 × 0.935 元 = 9,350.00 元（演示值）
+  assert.equal(illus.sell.gross_cents, 935000);
+  assert.equal(illus.sell.net_proceeds_cents, 934032);   // 935000 − 968
+  assert.equal(s.trade.budget_cents, 1075402);           // 934032 + 141370
 
-  // 买入：一手 = 100 × 4.000 = 400 元；预算可买 26 手（剩下不足 400 元 + 费用）
-  assert.equal(s.trade.buy.lots, 26);
-  assert.equal(s.trade.buy.quantity, 2600);
-  assert.equal(s.trade.buy.gross_cents, 1040000);
-  assert.equal(s.trade.buy.fees.commission_cents, 500);   // 2.60 元 → 5 元下限
-  assert.equal(s.trade.buy.fees.slippage_estimate_cents, 520);
-  assert.equal(s.trade.buy.fees.total_cents, 1020);
-  assert.equal(s.trade.buy.total_cost_cents, 1041020);
-  assert.equal(s.trade.residual_cash_cents, 34382);
-  assert.equal(s.trade.fees_cents, 968 + 1020);
+  // 买入：一手 = 100 × 4.000 = 400 元；预算可买 26 手（演示值）
+  assert.equal(illus.lots, 26);
+  assert.equal(illus.price_milli, 4000);
+  assert.equal(illus.gross_cents, 1040000);
+  assert.equal(illus.total_cost_cents, 1041020);         // 含 1,020 分费用
+  assert.equal(s.trade.budget_cents - illus.total_cost_cents, 34382);
 
   // 交易前
   assert.equal(s.before.semiconductor_equipment_weight.toFixed(6), '0.726762');
   assert.equal(s.before.concentration.hhi.toFixed(6), '0.557087');
-  // 交易后：159558 = 48,900 × 0.935 = 45,721.50；510300 = 10,400.00
-  const semi = s.after.positions.find(p => p.ts_code === '159558.SZ');
-  assert.equal(semi.quantity, 48900);
-  assert.equal(semi.market_value_cents, 4572150);
-  const bought = s.after.positions.find(p => p.ts_code === '510300.SH');
-  assert.equal(bought.market_value_cents, 1040000);
-  assert.equal(bought.quantity, 2600);
-  assert.equal(s.after.semiconductor_equipment_weight.toFixed(6), '0.603531');
-  assert.equal(s.after.cash_cents, 34382); // 141370 + 934032 − 1041020
   // 费用使总资产下降，且降幅正好等于双边费用（快照价 = 行情价，价格影响为 0）
   assert.equal(s.trade.price_effect_cents, 0);
-  assert.equal(s.before.total_assets_cents - s.after.total_assets_cents, 968 + 1020);
-  assert.ok(s.after.concentration.hhi < s.before.concentration.hhi, 'rotation lowers single-theme concentration');
+  const illusFees = (illus.sell.gross_cents - illus.sell.net_proceeds_cents) + (illus.total_cost_cents - illus.gross_cents);
+  assert.equal(illusFees, 968 + 1020);
 
   // 三种情景对照齐全
   assert.deepEqual(s.comparison.map(r => r.action), ['HOLD', 'ROTATE', 'REDUCE_EQUITY']);
-  assert.equal(s.comparison.find(r => r.action === 'ROTATE').executable, true);
+  assert.equal(s.comparison.find(r => r.action === 'ROTATE').executable, false);
   assert.equal(s.risk.kind, 'declared_stress');
   assert.equal(s.risk.shock_pct ?? s.risk.stress.shock_pct, -0.1);
   assert.equal(s.historical_performance.available, false);
@@ -243,10 +240,11 @@ test('6b. decision_id 确定性：同一输入同一 ID，输入变化则 ID 变
   assert.notEqual(a.decision_id, c.decision_id);
 });
 
-test('6c. 卖出价高于快照参考价时，价差单列而不混入费用', () => {
+test('6c. 卖出价高于快照参考价时，价差单列而不混入费用（演示）', () => {
   const quotes = new Map([quote('159558.SZ', 0.95), quote('510300.SH', 4.0)]);
   const s = rotate({ quotes });
-  assert.equal(s.trade.sell.gross_cents, 950000);
+  assert.equal(s.status, 'ILLUSTRATIVE');
+  assert.equal(s.trade.illustrative.sell.gross_cents, 950000);
   // 10000 份对应快照市值 935000；卖出多出 15000 分 = 150 元
   assert.equal(s.trade.price_effect_cents, 15000);
 });
@@ -298,9 +296,11 @@ test('9. 过期行情 → NOT_EXECUTABLE / quote_stale，并返回报价日期',
   assert.equal(s.quotes.quote_dates['159558.SZ'], '20261016');
   assert.equal(s.quotes.quote_dates['510300.SH'], DATE);
   assert.ok(s.warnings.includes('quote_stale'));
-  // 仍然给出完整对照，但执行标记必须为 false
+  // 仍然给出完整对照，但执行标记必须为 false，且不留下可下单的腿。
   assert.equal(s.comparison.find(r => r.action === 'ROTATE').executable, false);
-  assert.ok(s.trade.sell.net_proceeds_cents > 0, 'numbers are still computed for comparison');
+  assert.equal(s.trade.sell.quantity, 0);
+  assert.equal(s.trade.sell.net_proceeds_cents, null);
+  assert.ok(s.trade.illustrative.sell.net_proceeds_cents > 0, 'numbers are still computed for comparison');
 });
 
 test('9b. 缺行情 → NOT_EXECUTABLE / quote_missing', () => {
@@ -438,26 +438,41 @@ test('13b. CLI 导入不会写市场库，且输出对账结果', () => {
 test('13c. CLI portfolio-scenario 输出 JSON，exit 0', () => {
   const run = spawnSync(process.execPath, [
     join(ROOT, 'build', 'ashare', 'cli.js'), 'portfolio-scenario', '--action', 'sell-buy',
-    '--sell', '159558.SZ', '--buy', '510300.SH', '--shares', '10000',
+    '--sell', '159558.SZ', '--buy', '510300.SH', '--shares', '10000', '--mode', 'research',
     '--sell-price', '0.935', '--buy-price', '4.0', '--advantage', 'yes', '--basis', '测试',
     '--db', join(dir, 'cli.sqlite'),
   ], { cwd: dir, env: process.env, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   const out = JSON.parse(run.stdout);
-  assert.equal(out.status, 'EXECUTABLE');
-  assert.equal(out.trade.buy.lots, 26);
+  // CLI 自填价格只能产生演示结果（A4）；空市场缓存下标的无法核实，因此仍是
+  // NOT_EXECUTABLE —— 关键契约是"绝不可执行"，算术只出现在 illustrative。
+  assert.notEqual(out.status, 'EXECUTABLE');
+  assert.equal(out.trade.buy.lots, 0);
+  assert.equal(out.trade.buy.price_milli, null);
+  assert.equal(out.trade.illustrative.lots, 26);
 });
 
 // ---------------------------------------------------------------- E. MCP 门控
 
-test('14. 账户工具默认关闭：tools/list 不广告，直接调用被拒绝', async () => {
-  const { getAvailableToolList, dispatchTool } = await import('../build/dispatch.js');
+test('14. 账户工具默认关闭：公网 tools/list 不广告，直接调用被 private_endpoint_required 拒绝', async () => {
+  const { getAvailableToolList, dispatchTool, getPrivateToolList, dispatchPrivateTool } = await import('../build/dispatch.js');
   delete process.env.ASHARE_PORTFOLIO_ENABLED;
+  delete process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN;
   const names = getAvailableToolList().map(t => t.name);
   assert.equal(names.includes('ashare_portfolio_summary'), false);
   assert.equal(names.includes('ashare_portfolio_scenario'), false);
   assert.equal(portfolioEnabled(), false);
-  await assert.rejects(() => dispatchTool('ashare_portfolio_summary', {}), /ASHARE_PORTFOLIO_ENABLED=1/);
+  // 公网/本地入口：账户工具被硬拒绝，原因码明确
+  await assert.rejects(() => dispatchTool('ashare_portfolio_summary', {}), /private_endpoint_required/);
+  await assert.rejects(() => dispatchTool('ashare_portfolio_scenario', { action: 'hold' }), /private_endpoint_required/);
+  // 私有清单只列账户工具；未授权读取账户库时给出结构化拒绝而不是账户数据
+  const privateNames = getPrivateToolList().map(t => t.name);
+  assert.ok(privateNames.includes('ashare_portfolio_summary'));
+  assert.equal(privateNames.includes('current_timestamp'), false);
+  const refused = JSON.parse((await dispatchPrivateTool('ashare_portfolio_summary', {})).content[0].text);
+  assert.equal(refused.refused, true);
+  assert.equal(refused.reason, 'portfolio_tools_disabled');
+  await assert.rejects(() => dispatchPrivateTool('current_timestamp', {}), /market_tool_not_available_on_private_endpoint/);
 });
 
 test('14b. ashare_daily profile 在未开启门控时也不暴露账户工具', async () => {
@@ -471,11 +486,15 @@ test('14b. ashare_daily profile 在未开启门控时也不暴露账户工具', 
   delete process.env.FINANCE_TOOL_PROFILE;
 });
 
-test('14c. ASHARE_PORTFOLIO_ENABLED=1 才暴露，且工具描述声明演示/只读/隔离/费用为假设', async () => {
+test('14c. 开启门控后账户工具只在私有清单出现，且描述声明演示/只读/隔离/费用为假设', async () => {
   process.env.ASHARE_PORTFOLIO_ENABLED = '1';
   process.env.FINANCE_TOOL_PROFILE = 'ashare_daily';
-  const { getAvailableToolList, dispatchTool } = await import('../build/dispatch.js');
-  const tools = getAvailableToolList();
+  const { getAvailableToolList, getPrivateToolList, dispatchPrivateTool } = await import('../build/dispatch.js');
+  // 公网清单即使门控打开也绝不包含账户工具（A5）。
+  const publicNames = getAvailableToolList().map(t => t.name);
+  assert.equal(publicNames.includes('ashare_portfolio_summary'), false);
+  assert.equal(publicNames.includes('ashare_portfolio_scenario'), false);
+  const tools = getPrivateToolList();
   const names = tools.map(t => t.name);
   assert.ok(names.includes('ashare_portfolio_summary'));
   assert.ok(names.includes('ashare_portfolio_scenario'));
@@ -488,19 +507,24 @@ test('14c. ASHARE_PORTFOLIO_ENABLED=1 才暴露，且工具描述声明演示/�
   }
   // 读取的是真实导入的账户库
   process.env.ASHARE_PORTFOLIO_DB_PATH = join(dir, 'cli.sqlite');
-  const res = await dispatchTool('ashare_portfolio_summary', {});
+  const res = await dispatchPrivateTool('ashare_portfolio_summary', {});
   const body = JSON.parse(res.content[0].text);
   assert.equal(body.summary.totals.total_assets_cents, 7577653);
   assert.equal(body.summary.max_drawdown.available, false);
   assert.equal(body.reconciliation.ok, true);
 
-  const scenario = await dispatchTool('ashare_portfolio_scenario', {
+  const scenario = await dispatchPrivateTool('ashare_portfolio_scenario', {
     action: 'sell-buy', sell_code: '159558.SZ', sell_shares: 10000,
-    buy_code: '510300.SH', sell_price: 0.935, buy_price: 4.0, as_of_trade_date: DATE, advantage: true,
+    buy_code: '510300.SH', sell_price: 0.935, buy_price: 4.0, as_of_trade_date: DATE,
+    mode: 'research', advantage: true,
   });
   const s = JSON.parse(scenario.content[0].text);
-  assert.equal(s.status, 'EXECUTABLE');
-  assert.equal(s.trade.buy.lots, 26);
+  // 私有端点也必须遵守 A4：调用方价格 + demo 账户 + 空市场缓存（标的无法核实）
+  // 一律不可执行；计算结果只出现在 illustrative。
+  assert.notEqual(s.status, 'EXECUTABLE');
+  assert.equal(s.trade.buy.lots, 0);
+  assert.equal(s.trade.buy.price_milli, null);
+  assert.equal(s.trade.illustrative.lots, 26);
   delete process.env.ASHARE_PORTFOLIO_ENABLED;
   delete process.env.FINANCE_TOOL_PROFILE;
 });
@@ -508,8 +532,8 @@ test('14c. ASHARE_PORTFOLIO_ENABLED=1 才暴露，且工具描述声明演示/�
 test('14d. 开启门控但账户库缺失时给出明确错误，而不是伪造数据', async () => {
   process.env.ASHARE_PORTFOLIO_ENABLED = '1';
   process.env.ASHARE_PORTFOLIO_DB_PATH = join(dir, 'missing.sqlite');
-  const { dispatchTool } = await import('../build/dispatch.js');
-  await assert.rejects(() => dispatchTool('ashare_portfolio_summary', {}), /账户数据库不存在/);
+  const { dispatchPrivateTool } = await import('../build/dispatch.js');
+  await assert.rejects(() => dispatchPrivateTool('ashare_portfolio_summary', {}), /账户数据库不存在/);
   assert.equal(existsSync(join(dir, 'missing.sqlite')), false, 'read-only access must not create the file');
   delete process.env.ASHARE_PORTFOLIO_ENABLED;
 });
