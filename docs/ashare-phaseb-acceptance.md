@@ -102,9 +102,9 @@
 - 不可变：同一交易日已有快照时只返回 `EXISTS`（含重算 ID 与内容是否一致），绝不覆盖；`--revise` 追加 `REVISED` 行并指向原始 `snapshot_id`，原始行逐字节不变。
 - `research-evaluate --date YYYYMMDD [--as-of YYYYMMDD]`：用保存的成员与当时信号、同一 `evaluateEvents()` 与同一 `as_of` 评价两版；持有期未结束返回 `PENDING`，完成数 0、收益 `null`，不生成任何假定未来收益；结果只追加到 `snapshot_evaluation`。
 
-反例测试 `test/ashare-snapshot.test.mjs`（9 项）：非交易日、超出缓存、无正式报告均不写库；成功写入后正式库文件字节与 `report/watchlist/stock_score` 内容不变；相同输入重跑返回 `EXISTS` 且内容一致；`--revise` 保留原始行；未到期 `PENDING` 且补足未来 K 线后两版出现完成观察；V2 池从存储状态推进；`horizon < 2` 与非法日期在写入前报错。
+反例测试 `test/ashare-snapshot.test.mjs`（9 项）：非交易日、超出缓存、无正式报告均不写库；成功写入后正式库文件字节与 `report/watchlist/stock_score` 内容不变；相同输入重跑返回 `EXISTS` 且内容一致；`--revise` 保留原始行；未到期 `PENDING` 且补足未来 K 线后两版出现完成观察；V2 池从存储状态推进；`horizon < 2` 与非法日期在写入前报错。原始状态链与观察属性另有 `test/ashare-snapshot-chain.test.mjs`（9 项），共同起点另有 `test/ashare-research-seed.test.mjs`（8 项），规则见 `docs/ashare-research-snapshot.md` §4.1–4.3。
 
-真实缓存验证（`deploy/ashare/verify-research-snapshot.mjs`，证据 `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`，17/17 PASS）：源文件 sha256、大小、mtime 前后不变；20261016 快照引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，V1 与正式 `stock_score` 的 1,756 只逐只一致；V2 评分变化 430 只、全部 −3.75、排名相关 0.990175，与历史实验一致；重复运行 `EXISTS` 且只有一行快照；`research-evaluate --as-of 20261016` 计划退出日 20261030、两版 `PENDING`；20261019 返回 `PENDING (date_after_data_cutoff)` 且快照/池状态行数不变。
+真实缓存验证（`deploy/ashare/verify-research-snapshot.mjs`，证据 `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json`，17/17 PASS）：源文件 sha256、大小、mtime 前后不变；20261016 快照引用正式报告 `ASR-20261016-20261016163620-ddd0d0`，观察属性 `BACKFILLED / before_prospective_start`，V1 与正式 `stock_score` 的 1,756 只逐只一致；V2 评分变化 430 只、全部 −3.75、排名相关 0.990175，与历史实验一致；重复运行 `EXISTS` 且只有一行快照；`research-evaluate --as-of 20261016` 计划退出日 20261030、两版 `PENDING`；20261019 返回 `PENDING (date_after_data_cutoff)` 且快照/池状态行数不变。共同起点验证（`deploy/ashare/verify-common-start.mjs`，证据 `docs/ashare-samples/phaseb-common-start-real-cache.json`）：71/71 对相邻交易日的正式股票池可由上一日正式股票池 + `score-1.0.0` 逐字节复现，`compatible=true`。
 
 本轮不新增 systemd timer；接入正式日频流程的步骤见 `docs/ashare-research-snapshot.md` §11，在 2026-10-19~21 验收完成前不应启用。
 
@@ -277,11 +277,14 @@ node deploy/ashare/verify-research-summary.mjs --summary docs/ashare-samples/pha
 | 证据 | 结果 |
 |---|---|
 | `npm test` | 175/175 通过，0 失败，0 跳过 |
-| `node --test test/ashare-*.test.mjs` | 129/129 通过（基线 96 + P0 9 + 前瞻快照 9 + 研究接口 7 + 证据自洽 8） |
+| `node --test test/ashare-*.test.mjs` | 146/146 通过（基线 129 + 状态链/观察属性 9 + 共同起点 8） |
 | P0 NULL OHLC 反例 | `test/ashare-ohlc-audit.test.mjs` 9/9 通过（见 §2.1） |
 | P0 真实缓存一致性 | `docs/ashare-samples/phaseb-ohlc-audit-real-cache.json` PASS，3,513 个股票日 0 差异（见 §2.1） |
 | 前瞻快照反例 | `test/ashare-snapshot.test.mjs` 9/9 通过（见 §3.3） |
+| 原始状态链 / 观察属性 | `test/ashare-snapshot-chain.test.mjs` 9/9 通过（见 `docs/ashare-research-snapshot.md` §4.1–4.2） |
+| 共同起点 | `test/ashare-research-seed.test.mjs` 8/8 通过（见 `docs/ashare-research-snapshot.md` §4.3） |
 | 前瞻快照真实缓存 | `docs/ashare-samples/phaseb-forward-snapshot-real-cache.json` 17/17 PASS（见 §3.3） |
+| 共同起点真实缓存 | `docs/ashare-samples/phaseb-common-start-real-cache.json` 71/71 对复现，PASS |
 | 独立复核三项审查问题 | PASS（NULL OHLC 掩码、未退出区间、`horizon<2`）及执行器整合 PASS（`/tmp/phaseb-fix-verification.txt`） |
 | V1 一致性（`docs/ashare-samples/phaseb-v1-parity.json`） | PASS：9 个日期全部精确匹配，源快照与基线构建哈希不变 |
 | V1 一致性（封版复测，`docs/ashare-samples/phaseb-v1-parity-freeze.json`） | PASS：基线 `fc24fef` 构建 vs 封版构建，9 个日期全市场逐字段精确匹配，0 差异；6 个连续股票池日期输出与持久化状态哈希相同 |
