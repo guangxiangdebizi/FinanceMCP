@@ -189,7 +189,7 @@ export interface InstrumentInfo {
 export interface Tradability {
   tradable: boolean;
   /** 不可执行时的原因代码。 */
-  reason?: 'permission_restricted';
+  reason?: 'permission_restricted' | 'instrument_unknown';
   detail?: string;
 }
 
@@ -213,6 +213,15 @@ const RESTRICTED_BOARDS = new Set(['688', '689', '300', '301', '8', '4']);
  */
 export function tradabilityOf(code: string, info: InstrumentInfo): Tradability {
   if (info.kind === 'ETF') return { tradable: true };
+  // 身份未知一律 fail closed：不能因为"看不出是受限板块"就放行。
+  // 调用方应在行情/身份解析阶段已给出 instrument_unknown；这里再兜一层。
+  if (!info.kind || info.kind === ('UNKNOWN' as any)) {
+    return {
+      tradable: false,
+      reason: 'instrument_unknown',
+      detail: `${code} 的品种身份未知，按不可操作处理（fail closed）`,
+    };
+  }
   const board = info.board ?? inferBoard(code);
   if (board && RESTRICTED_BOARDS.has(board)) {
     return {

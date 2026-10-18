@@ -19,7 +19,8 @@ const ledger = await import('../build/portfolio/ledger.js');
 
 const {
   buildNavSeries, importEvents, initBaseline, isEtfCode, nextBusinessDay,
-  recordEvent, replayAccount, settlementCalendarFromDb, settlementRuleFor, validateLedger,
+  readAccountCompleteness, reconcileAccountVsLedger, recordEvent, replayAccount,
+  setAccountCompleteness, settlementCalendarFromDb, settlementRuleFor, validateLedger,
 } = ledger;
 
 // ---------------------------------------------------------------- fixture
@@ -435,6 +436,221 @@ test('A3-6b 缺价日总估值等于上一估值，不做插值', () => {
   assert.equal(last.total_value_cents, prev.total_value_cents);
   assert.equal(last.nav_per_unit, prev.nav_per_unit);
   assert.equal(last.confidence, 'carried_forward');
+});
+
+// ---------------------------------------------------------------- 13. A3 反例：from 不得重新锚定
+// 基线 20261016，持仓 159558.SZ 1000 份 @1.000 元；价格 16→1.000、19→1.100、20→1.210、21→0.900。
+openAccount('r2-nav-from', '20261016', 0, [position('159558.SZ', '半导体设备ETF', 1000, 1000, 1000)], '2026-10-16');
+const FROM_PRICES = {
+  20261016: { '159558.SZ': 1000 },
+  20261019: { '159558.SZ': 1100 },
+  20261020: { '159558.SZ': 1210 },
+  20261021: { '159558.SZ': 900 },
+};
+
+test('A3-11 反例：from 变化不得改变重叠日期的单位净值（旧实现从 from 重新锚定）', () => {
+  const full = buildNavSeries(db, 'r2-nav-from', { from: '20261016', to: '20261021', prices: FROM_PRICES });
+  const late = buildNavSeries(db, 'r2-nav-from', { from: '20261020', to: '20261021', prices: FROM_PRICES });
+
+  assert.equal(navAt(full, '20261021').nav_per_unit, 0.9);
+  // 旧实现把 20261020 重新锚定为 1.00：units=121，20261021 的 0.743802 是错的。
+  assert.equal(navAt(late, '20261021').nav_per_unit, 0.9, 'from 只裁剪输出，不得重新锚定份额');
+  for (const point of late.points) {
+    assert.equal(point.nav_per_unit, navAt(full, point.date).nav_per_unit, `${point.date} 重叠点必须一致`);
+    assert.equal(point.units, navAt(full, point.date).units, `${point.date} 份额必须一致`);
+  }
+  // 输出确实被裁剪：只保留 >= from 的点。
+  assert.deepEqual(late.points.map(p => p.date), ['20261020', '20261021']);
+  assert.equal(late.from, '20261020');
+  assert.equal(late.to, '20261021');
+  assert.equal(late.max_drawdown.available, true);
+  assert.equal(late.max_drawdown.value, -0.256198, '1.210 → 0.900');
+});
+
+test('A3-11b from 晚于现金流日：历史现金流仍参与折算（不重新锚定）', () => {
+  // r2-nav-multi：20261021 入金 110 元后份额应为 200；若从 20261021 重新锚定则份额=220，
+  // 20261022 的单位净值会被错误算成 0.909091。
+  const series = buildNavSeries(db, 'r2-nav-multi', { from: '20261021', to: '20261022', prices: MULTI_PRICES });
+  assert.deepEqual(series.points.map(p => p.date), ['20261021', '20261022']);
+  assert.equal(navAt(series, '20261021').units, 200, '从基线起算：100 + 100/1.10 = 200');
+  assert.equal(navAt(series, '20261022').nav_per_unit, 1, '取款不改变单位净值');
+  const full = buildNavSeries(db, 'r2-nav-multi', { from: '20261019', to: '20261022', prices: MULTI_PRICES });
+  for (const point of series.points) {
+    assert.equal(point.nav_per_unit, navAt(full, point.date).nav_per_unit);
+    assert.equal(point.units, navAt(full, point.date).units);
+  }
+});
+
+// ---------------------------------------------------------------- 14. A4 可卖数量与 T+0/T+1
+// 真实交易日历：20261016（五）→ 20261020（二，19 为节假日）→ 20261021。
+const sellableCalendar = settlementCalendarFromDb(market);
+
+test('A4-1 反例：权益 ETF 当日买入 → sellable_quantity=0，卖出被拒（insufficient_sellable_position）', () => {
+  openAccount('r2-sellable-eq', '20261016', 100000, [], '2026-10-16');
+  recordEvent(db, event({
+    event_id: 'SE-BUY', account_id: 'r2-sellable-eq', event_type: 'TRADE_BUY', occurred_on: '20261020',
+    ts_code: '159558.SZ', quantity: 1000, price_milli: 1000, fee_cents: 0,
+  }));
+  const sameDay = replayAccount(db, 'r2-sellable-eq', { asOf: '20261020', calendar: sellableCalendar });
+  const p = sameDay.positions.find(x => x.ts_code === '159558.SZ');
+  assert.equal(p.quantity, 1000);
+  assert.equal(p.sellable_quantity, 0, 'T+1：当日买入不可卖');
+  assert.equal(p.settlement_rule, 'T+1');
+  assert.equal(sameDay.reconstruction.sellable_basis, 'trade_calendar');
+  assert.equal(sameDay.reconstruction.previous_trading_day, '20261016', '19 日节假日，前一交易日是 16 日');
+
+  // 同一账户按 20261021 重建：买入日 20261020 已是前一交易日 → 可卖。
+  const nextDay = replayAccount(db, 'r2-sellable-eq', { asOf: '20261021', calendar: sellableCalendar });
+  assert.equal(nextDay.positions.find(x => x.ts_code === '159558.SZ').sellable_quantity, 1000, '隔日可卖');
+});
+
+test('A4-2 债券 ETF 当日买入当日可卖（T+0）', () => {
+  openAccount('r2-sellable-bond', '20261016', 100000, [], '2026-10-16');
+  recordEvent(db, event({
+    event_id: 'SB-BUY', account_id: 'r2-sellable-bond', event_type: 'TRADE_BUY', occurred_on: '20261020',
+    ts_code: '511010.SH', quantity: 100, price_milli: 100000, fee_cents: 0,
+  }));
+  const state = replayAccount(db, 'r2-sellable-bond', { asOf: '20261020', calendar: sellableCalendar });
+  const p = state.positions.find(x => x.ts_code === '511010.SH');
+  assert.equal(p.settlement_rule, 'T+0');
+  assert.equal(p.sellable_quantity, 100, '债券 ETF T+0：当日买入当日可卖');
+});
+
+test('A4-3 混合同日买入 + 历史持仓：只允许卖出历史份额', () => {
+  // 基线（20261016）自带 1000 份 159558.SZ；20261020 再买 500 份。
+  openAccount('r2-sellable-mix', '20261016', 100000,
+    [position('159558.SZ', '半导体设备ETF', 1000, 1000, 1000)], '2026-10-16');
+  recordEvent(db, event({
+    event_id: 'SM-BUY', account_id: 'r2-sellable-mix', event_type: 'TRADE_BUY', occurred_on: '20261020',
+    ts_code: '159558.SZ', quantity: 500, price_milli: 1000, fee_cents: 0,
+  }));
+  const state = replayAccount(db, 'r2-sellable-mix', { asOf: '20261020', calendar: sellableCalendar });
+  const p = state.positions.find(x => x.ts_code === '159558.SZ');
+  assert.equal(p.quantity, 1500);
+  assert.equal(p.sellable_quantity, 1000, '只有基线（历史）份额可卖，当日买入的 500 份不可卖');
+});
+
+test('A4-4 当日先卖后买：可卖数量按 FIFO 消耗后如实减少', () => {
+  openAccount('r2-sellable-fifo', '20261016', 100000,
+    [position('159558.SZ', '半导体设备ETF', 1000, 1000, 1000)], '2026-10-16');
+  // event_id 顺序决定同日重放顺序：SELL 先于 BUY。
+  recordEvent(db, event({
+    event_id: 'SF-SELL', account_id: 'r2-sellable-fifo', event_type: 'TRADE_SELL', occurred_on: '20261020',
+    ts_code: '159558.SZ', quantity: 600, price_milli: 1000, fee_cents: 0,
+  }), { calendar: sellableCalendar });
+  recordEvent(db, event({
+    event_id: 'SF-BUY', account_id: 'r2-sellable-fifo', event_type: 'TRADE_BUY', occurred_on: '20261020',
+    ts_code: '159558.SZ', quantity: 300, price_milli: 1000, fee_cents: 0,
+  }));
+  const state = replayAccount(db, 'r2-sellable-fifo', { asOf: '20261020', calendar: sellableCalendar });
+  const p = state.positions.find(x => x.ts_code === '159558.SZ');
+  assert.equal(p.quantity, 700);
+  assert.equal(p.sellable_quantity, 400, '1000 − 600 历史份额可卖；当日买入的 300 份不可卖');
+});
+
+test('A4-5 缺少交易日历：仍排除当日买入，并标注 calendar_assumed', () => {
+  const state = replayAccount(db, 'r2-sellable-eq', { asOf: '20261020' });
+  const p = state.positions.find(x => x.ts_code === '159558.SZ');
+  assert.equal(p.sellable_quantity, 0, '保守：无日历也不把当日买入当成可卖');
+  assert.equal(state.reconstruction.sellable_basis, 'calendar_assumed');
+  assert.equal(state.reconstruction.previous_trading_day, null);
+});
+
+// ---------------------------------------------------------------- 15. A1 跨日重建 / A2 对账
+test('A1-1 无事件的日期也能纯按基线重建，并给出重建依据', () => {
+  openAccount('r2-reconstruct', '20261016', 500000, [position('159558.SZ', '半导体设备ETF', 1000, 1000, 1000)], '2026-10-16');
+  recordEvent(db, event({
+    event_id: 'RC-BUY', account_id: 'r2-reconstruct', event_type: 'TRADE_BUY', occurred_on: '20261020',
+    ts_code: '159558.SZ', quantity: 1000, price_milli: 1000, fee_cents: 0,
+  }));
+  // 20261021 没有任何事件：仍应得到确定状态。
+  const state = replayAccount(db, 'r2-reconstruct', { asOf: '20261021', calendar: sellableCalendar });
+  assert.equal(state.positions.find(p => p.ts_code === '159558.SZ').quantity, 2000);
+  assert.equal(state.cash.balance_cents, 400000);
+  assert.equal(state.events_applied, 1, '只应用了 20261020 的买入');
+  assert.equal(state.reconstruction.basis, 'baseline_plus_events');
+  assert.equal(state.reconstruction.from_snapshot, false);
+  assert.equal(state.reconstruction.baseline_as_of, '20261016');
+  assert.equal(state.reconstruction.as_of, '20261021');
+});
+
+test('A2-1 对账一致：快照数量/现金/证券市值与账本重放相同 → ok', () => {
+  const snapshot = {
+    snapshot_id: 'r2-reconstruct',
+    as_of: '2026-10-21',
+    positions: [{ ts_code: '159558.SZ', quantity: 2000, ref_price_milli: 1000 }],
+    totals: { cash_cents: 400000, securities_mv_cents: 200000 },
+  };
+  const result = reconcileAccountVsLedger(db, 'r2-reconstruct', snapshot);
+  assert.equal(result.ok, true, JSON.stringify(result.mismatches));
+  assert.deepEqual(result.mismatches, []);
+  assert.equal(result.as_of, '20261021');
+  assert.match(result.note, /一致/);
+});
+
+test('A2-2 对账冲突：数量/现金/市值任一项不符 → ok=false 并逐项报出', () => {
+  const snapshot = {
+    snapshot_id: 'r2-reconstruct',
+    as_of: '2026-10-21',
+    positions: [
+      { ts_code: '159558.SZ', quantity: 1900, ref_price_milli: 1000 }, // 少 100 份
+      { ts_code: '516080.SH', quantity: 100, ref_price_milli: 636 },   // 账本没有
+    ],
+    totals: { cash_cents: 400000, securities_mv_cents: 1963600 },
+  };
+  const result = reconcileAccountVsLedger(db, 'r2-reconstruct', snapshot);
+  assert.equal(result.ok, false);
+  const byField = result.mismatches.map(m => [m.field, m.code]);
+  assert.ok(byField.some(([f, c]) => f === 'quantity' && c === '159558.SZ'), JSON.stringify(result.mismatches));
+  assert.ok(byField.some(([f, c]) => f === 'quantity' && c === '516080.SH'), JSON.stringify(result.mismatches));
+  const q = result.mismatches.find(m => m.field === 'quantity' && m.code === '159558.SZ');
+  assert.equal(q.snapshot_value, 1900);
+  assert.equal(q.ledger_value, 2000);
+  assert.equal(q.delta, -100);
+  assert.match(result.note, /不一致/);
+});
+
+test('A2-3 现金不一致单独报出（代码数量相同）', () => {
+  const snapshot = {
+    snapshot_id: 'r2-reconstruct',
+    as_of: '2026-10-21',
+    positions: [{ ts_code: '159558.SZ', quantity: 2000, ref_price_milli: 1000 }],
+    totals: { cash_cents: 399999, securities_mv_cents: 200000 },
+  };
+  const result = reconcileAccountVsLedger(db, 'r2-reconstruct', snapshot);
+  assert.equal(result.ok, false);
+  const cash = result.mismatches.find(m => m.field === 'cash_cents');
+  assert.ok(cash);
+  assert.equal(cash.snapshot_value, 399999);
+  assert.equal(cash.ledger_value, 400000);
+  assert.equal(cash.delta, -1);
+});
+
+// ---------------------------------------------------------------- 16. 完整性声明（B3）
+test('B3-1 完整性声明默认 unreported_trade_risk=true，必须 confirm 且必须有 recordedBy', () => {
+  assert.throws(() => setAccountCompleteness(db, 'r2-reconstruct', { as_of: '20261021' }), /confirm/);
+  assert.throws(() => setAccountCompleteness(db, 'r2-reconstruct', { as_of: '20261021' }, { confirm: true }), /recordedBy/);
+  assert.throws(() => setAccountCompleteness(db, 'r2-reconstruct', { as_of: '20261021' }, { confirm: true, recordedBy: '   ' }), /recordedBy/);
+  assert.equal(readAccountCompleteness(db, 'r2-reconstruct'), null, '被拒绝的写入不留下任何声明');
+  const result = setAccountCompleteness(db, 'r2-reconstruct', { as_of: '20261021' }, { confirm: true, recordedBy: 'tester' });
+  // 契约：返回值本身就是 AccountCompleteness；同时带 completeness 别名供 CLI 直接打印。
+  assert.equal(result.unreported_trade_risk, true, '缺省保守：存在未上报交易风险');
+  assert.equal(result.completeness.unreported_trade_risk, true);
+  assert.equal(result.reported_events_through, null);
+  assert.equal(result.as_of, '20261021');
+  assert.equal(result.recorded_by, 'tester');
+  const explicit = setAccountCompleteness(db, 'r2-reconstruct', {
+    as_of: '20261021', reported_events_through: '20261020', unreported_trade_risk: false,
+    last_user_reconciled_at: '2026-10-21T08:00:00Z', note: 'user checked',
+  }, { confirm: true, recordedBy: 'tester' });
+  assert.equal(explicit.unreported_trade_risk, false);
+  assert.equal(explicit.reported_events_through, '20261020');
+  assert.equal(explicit.recorded_by, 'tester');
+  assert.equal(readAccountCompleteness(db, 'r2-reconstruct').unreported_trade_risk, false);
+  // reported_events_through 不能晚于声明日
+  assert.throws(() => setAccountCompleteness(db, 'r2-reconstruct', {
+    as_of: '20261020', reported_events_through: '20261021',
+  }, { confirm: true, recordedBy: 'tester' }), /不能晚于/);
 });
 
 test.after(() => {

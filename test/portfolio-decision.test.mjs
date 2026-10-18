@@ -106,6 +106,10 @@ importSnapshot(portfolio, { ...MIXED, is_current: false });
 // R2 受控正例的显式测试注入：账本基线 + 用户确认 + 可复核的研究证据。
 ledger.initBaseline(portfolio, 'synthetic-test', { asOf: LAST, snapshotId: SYNTH.snapshot_id, note: 'r2 test fixture' });
 ledger.confirmRealAccount(portfolio, 'synthetic-test', { confirm: true, note: 'r2 test fixture' });
+// V1.0 准入：账本完整性必须由用户显式声明；这里声明"已录入到 LAST、无未上报风险"。
+ledger.setAccountCompleteness(portfolio, 'synthetic-test', {
+  as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'test fixture declaration',
+}, { confirm: true, recordedBy: 'test-fixture' });
 evidenceModule.recordResearchEvidence(portfolio, {
   evidence_id: 'EV-SYNTH-001', kind: 'ROTATION', buy_code: '510300.SH', sell_code: '159558.SZ',
   strategy_id: 'r2-test', as_of: LAST, valid_until: null, status: 'VERIFIED',
@@ -272,14 +276,18 @@ test('5. RESEARCH_VERIFIED + evidence_id + 当前账户 + 当日行情 → ACTIO
   assert.equal(rotate.legs[1].ts_code, '510300.SH');
   assert.equal(rotate.legs[1].price_milli, 4000);
   assert.equal(rotate.funding_source, 'sell_proceeds_and_cash');
-  // 账户不是当前快照时，同样的输入必须降级
+  // V1.0：账户库里的"当前快照"是合成的 is_current=false 快照时，状态仍可由
+  // 账本重建；但传入一个**不是账户库当前快照**的临时对象必须被识别为自相矛盾。
   const stale = buildDecision(base({
     snapshot: accountSummary({ ...SYNTH, is_current: false, snapshot_id: 'synthetic-not-current' }),
     action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', buy_kind: 'ETF' },
     evidence: VERIFIED,
   }));
   assert.equal(stale.status, 'ILLUSTRATIVE');
-  assert.ok(stale.reasons.some(r => r.code === 'account_not_current'));
+  assert.ok(
+    stale.reasons.some(r => r.code === 'account_not_current' || r.code === 'account_snapshot_mismatch'),
+    JSON.stringify(stale.reasons),
+  );
   assert.equal(stale.options.find(o => o.action === 'SELL_AND_BUY').executable, false);
 });
 

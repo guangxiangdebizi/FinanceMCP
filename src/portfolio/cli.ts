@@ -2,19 +2,28 @@ import type { DatabaseSync } from 'node:sqlite';
 import { existsSync, readFileSync } from 'node:fs';
 import { ashareDbPath } from '../ashare/db.js';
 import {
-  DEMO_SNAPSHOT, DEMO_SNAPSHOT_ID, accountSummary, importDemoSnapshot, latestSnapshot, markSnapshotCurrent, readSnapshot, reconcile,
+  DEMO_SNAPSHOT, DEMO_SNAPSHOT_ID, accountSummary, importDemoSnapshot, importSnapshot,
+  latestSnapshot, markSnapshotCurrent, readSnapshot, reconcile,
+  type AccountSnapshot,
 } from './account.js';
 import { openPortfolioDb, portfolioDbPath } from './db.js';
 import {
-  buildNavSeries, confirmRealAccount, importEvents, initBaseline, recordEvent, replayAccount, validateLedger,
+  buildNavSeries, confirmRealAccount, importEvents, initBaseline, readAccountCompleteness, recordEvent,
+  replayAccount, setAccountCompleteness, validateLedger,
   type LedgerEventInput, type PriceTable,
 } from './ledger.js';
 import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quotes.js';
 import { buildScenario, type EtfQuoteInput, type ScenarioAction } from './scenario.js';
 import { DEFAULT_FEE_RULES, DEFAULT_STRESS_RULES } from './rules.js';
 import { runDecisionCommand } from './decisionCli.js';
-import { runResearchSummaryCommand } from './researchCli.js';
-import { EVIDENCE_STATUSES, ensureEvidenceSchema, recordResearchEvidence, type EvidenceStatus } from './evidence.js';
+import { defaultTradeDate, runResearchSummaryCommand } from './researchCli.js';
+import { buildDailyReport } from './dailyReport.js';
+import { screenEtfCandidates } from '../ashare/etfUniverse.js';
+import { buildBenchmarkComparison } from './benchmarks.js';
+import {
+  EVIDENCE_STATUSES, ensureEvidenceSchema, readEvidenceStatusHistory, recordResearchEvidence,
+  revokeResearchEvidence, type EvidenceStatus,
+} from './evidence.js';
 
 /**
  * 账户子命令。输出到 stdout 的永远是 JSON（与 ashare CLI 一致），进度与错误走 stderr。
@@ -30,7 +39,9 @@ export interface PortfolioCliHelpers {
 
 export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [options]
 
-  portfolio-import                                   导入 PRD §3 基线快照（幂等，可用 --db PATH 指定账户库）
+  portfolio-import [--file PATH] [--dry-run] [--confirm-current] [--db PATH]
+                                                      导入账户快照。无 --file 时导入 PRD §3 演示基线；
+                                                      --file 读取用户真实快照 JSON（先 --dry-run 对账再确认）
   portfolio-summary [--db PATH] [--snapshot ID]      只读账户汇总：市值、权重、集中度、主题暴露、对账
   portfolio-mark-current --snapshot ID --confirmed-by WHO [--db PATH]
                                                       把用户确认过的快照标记为当前账户（唯一路径；演示基线不可）
@@ -69,11 +80,28 @@ export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [opti
   portfolio-ledger-validate --account ID [--db PATH]   账本不变量检查（现金/数量/撤销/拆分）
   portfolio-ledger-confirm-real --account ID --confirm 用户显式确认为真实账户（无 --confirm 直接拒绝）
 
+  账本完整性声明（跨日重建的产品前提；不改变账本数据）：
+  portfolio-completeness-set --account ID --as-of YYYYMMDD --recorded-by WHO --confirm [--db PATH]
+        [--last-reconciled-at ISO] [--events-through YYYYMMDD] [--unreported-risk yes|no] [--note TEXT]
+                                                       声明"用户已核对到哪个时点"；缺省按存在未上报交易风险处理
+  portfolio-completeness --account ID [--db PATH]      只读查看当前完整性声明
+
   研究证据（唯一写路径；不通过 MCP 暴露）：
   portfolio-evidence-record --id ID --kind ROTATION --buy CODE [--sell CODE]
         --strategy ID --as-of YYYYMMDD [--valid-until YYYYMMDD]
         --status PENDING|VERIFIED|REVOKED --recorded-by WHO [--note TEXT] --confirm [--dry-run] [--db PATH]
                                                        写入一条可复核的研究证据记录；无 --confirm 直接拒绝
+  portfolio-evidence-revoke --id ID --recorded-by WHO --confirm [--reason TEXT] [--db PATH]
+                                                       受控撤回（VERIFIED→REVOKED，追加审计事件，不改写原记录）
+  portfolio-evidence-history --id ID [--db PATH]       查看某条证据的状态变更历史
+
+  收盘日报与研究候选（D1/C2/C6）：
+  portfolio-daily-report --account ID [--date YYYYMMDD] [--snapshot ID] [--max-actions 0..3]
+        [--market-db PATH] [--db PATH]                 首屏给出"下一交易日最值得做的 0–3 个动作"
+  portfolio-etf-candidates --date YYYYMMDD [--categories broad,industry,bond,gold,cross_border]
+        [--limit N] [--market-db PATH]                 适格 ETF 动态候选筛选（数据缺失显式 DEGRADED）
+  portfolio-benchmarks [--start YYYYMMDD] [--end YYYYMMDD] [--market-db PATH]
+                                                       事先固定的对照基准比较
 `;
 
 /** 严格整数参数：拒绝小数、空串与超出安全整数范围的输入。 */
@@ -186,20 +214,160 @@ function positiveNumber(raw: string | undefined, label: string): number | undefi
   return value;
 }
 
+/**
+ * 读取用户提供的真实账户快照 JSON。字段口径与 `AccountSnapshot` 完全一致
+ * （金额整数分、价格整数厘、数量整数份/股），因此不引入第二套格式。
+ * 只做结构校验：任何缺字段/类型不符/负数一律拒绝，绝不替调用方补默认值。
+ */
+function parseSnapshotFile(path: string): AccountSnapshot {
+  if (!existsSync(path)) throw new Error(`账户快照文件不存在：${path}`);
+  let raw: any;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error: any) {
+    throw new Error(`账户快照文件不是合法 JSON：${error?.message ?? error}`);
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('账户快照文件需要是一个 JSON 对象');
+  const snapshot = raw as Record<string, any>;
+
+  const text = (value: unknown, label: string): string => {
+    if (typeof value !== 'string' || value.trim() === '') throw new Error(`账户快照缺少 ${label}（需要非空字符串）`);
+    return value.trim();
+  };
+  const int = (value: unknown, label: string, allowNegative = false): number => {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value)) throw new Error(`账户快照 ${label} 必须是整数`);
+    if (!allowNegative && value < 0) throw new Error(`账户快照 ${label} 不能为负数`);
+    return value;
+  };
+
+  const snapshotId = text(snapshot.snapshot_id, 'snapshot_id');
+  const asOfRaw = text(snapshot.as_of, 'as_of');
+  // 只接受两种明确写法；不做"去掉所有短横线"的宽松归一化，避免 16-10-2026 被
+  // 误当成 16102026 这样的合法日期。
+  let asOfDigits: string;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asOfRaw)) asOfDigits = asOfRaw.replace(/-/g, '');
+  else if (/^\d{8}$/.test(asOfRaw)) asOfDigits = asOfRaw;
+  else throw new Error(`账户快照 as_of 需要 YYYYMMDD 或 YYYY-MM-DD，收到 ${asOfRaw}`);
+  if (!/^\d{8}$/.test(asOfDigits)) throw new Error(`账户快照 as_of 需要 YYYYMMDD 或 YYYY-MM-DD，收到 ${asOfRaw}`);
+  const asOf = `${asOfDigits.slice(0, 4)}-${asOfDigits.slice(4, 6)}-${asOfDigits.slice(6, 8)}`;
+
+  if (!Array.isArray(snapshot.positions) || snapshot.positions.length === 0) {
+    throw new Error('账户快照 positions 需要是非空数组');
+  }
+  const positions = snapshot.positions.map((p: any, i: number) => {
+    if (!p || typeof p !== 'object') throw new Error(`账户快照 positions[${i}] 不是对象`);
+    const quantity = int(p.quantity, `positions[${i}].quantity`);
+    const refPrice = int(p.ref_price_milli, `positions[${i}].ref_price_milli`);
+    const refCost = int(p.ref_cost_milli, `positions[${i}].ref_cost_milli`);
+    if (quantity <= 0) throw new Error(`账户快照 positions[${i}].quantity 必须为正整数`);
+    if (refPrice <= 0) throw new Error(`账户快照 positions[${i}].ref_price_milli 必须为正整数（厘）`);
+    return {
+      ts_code: text(p.ts_code, `positions[${i}].ts_code`),
+      name: text(p.name, `positions[${i}].name`),
+      quantity,
+      ref_price_milli: refPrice,
+      ref_cost_milli: refCost,
+      market_value_cents: int(p.market_value_cents, `positions[${i}].market_value_cents`),
+    };
+  });
+
+  const totalsRaw = snapshot.totals;
+  if (!totalsRaw || typeof totalsRaw !== 'object') throw new Error('账户快照缺少 totals');
+  const totals = {
+    total_assets_cents: int(totalsRaw.total_assets_cents, 'totals.total_assets_cents'),
+    securities_mv_cents: int(totalsRaw.securities_mv_cents, 'totals.securities_mv_cents'),
+    cash_cents: int(totalsRaw.cash_cents, 'totals.cash_cents'),
+    wealth_cents: int(totalsRaw.wealth_cents, 'totals.wealth_cents'),
+    // 截图浮亏与按成本复算可能有差额（三位小数舍入），允许为负，也允许缺省。
+    unrealized_pnl_cents: totalsRaw.unrealized_pnl_cents === undefined || totalsRaw.unrealized_pnl_cents === null
+      ? 0 : int(totalsRaw.unrealized_pnl_cents, 'totals.unrealized_pnl_cents', true),
+  };
+
+  const warnings = Array.isArray(snapshot.warnings) ? snapshot.warnings.map((w: unknown) => String(w)) : [];
+  return {
+    snapshot_id: snapshotId,
+    as_of: asOf,
+    source: text(snapshot.source, 'source'),
+    note: typeof snapshot.note === 'string' ? snapshot.note : '',
+    warnings,
+    // 真实快照的 is_current 由文件声明，但真正写入仍必须经 --confirm-current（见 CLI）。
+    is_current: snapshot.is_current === true,
+    positions,
+    totals,
+  };
+}
+
 export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): boolean {
   switch (command) {
     case 'portfolio-import': {
+      const file = h.arg('file');
+      const dryRun = h.flag('dry-run');
+      const confirmCurrent = h.flag('confirm-current');
+      // 无 --file：保留既有演示基线导入（幂等）。
+      if (!file) {
+        const db = openPortfolioDb(h.arg('db'));
+        try {
+          const result = importDemoSnapshot(db);
+          const reload = readSnapshot(db, DEMO_SNAPSHOT_ID)!;
+          h.print({
+            ...result,
+            db: portfolioDbPath(),
+            source: DEMO_SNAPSHOT.source,
+            warnings: DEMO_SNAPSHOT.warnings,
+            reconciliation: reconcile(reload),
+            note: '只导入 PRD §3 截图基线；不写入历史成交、出入金或收益。真实账户请用 --file。',
+          });
+        } finally {
+          db.close();
+        }
+        return true;
+      }
+
+      // 真实快照导入：解析 → （dry-run 只校验/对账）→ 用户确认 → 写入。
+      const snapshot = parseSnapshotFile(file);
+      if (snapshot.is_current && !confirmCurrent) {
+        // 文件声明当前账户，但没有显式确认：拒绝，避免"自认当前"。
+        throw new Error(`快照 ${snapshot.snapshot_id} 声明 is_current=true，但缺少 --confirm-current（只能由用户本人确认）`);
+      }
+      const effective: AccountSnapshot = confirmCurrent ? { ...snapshot, is_current: true } : { ...snapshot, is_current: false };
+      const recon = reconcile(effective);
+
+      if (dryRun) {
+        h.print({
+          dry_run: true,
+          file,
+          db: portfolioDbPath(),
+          snapshot_id: effective.snapshot_id,
+          as_of: effective.as_of,
+          source: effective.source,
+          is_current: effective.is_current,
+          positions: effective.positions.length,
+          securities_mv: effective.totals.securities_mv_cents / 100,
+          cash: effective.totals.cash_cents / 100,
+          wealth: effective.totals.wealth_cents / 100,
+          total_assets: effective.totals.total_assets_cents / 100,
+          reconciliation: recon,
+          note: 'dry-run：只解析并逐项对账，未写入任何数据。确认无误后去掉 --dry-run 重新执行。',
+        });
+        return true;
+      }
+
       const db = openPortfolioDb(h.arg('db'));
       try {
-        const result = importDemoSnapshot(db);
-        const reload = readSnapshot(db, DEMO_SNAPSHOT_ID)!;
+        const before = latestSnapshot(db);
+        const result = importSnapshot(db, effective, { confirmCurrent });
+        const reload = readSnapshot(db, effective.snapshot_id)!;
         h.print({
           ...result,
+          file,
           db: portfolioDbPath(),
-          source: DEMO_SNAPSHOT.source,
-          warnings: DEMO_SNAPSHOT.warnings,
+          source: effective.source,
+          as_of: effective.as_of,
+          is_current: effective.is_current,
+          warnings: effective.warnings,
           reconciliation: reconcile(reload),
-          note: '只导入 PRD §3 截图基线；不写入历史成交、出入金或收益。',
+          previous_snapshot: before ? before.snapshot_id : null,
+          note: '真实账户快照只落在本地私有账户库；不要把它提交到公开仓库。历史净值/回撤仍需基线之后的账本事件。',
         });
       } finally {
         db.close();
@@ -252,6 +420,35 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
     case 'portfolio-research-summary':
       // 研究模式晚间摘要：只读账户库与市场缓存，输出永远不是 ACTIONABLE。
       return runResearchSummaryCommand(h);
+    case 'portfolio-completeness-set': {
+      const accountId = requireArg(h, 'account');
+      if (!h.flag('confirm')) throw new Error('声明账本完整性需要显式 --confirm（该动作只能由用户本人执行）');
+      const db = openPortfolioDb(h.arg('db'));
+      try {
+        const result = setAccountCompleteness(db, accountId, {
+          as_of: h.ymd(requireArg(h, 'as-of'), '--as-of'),
+          last_user_reconciled_at: h.arg('last-reconciled-at') ?? null,
+          reported_events_through: h.arg('events-through') ? h.ymd(h.arg('events-through')!, '--events-through') : null,
+          // --unreported-risk yes|no：缺省保守为「存在未上报交易风险」。
+          unreported_trade_risk: (h.arg('unreported-risk') ?? 'yes').toLowerCase() !== 'no',
+          note: h.arg('note') ?? '',
+        }, { confirm: true, recordedBy: requireArg(h, 'recorded-by') });
+        h.print({ ...result, db: portfolioDbPath(), note: '完整性声明只描述"用户已核对到哪个时点"，不代表券商实时余额。' });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
+    case 'portfolio-completeness': {
+      const accountId = requireArg(h, 'account');
+      const db = openReadOnly(h.arg('db'));
+      try {
+        h.print({ account_id: accountId, completeness: readAccountCompleteness(db, accountId), db: portfolioDbPath() });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
     case 'portfolio-evidence-record': {
       const input = {
         evidence_id: requireArg(h, 'id'),
@@ -279,6 +476,100 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
         h.print({ ...result, db: portfolioDbPath(), note: '研究证据不代表收益保证；只有状态 VERIFIED 且代码/日期匹配时才可能支持条件化预案。' });
       } finally {
         db.close();
+      }
+      return true;
+    }
+    case 'portfolio-evidence-revoke': {
+      // 受控撤回：不删除、不改写原记录的经济字段，只追加状态变更事件。
+      const evidenceId = requireArg(h, 'id');
+      const recordedBy = requireArg(h, 'recorded-by');
+      if (!h.flag('confirm') || h.flag('dry-run')) {
+        h.print({
+          dry_run: true,
+          would_revoke: evidenceId,
+          recorded_by: recordedBy,
+          note: '未加 --confirm：不写入。撤回会让该证据立刻不再支持可执行预案，请确认后由用户本人重新执行。',
+        });
+        return true;
+      }
+      const db = openPortfolioDb(h.arg('db'));
+      try {
+        const result = revokeResearchEvidence(db, evidenceId, {
+          confirm: true, recordedBy, reason: h.arg('reason') ?? '',
+        });
+        h.print({ ...result, db: portfolioDbPath(), note: '撤回只改变证据状态；原始记录与历史状态变更均可审计。' });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
+    case 'portfolio-evidence-history': {
+      const evidenceId = requireArg(h, 'id');
+      const db = openReadOnly(h.arg('db'));
+      try {
+        h.print({ evidence_id: evidenceId, history: readEvidenceStatusHistory(db, evidenceId), db: portfolioDbPath() });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
+    case 'portfolio-daily-report': {
+      // D1 收盘日报：首屏就是"下一交易日最值得做的 0–3 个动作"。
+      const accountId = requireArg(h, 'account');
+      const dbPath = h.arg('db') ?? portfolioDbPath();
+      if (!existsSync(dbPath)) throw new Error(`账户数据库不存在（${dbPath}），请先运行 finance-ashare portfolio-import`);
+      const db = openPortfolioDb(dbPath, { writable: false });
+      const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
+      try {
+        const snapshotId = h.arg('snapshot');
+        const snapshot = snapshotId ? readSnapshot(db, snapshotId) : latestSnapshot(db);
+        if (!snapshot) throw new Error(snapshotId ? `账户快照 ${snapshotId} 不存在` : '账户库中没有任何快照，请先运行 portfolio-import');
+        const asOf = h.arg('date') ? h.ymd(h.arg('date'), '--date') : defaultTradeDate(market, snapshot);
+        const maxActions = intArg(h.arg('max-actions'), '--max-actions');
+        const report = buildDailyReport({
+          portfolioDb: db,
+          marketDb: market,
+          accountId,
+          asOfTradeDate: asOf,
+          snapshotId,
+          maxActions: maxActions === undefined ? undefined : maxActions,
+        });
+        h.print(report);
+      } finally {
+        market?.close();
+        db.close();
+      }
+      return true;
+    }
+    case 'portfolio-etf-candidates': {
+      // C2 适格 ETF 候选筛选：只读市场缓存，数据缺失时显式 DEGRADED。
+      const asOf = h.ymd(requireArg(h, 'date'), '--date');
+      const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
+      if (!market) throw new Error(`市场缓存不存在（${h.arg('market-db') ?? ashareDbPath()}）`);
+      try {
+        const categories = h.arg('categories')?.split(',').map(c => c.trim()).filter(Boolean);
+        h.print(screenEtfCandidates(market, {
+          asOf,
+          categories: categories?.length ? categories : undefined,
+          limit: intArg(h.arg('limit'), '--limit'),
+        }));
+      } finally {
+        market.close();
+      }
+      return true;
+    }
+    case 'portfolio-benchmarks': {
+      // C6 事先固定的对照基准（沪深300 ETF / 固定多资产篮子 / 原五只不动）。
+      const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
+      if (!market) throw new Error(`市场缓存不存在（${h.arg('market-db') ?? ashareDbPath()}）`);
+      try {
+        h.print(buildBenchmarkComparison({
+          marketDb: market,
+          start: h.arg('start') ? h.ymd(h.arg('start'), '--start') : undefined,
+          end: h.arg('end') ? h.ymd(h.arg('end'), '--end') : undefined,
+        }));
+      } finally {
+        market.close();
       }
       return true;
     }

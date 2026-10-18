@@ -7,6 +7,12 @@ services:
   finance-mcp:
     build:
       context: ../..
+      # Record the exact source revision in the image so the running service can
+      # always be traced back to a commit (no more "production SHA unverified").
+      args:
+        GIT_REVISION: ${ASHARE_GIT_REVISION:-unknown}
+        GIT_BRANCH: ${ASHARE_GIT_BRANCH:-unknown}
+        BUILD_TIME: ${ASHARE_BUILD_TIME:-unknown}
     image: finance-mcp-ashare:local
     container_name: finance-mcp-ashare
     restart: unless-stopped
@@ -22,6 +28,12 @@ services:
       PORT: "3000"
       MCP_HTTP_HOST: 0.0.0.0
       ASHARE_DATA_DIR: /data
+      # Private account ledger: a SEPARATE SQLite file outside the market cache,
+      # reachable only through the authenticated /private/mcp endpoint.
+      ASHARE_PORTFOLIO_DB_PATH: /private/portfolio.sqlite
+      # Empty means the private endpoint is not mounted at all (the path 404s and
+      # never advertises itself). Set a strong random value in .env to enable it.
+      ASHARE_PRIVATE_PORTFOLIO_TOKEN: ${ASHARE_PRIVATE_PORTFOLIO_TOKEN:-}
       # Expose only the five A-share tools to ChatGPT.
       FINANCE_TOOL_PROFILE: ashare_daily
       # Never take data-source credentials from requests; Tushare comes from TUSHARE_TOKEN in .env.
@@ -35,6 +47,9 @@ services:
       MCP_TRUST_PROXY: loopback,uniquelocal
     volumes:
       - ${ASHARE_HOST_DATA_DIR:-/home/jcshi/.local/share/finance-mcp-ashare}:/data
+      # Private account directory (mode 700 on the host). Holds portfolio.sqlite
+      # only; never committed to Git and never exposed on the public endpoint.
+      - ${ASHARE_PRIVATE_HOST_DIR:-/home/jcshi/.local/share/ashare-private}:/private
     # Loopback only: the public entry point is the existing Caddy :443 listener.
     ports:
       - "127.0.0.1:8130:3000"

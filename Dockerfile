@@ -31,6 +31,16 @@ USER appuser
 # 暴露端口（Smithery 平台要求）
 EXPOSE 3000
 
+# OCI revision label：在构建时用 --build-arg GIT_REVISION=$(git rev-parse HEAD)
+# 写入，使运行中的镜像可以与其代码提交对应，避免"生产版本未经核对"的情况。
+ARG GIT_REVISION=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.revision=$GIT_REVISION \
+      org.opencontainers.image.ref.name=$GIT_BRANCH \
+      org.opencontainers.image.created=$BUILD_TIME \
+      org.opencontainers.image.title="FinanceMCP A-share daily research"
+
 # 设置环境变量
 ENV NODE_ENV=production
 ENV PORT=3000

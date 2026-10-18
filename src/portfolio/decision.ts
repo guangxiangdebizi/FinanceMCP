@@ -13,7 +13,11 @@ import {
 } from './instrument.js';
 import { assessQuoteIntegrity, suspensionSynced } from './quotes.js';
 import { verifyResearchEvidence, type EvidenceReason } from './evidence.js';
-import { readBaseline, realAccountGate, replayAccount } from './ledger.js';
+import {
+  readAccountCompleteness, readBaseline, realAccountGate, reconcileAccountVsLedger, replayAccount,
+  settlementCalendarFromDb,
+  type AccountCompleteness, type ReconciliationResult, type SettlementCalendar,
+} from './ledger.js';
 
 // 保持既有导出名：代码归一化是决策层的公开辅助函数。
 export { normalizeSecurityCode } from './instrument.js';
@@ -211,6 +215,20 @@ function tableExists(db: DatabaseSync, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
 
+/**
+ * 市场缓存里的 `trade_cal` → 账本可卖数量判定用的交易日历。
+ * 缓存缺失/查询失败时返回 undefined，由重放退回保守口径并标注 calendar_assumed。
+ */
+function settlementCalendarOf(db: DatabaseSync | null | undefined): SettlementCalendar | undefined {
+  if (!db) return undefined;
+  try {
+    if (!tableExists(db, 'trade_cal')) return undefined;
+  } catch {
+    return undefined;
+  }
+  return settlementCalendarFromDb(db);
+}
+
 interface TradeDayCheck {
   /** as_of 当日是否开市；日历缺失或没有该日期时为 null。 */
   isOpen: boolean | null;
@@ -387,6 +405,7 @@ export type DecisionReasonCode =
   | 'instrument_claim_mismatch'
   | 'permission_restricted'
   | 'insufficient_position'
+  | 'insufficient_sellable_position'
   | 'invalid_input'
   | 'invalid_invalidation'
   | 'lot_rule'
@@ -400,6 +419,9 @@ export type DecisionReasonCode =
   | 'account_snapshot_mismatch'
   | 'account_snapshot_stale'
   | 'account_settlement_pending'
+  | 'account_reconstruction_unavailable'
+  | 'account_completeness_undeclared'
+  | 'account_reconciliation_mismatch'
   | 'as_of_not_trading_day'
   | 'risk_budget_exceeded'
   | 'stock_not_cached'
@@ -600,12 +622,27 @@ export interface DecisionResult {
 // ---------------------------------------------------------------- 账户状态门控
 
 /**
- * 账户可执行与否的统一门控（R2 A1.5）。必须同时满足：
- * 1. 快照 `is_current === true`（用户确认过的当前账户）；
- * 2. 账户库存在，且该 account_id 的账本门控为 REAL_ACCOUNT_VERIFIED；
- * 3. 快照日期与决策日**同一交易日**（0 天容忍；不同日 → account_snapshot_stale）；
- * 4. 账本在该日没有未交收卖出（否则现金口径有歧义）。
- * 任一不满足即不可执行。快照对象无法自证“当前”，gate 也无法从快照推断。
+ * 账户可执行与否的统一门控（R2 A1.5 / A1 跨日重建）。
+ *
+ * 可执行路径有两条，满足其一即可（两者都保留原有的安全条件）：
+ *
+ * 1. **同日确认快照**：`is_current === true` 且快照日期 == 决策日（0 天容忍）；
+ * 2. **账本重建**（R2 A1）：以 `account_baseline + account_event` 重建决策日的状态，
+ *    不要求用户每天刷新快照。必须同时满足：
+ *    (a) 账户有 `account_baseline`；
+ *    (b) 账本门控为 REAL_ACCOUNT_VERIFIED；
+ *    (c) 决策日 >= baseline.as_of；
+ *    (d) 账本里没有晚于决策日的事件（否则重建的"当日"状态会被未来事件污染）；
+ *    (e) 决策日没有未交收卖出（现金口径无歧义）；
+ *    (f) 完整性已披露（`account_completeness` 存在且 `as_of` 覆盖决策日）。
+ *    通过时 `state_basis = 'ledger_reconstruction'`，并始终披露
+ *    `unreported_trade_risk`（默认 true）。
+ *
+ * 无论走哪条路径：
+ * - 快照比决策日旧 → 只发 `account_snapshot_stale` **警告**（不硬阻塞），
+ *   因为状态已由账本重建；快照比决策日新 → 仍按不一致处理（数据自相矛盾）。
+ * - A2：同日确认快照存在时，必须与账本重放对账一致；不一致 → 不可执行。
+ * - 未交收卖出、账本缺失、真实账户未确认等既有条件全部保留。
  */
 export interface AccountStatusEvaluation {
   ok: boolean;
@@ -616,45 +653,122 @@ export interface AccountStatusEvaluation {
   as_of: string;
   pending_settlement_cents: number;
   reasons: Reason[];
+  /**
+   * 可执行状态的来源：
+   * - `same_day_snapshot`：当日确认快照（旧路径，仍然有效）；
+   * - `ledger_reconstruction`：账本按决策日重建（A1 新路径）；
+   * - `none`：两条路径都不成立。
+   */
+  state_basis: 'same_day_snapshot' | 'ledger_reconstruction' | 'none';
+  /** 账本重建的基准日（无基线时为 null）。 */
+  baseline_as_of: string | null;
+  /** 账本重建是否覆盖决策日（有基线、决策日不早于基线、无未来事件）。 */
+  reconstruction_as_of: string | null;
+  /** 账本里是否存在晚于决策日的事件（存在时不得用于该日重建）。 */
+  future_events: boolean;
+  /** 快照与账本重放的对账结果；未核对时为 null。 */
+  reconciliation: ReconciliationResult | null;
+  /** 完整性声明（缺失时为 null，并按"存在未上报交易风险"处理）。 */
+  completeness: AccountCompleteness | null;
+  /** 完整性声明里用户声明已录入到哪个交易日（缺失时为 null）。 */
+  reported_events_through: string | null;
+  /** 用户上次人工核对时间（缺失时为 null）。 */
+  last_user_reconciled_at: string | null;
+  /** 完整性声明本身的 as_of（缺失时为 null）。 */
+  completeness_as_of: string | null;
+  /** 是否存在未上报交易风险（声明缺失时默认 true）。 */
+  unreported_trade_risk: boolean;
+  /**
+   * 账本重放给出的可卖数量（R2 A4）。没有账本时为空对象，
+   * 由调用方退回"只校验总持仓"的旧行为。
+   */
+  sellable: Record<string, { quantity: number; sellable_quantity: number; settlement_rule: 'T+0' | 'T+1' }>;
+  /** 发给调用方的警告（不阻塞可执行）。 */
+  warnings: Reason[];
   note: string;
+}
+
+/** 决策层只需要这几个字段，避免与 account.ts 强耦合。 */
+export interface AccountSnapshotLike {
+  snapshot_id: string;
+  as_of: string;
+  is_current?: boolean;
+  positions: { ts_code: string; quantity: number; ref_price_milli: number }[];
+  totals: { cash_cents: number; securities_mv_cents: number };
 }
 
 export function evaluateAccountStatus(
   portfolioDb: DatabaseSync | null | undefined,
-  snapshot: AccountSummary,
+  snapshot: AccountSnapshotLike,
   accountId: string,
   asOf: string,
+  options: { calendar?: SettlementCalendar } = {},
 ): AccountStatusEvaluation {
   const reasons: Reason[] = [];
+  const warnings: Reason[] = [];
   const snapshotYmd = String(snapshot.as_of ?? '').replace(/-/g, '');
   let gate: AccountStatusEvaluation['gate'] = 'UNAVAILABLE';
   let confirmedAt: string | null = null;
   let pendingSettlement = 0;
+  let baselineAsOf: string | null = null;
+  let reconstructionAsOf: string | null = null;
+  let futureEvents = false;
+  let reconciliation: ReconciliationResult | null = null;
+  let completeness: AccountCompleteness | null = null;
+  let unreportedRisk = true;
+  const sellable: AccountStatusEvaluation['sellable'] = {};
+  const sameDay = /^\d{8}$/.test(snapshotYmd) && snapshotYmd === asOf;
 
-  if (snapshot.is_current !== true) {
-    reasons.push({ code: 'account_not_current', detail: '账户快照 is_current=false，只能作为对照，不能作为可执行预案' });
-  }
   if (!portfolioDb) {
     reasons.push({ code: 'account_gate_unavailable', detail: '未提供只读账户库，无法复核真实账户确认状态与研究证据' });
   } else {
     const evaluated = realAccountGate(portfolioDb, accountId);
     gate = evaluated.verified ? 'VERIFIED' : 'PENDING';
     confirmedAt = evaluated.confirmed_at;
-    // 快照必须是账户库里“当前”的那一条，调用方不能拿一个自制的 AccountSummary 冒充。
+    completeness = readAccountCompleteness(portfolioDb, accountId) ?? null;
+    // 缺失声明时按"存在未上报交易风险"处理（保守方向），绝不默认"已完整"。
+    // 声明了 false 但没写 reported_events_through，或账本在声明之后还有事件，
+    // 同样按存在风险处理：声明不能覆盖它没有覆盖到的时点。
+    if (completeness === null) {
+      unreportedRisk = true;
+    } else if (!completeness.unreported_trade_risk) {
+      const through = completeness.reported_events_through;
+      const lateEvents = through === null ? 0 : (portfolioDb.prepare(
+        'SELECT COUNT(*) AS n FROM account_event WHERE account_id = ? AND occurred_on > ? AND occurred_on <= ?',
+      ).get(accountId, through, asOf) as any)?.n ?? 0;
+      unreportedRisk = through === null || lateEvents > 0;
+    } else {
+      unreportedRisk = true;
+    }
+
+    // 快照与账户库里"当前"快照的关系：只用于判断输入是否自相矛盾，
+    // 不再要求快照必须与决策日同日。
     let storedCurrent: ReturnType<typeof currentSnapshot>;
     try {
       storedCurrent = currentSnapshot(portfolioDb);
     } catch {
       storedCurrent = undefined;
     }
-    if (!storedCurrent) {
-      reasons.push({ code: 'account_not_current', detail: '账户库中没有用户确认的当前快照（is_current=1）' });
-    } else if (storedCurrent.snapshot_id !== snapshot.snapshot_id) {
+    if (sameDay) {
+      if (snapshot.is_current !== true) {
+        reasons.push({ code: 'account_not_current', detail: '账户快照 is_current=false，只能作为对照，不能作为可执行预案' });
+      }
+      if (!storedCurrent) {
+        reasons.push({ code: 'account_not_current', detail: '账户库中没有用户确认的当前快照（is_current=1）' });
+      } else if (storedCurrent.snapshot_id !== snapshot.snapshot_id) {
+        reasons.push({
+          code: 'account_snapshot_mismatch',
+          detail: `传入快照 ${snapshot.snapshot_id} 不是账户库当前快照 ${storedCurrent.snapshot_id}，不能作为可执行依据`,
+        });
+      }
+    } else if (storedCurrent && snapshotYmd > storedCurrent.as_of.replace(/-/g, '')) {
+      // 快照比账户库当前快照还新：数据自相矛盾，不能只靠账本重建绕过。
       reasons.push({
         code: 'account_snapshot_mismatch',
-        detail: `传入快照 ${snapshot.snapshot_id} 不是账户库当前快照 ${storedCurrent.snapshot_id}，不能作为可执行依据`,
+        detail: `传入快照日期 ${snapshot.as_of} 晚于账户库当前快照 ${storedCurrent.as_of}，数据自相矛盾`,
       });
     }
+
     if (!evaluated.verified) {
       reasons.push({ code: 'account_not_verified', detail: `账户 ${accountId} 的账本门控为 ${evaluated.status}，未确认为真实账户` });
     } else {
@@ -663,14 +777,65 @@ export function evaluateAccountStatus(
         gate = 'PENDING';
         reasons.push({ code: 'account_gate_unavailable', detail: `账户 ${accountId} 没有账本基线，无法核对现金与持仓` });
       } else {
+        baselineAsOf = baseline.as_of;
         try {
-          const replay = replayAccount(portfolioDb, accountId, { asOf });
+          const replay = replayAccount(portfolioDb, accountId, { asOf, calendar: options.calendar });
           pendingSettlement = replay.cash.unsettled_cents;
+          // A4：账本给出的可卖数量（T+1 排除决策日当日买入）。键统一归一化，
+          // 避免事件里的代码写法与决策输入写法不同导致静默跳过校验。
+          for (const p of replay.positions) {
+            sellable[normalizeSecurityCode(p.ts_code)] = {
+              quantity: p.quantity, sellable_quantity: p.sellable_quantity, settlement_rule: p.settlement_rule,
+            };
+          }
+          // (c) 决策日不得早于基线：早于基线意味着"基线已包含该日之后的影响"，
+          //     重放无法还原那天，绝不回填。
+          if (asOf < baseline.as_of) {
+            reasons.push({
+              code: 'account_reconstruction_unavailable',
+              detail: `决策日 ${asOf} 早于账本基线 ${baseline.as_of}，无法重建该日状态`,
+            });
+          } else {
+            reconstructionAsOf = asOf;
+          }
+          // (d) 晚于决策日的事件：该日的重建结果会被未来事件污染。
+          const future = portfolioDb.prepare(
+            'SELECT COUNT(*) AS n FROM account_event WHERE account_id = ? AND occurred_on > ?',
+          ).get(accountId, asOf) as any;
+          futureEvents = (future?.n ?? 0) > 0;
+          if (futureEvents) {
+            reasons.push({
+              code: 'account_reconstruction_unavailable',
+              detail: `账本中存在晚于决策日 ${asOf} 的事件（${future.n} 条），该日状态无法由账本唯一确定`,
+            });
+          }
+          // (e) 决策日未交收卖出：现金口径有歧义。
           if (pendingSettlement !== 0 || replay.pending_settlement.length > 0) {
             reasons.push({
               code: 'account_settlement_pending',
               detail: `账户 ${accountId} 在 ${asOf} 仍有未交收卖出 ${(pendingSettlement / 100).toFixed(2)} 元，可用现金口径有歧义`,
             });
+          }
+          // (f) 完整性披露：必须存在覆盖决策日的声明。
+          if (!completeness || completeness.as_of < asOf) {
+            reasons.push({
+              code: 'account_completeness_undeclared',
+              detail: completeness
+                ? `完整性声明只覆盖到 ${completeness.as_of}，早于决策日 ${asOf}`
+                : `账户 ${accountId} 没有完整性声明（用户尚未确认已录入到哪个时点）`,
+            });
+          }
+          // A2：同日确认快照存在时，必须与账本重放对账一致。
+          if (sameDay) {
+            reconciliation = reconcileAccountVsLedger(portfolioDb, accountId, snapshot);
+            if (!reconciliation.ok) {
+              reasons.push({
+                code: 'account_reconciliation_mismatch',
+                detail: `快照与账本重放不一致（${reconciliation.mismatches.length} 项差异：`
+                  + reconciliation.mismatches.map(m => `${m.field}${m.code ? `:${m.code}` : ''} 快照 ${m.snapshot_value} vs 账本 ${m.ledger_value}`).join('；')
+                  + '），账本可能漏录/多录事件',
+              });
+            }
           }
         } catch (error) {
           reasons.push({ code: 'account_gate_unavailable', detail: `账本重放失败：${(error as Error).message}` });
@@ -678,13 +843,32 @@ export function evaluateAccountStatus(
       }
     }
   }
-  // 0 天容忍：快照必须与决策日是同一天（YYYYMMDD）。
-  if (!/^\d{8}$/.test(snapshotYmd) || snapshotYmd !== asOf) {
-    reasons.push({
+
+  // 快照旧于决策日：只警告（状态已由账本重建）；快照新于决策日：数据矛盾。
+  if (!/^\d{8}$/.test(snapshotYmd)) {
+    reasons.push({ code: 'account_snapshot_stale', detail: `账户快照日期 ${snapshot.as_of} 无法解析，不能作为当日依据` });
+  } else if (snapshotYmd < asOf) {
+    warnings.push({
       code: 'account_snapshot_stale',
-      detail: `账户快照日期 ${snapshot.as_of} 与决策日 ${asOf} 不是同一交易日（0 天容忍），现金与持仓可能已变化`,
+      detail: `账户快照日期 ${snapshot.as_of} 早于决策日 ${asOf}；状态按账本重建，但仍需注意未录入交易的风险`,
+    });
+  } else if (snapshotYmd > asOf) {
+    reasons.push({
+      code: 'account_snapshot_mismatch',
+      detail: `账户快照日期 ${snapshot.as_of} 晚于决策日 ${asOf}，数据自相矛盾`,
     });
   }
+
+  const hardCodes = new Set(reasons.map(r => r.code));
+  const sameDayPath = sameDay && snapshot.is_current === true
+    && !hardCodes.has('account_not_current') && !hardCodes.has('account_snapshot_mismatch');
+  const reconstructionPath = reconstructionAsOf === asOf && !futureEvents && gate === 'VERIFIED'
+    && baselineAsOf !== null && !hardCodes.has('account_completeness_undeclared')
+    && !hardCodes.has('account_gate_unavailable');
+  const stateBasis: AccountStatusEvaluation['state_basis'] = reasons.length > 0
+    ? 'none'
+    : sameDayPath ? 'same_day_snapshot'
+      : reconstructionPath ? 'ledger_reconstruction' : 'none';
 
   return {
     ok: reasons.length === 0,
@@ -695,7 +879,22 @@ export function evaluateAccountStatus(
     as_of: asOf,
     pending_settlement_cents: pendingSettlement,
     reasons,
-    note: '可执行要求：当前确认快照 + 账本 REAL_ACCOUNT_VERIFIED + 同一交易日 + 无未交收卖出。',
+    state_basis: stateBasis,
+    baseline_as_of: baselineAsOf,
+    reconstruction_as_of: reconstructionAsOf,
+    future_events: futureEvents,
+    reconciliation,
+    completeness,
+    reported_events_through: completeness?.reported_events_through ?? null,
+    last_user_reconciled_at: completeness?.last_user_reconciled_at ?? null,
+    completeness_as_of: completeness?.as_of ?? null,
+    unreported_trade_risk: unreportedRisk,
+    sellable,
+    warnings,
+    note: stateBasis === 'ledger_reconstruction'
+      ? '可执行依据：账本按决策日重建（基线 + 事件）+ REAL_ACCOUNT_VERIFIED + 无未来事件 + 无未交收卖出 + 完整性已披露。'
+        + (unreportedRisk ? '仍存在未上报交易风险：不能声称与券商实时一致。' : '用户已声明无未上报交易。')
+      : '可执行要求：当日确认快照或账本重建 + REAL_ACCOUNT_VERIFIED + 无未交收卖出 + 完整性已披露。',
   };
 }
 
@@ -948,8 +1147,11 @@ export function buildDecision(input: DecisionInput): DecisionResult {
     quotes.set(code, info.kind === 'STOCK' ? loadStockQuote(db, code, asOf) : loadEtfQuote(db, code, asOf));
   }
 
-  // 账户门控：当前快照 + 账本 REAL_ACCOUNT_VERIFIED + 同一交易日 + 无未交收卖出。
-  const accountStatus = evaluateAccountStatus(portfolioDb, input.snapshot, input.account_id, asOf);
+  // 账户门控（R2 A1）：当日确认快照 **或** 账本按决策日重建；两者都要求
+  // REAL_ACCOUNT_VERIFIED + 无未交收卖出 + 完整性已披露。快照旧于决策日只发警告。
+  const accountStatus = evaluateAccountStatus(portfolioDb, input.snapshot, input.account_id, asOf, {
+    calendar: settlementCalendarOf(db),
+  });
   const accountCurrent = accountStatus.is_current;
   const tradeRequested = input.action.type === 'SELL_AND_BUY' || input.action.type === 'REDUCE_EQUITY';
   if (tradeRequested) {
@@ -957,6 +1159,11 @@ export function buildDecision(input: DecisionInput): DecisionResult {
       if (!reasons.some(x => x.code === r.code && x.detail === r.detail)) reasons.push(r);
     }
   }
+  // 快照陈旧等只作为警告传给调用方，不阻塞账本重建的可执行路径。
+  // warnings 输出约定是"无空格的原因码"，细节在 account_status 里完整保留。
+  for (const w of accountStatus.warnings) warnings.push(w.code);
+  // 未上报交易风险：必须随结果一起披露，且不得声称与券商实时一致。
+  if (accountStatus.unreported_trade_risk) warnings.push('unreported_trade_risk');
 
   const before = buildState(input, quotes);
   const evidence = normalizeEvidence(input.evidence, {
@@ -979,9 +1186,9 @@ export function buildDecision(input: DecisionInput): DecisionResult {
   options.push(hold);
 
   const reduceSpec = reduceLegOf(input);
-  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk));
+  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk, accountStatus));
 
-  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk, evidence);
+  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountStatus.reasons, tradingDayOk, evidence, accountStatus);
   options.push(rotate);
 
   options.push(optionNoAction(before, input.action.type === 'NO_ACTION' ? (input.action.reason ?? '调用方选择不操作') : '保留现金与现有持仓，不产生交易', stressRules, fees));
@@ -1257,17 +1464,25 @@ const DATA_BLOCKING_REASONS = new Set<string>([
   'candidate_not_cached', 'candidate_bar_missing', 'market_cache_unavailable', 'instrument_unknown',
   'as_of_not_trading_day', 'trade_calendar_missing', 'invalid_close', 'ohlc_missing', 'ohlc_inconsistent',
   'volume_invalid', 'amount_invalid', 'list_status_unknown', 'suspension_unknown', 'bar_not_latest_trade_day',
+  // A2：同日快照与账本重放冲突属于数据不一致，必须 DATA_INSUFFICIENT（不给任何执行腿）。
+  'account_reconciliation_mismatch',
 ]);
 // 约束类原因：NO_ACTION。
 const CONSTRAINT_BLOCKING_REASONS = new Set<string>([
   'invalid_input', 'invalid_invalidation', 'lot_rule', 'insufficient_position', 'permission_restricted',
   'instrument_claim_mismatch', 'same_instrument', 'insufficient_cash_for_one_lot', 'instrument_not_tradable',
   'instrument_suspended',
+  // A4：超过当日可卖数量（例如当日买入当日卖出）是硬约束，必须 NO_ACTION。
+  'insufficient_sellable_position',
 ]);
 // 软性原因：可以算，但只能是 ILLUSTRATIVE。
 const SOFT_REASONS = new Set<string>([
   'quote_stale', 'account_not_current', 'account_not_verified', 'account_gate_unavailable',
   'account_snapshot_stale', 'account_settlement_pending', 'rotation_advantage_unverified', 'no_demonstrated_advantage',
+  // 账本重建的硬条件缺失：保留为软性/不可执行，绝不放行。
+  'account_reconstruction_unavailable', 'account_completeness_undeclared',
+  // 传入快照与账户库/账本自相矛盾：绝不能被"未列入任何集合"的默认分支放行成 ACTIONABLE。
+  'account_snapshot_mismatch',
 ]);
 
 function statusOfReasons(reasons: Reason[], canCompute: boolean): DecisionStatus {
@@ -1277,12 +1492,33 @@ function statusOfReasons(reasons: Reason[], canCompute: boolean): DecisionStatus
   return canCompute ? 'ACTIONABLE' : 'DATA_INSUFFICIENT';
 }
 
+/**
+ * A4：请求卖出数量必须落在"当日可卖"范围内。
+ *
+ * 可卖数量来自账本重放（T+1 品种排除决策日当日买入）。账本不可用时退回
+ * 旧行为（只校验总持仓），并让账户门控本身决定是否可执行——绝不在这里
+ * 假定"当日买入也可卖"。
+ */
+function checkSellable(
+  code: string, shares: number, status: AccountStatusEvaluation,
+): Reason | null {
+  const entry = status.sellable[normalizeSecurityCode(code)];
+  if (!entry || !Number.isInteger(shares) || shares <= 0) return null;
+  if (shares <= entry.sellable_quantity) return null;
+  const ruleText = entry.settlement_rule === 'T+0' ? 'T+0' : 'T+1（当日买入不可卖）';
+  return {
+    code: 'insufficient_sellable_position',
+    detail: `拟卖出 ${code} ${shares} 份，但 ${status.as_of} 可卖仅 ${entry.sellable_quantity} 份`
+      + `（持仓 ${entry.quantity} 份，${ruleText}）；买入当日卖出会被拒绝`,
+  };
+}
+
 function optionReduce(
   state: PortfolioState,
   spec: { sell_code: string; sell_shares: number } | null,
   quotes: Map<string, QuoteLookup>, resolveFor: (raw: string) => ResolvedInstrument, asOf: string,
   stressRules: AssetClassStressRules, fees: FeeRules, lots: LotRules, stockRules: StockRules,
-  accountIssues: Reason[], tradingDayOk: boolean,
+  accountIssues: Reason[], tradingDayOk: boolean, accountStatus: AccountStatusEvaluation,
 ): DecisionOption {
   const base = {
     action: 'REDUCE_EQUITY' as const,
@@ -1320,6 +1556,8 @@ function optionReduce(
   else if (shares % lotMultiple !== 0) reasons.push({ code: 'lot_rule', detail: `卖出 ${shares} 不是 ${lotMultiple} 的整数倍` });
   if (!position) reasons.push({ code: 'insufficient_position', detail: `账户快照不持有 ${code}` });
   else if (Number.isInteger(shares) && shares > position.quantity) reasons.push({ code: 'insufficient_position', detail: `拟卖出 ${shares}，超过持仓 ${position.quantity}` });
+  const sellableIssue = checkSellable(code, shares, accountStatus);
+  if (sellableIssue) reasons.push(sellableIssue);
   if (!quote || !quote.available) {
     reasons.push({ code: quote?.reason ?? 'candidate_not_cached', detail: quote?.detail ?? `${code} 无可用缓存行情` });
   } else {
@@ -1365,6 +1603,7 @@ function optionRotate(
   quotes: Map<string, QuoteLookup>, resolveFor: (raw: string) => ResolvedInstrument, asOf: string,
   stressRules: AssetClassStressRules, fees: FeeRules, lots: LotRules, stockRules: StockRules,
   accountIssues: Reason[], tradingDayOk: boolean, evidence: DecisionResult['evidence'],
+  accountStatus: AccountStatusEvaluation,
 ): DecisionOption {
   const base = {
     action: 'SELL_AND_BUY' as const,
@@ -1415,6 +1654,8 @@ function optionRotate(
   if (sellCode === buyCode) reasons.push({ code: 'same_instrument', detail: '卖出与买入为同一标的，不构成轮动' });
   if (!position) reasons.push({ code: 'insufficient_position', detail: `账户快照不持有 ${sellCode}` });
   else if (Number.isInteger(shares) && shares > position.quantity) reasons.push({ code: 'insufficient_position', detail: `拟卖出 ${shares}，超过持仓 ${position.quantity}` });
+  const sellableIssue = checkSellable(sellCode, shares, accountStatus);
+  if (sellableIssue) reasons.push(sellableIssue);
 
   // 权限只依据解析结果；调用方的 buy_kind/buy_board 只用来核对是否自相矛盾。
   if (buyInfo.found) {
@@ -1607,6 +1848,10 @@ function decisionId(
       ok: accountStatus.ok, gate: accountStatus.gate, is_current: accountStatus.is_current,
       snapshot_as_of: accountStatus.snapshot_as_of, as_of: accountStatus.as_of,
       pending_settlement_cents: accountStatus.pending_settlement_cents,
+      state_basis: accountStatus.state_basis,
+      unreported_trade_risk: accountStatus.unreported_trade_risk,
+      completeness_as_of: accountStatus.completeness_as_of,
+      reconciliation_ok: accountStatus.reconciliation ? accountStatus.reconciliation.ok : null,
     },
     rules: {
       fees, lots,

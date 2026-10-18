@@ -15,7 +15,15 @@ const MARKET_DB = join(dir, 'ashare.sqlite');
 const PORTFOLIO_DB = join(dir, 'portfolio.sqlite');
 const TOKEN = 'test-private-token-9f3a7c1b5e6d';
 
-const ACCOUNT_TOOLS = ['ashare_portfolio_summary', 'ashare_portfolio_scenario', 'ashare_portfolio_decision'];
+const ACCOUNT_TOOLS = [
+  'ashare_portfolio_summary',
+  'ashare_portfolio_scenario',
+  'ashare_portfolio_decision',
+  // V1.0 C2/C6/D1：研究候选、固定基准与收盘日报（仍为账户侧只读工具）。
+  'ashare_portfolio_daily_report',
+  'ashare_etf_candidates',
+  'ashare_portfolio_benchmarks',
+];
 
 // 先准备好合成账户库（CLI 导入，幂等）。
 const imported = spawnSync(process.execPath, [join(ROOT, 'build', 'ashare', 'cli.js'), 'portfolio-import'], {

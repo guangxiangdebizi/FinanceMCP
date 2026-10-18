@@ -35,7 +35,7 @@ function positiveInt(raw: string | undefined, label: string): number | undefined
 }
 
 /** 持仓 ETF 的最新 bar 日期；缓存缺失或没有 bar 时退回快照 as_of。 */
-function defaultTradeDate(market: DatabaseSync | null, snapshot: { as_of: string; positions: { ts_code: string }[] }): string {
+export function defaultTradeDate(market: DatabaseSync | null, snapshot: { as_of: string; positions: { ts_code: string }[] }): string {
   if (market) {
     let latest: string | null = null;
     try {

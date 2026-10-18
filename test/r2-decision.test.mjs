@@ -114,7 +114,7 @@ const STOCK_HOLD_SNAPSHOT = {
 };
 importSnapshot(portfolio, STOCK_HOLD_SNAPSHOT);
 
-/** 受控正例：显式测试账户 + 基线 + 用户确认，才可能得到 ACTIONABLE。 */
+/** 受控正例：显式测试账户 + 基线 + 用户确认 + 完整性声明，才可能得到 ACTIONABLE。 */
 ledger.initBaseline(portfolio, 'r2-account', { asOf: LAST, snapshotId: 'r2-current', note: 'test fixture' });
 ledger.confirmRealAccount(portfolio, 'r2-account', { confirm: true, note: 'r2 test fixture' });
 ledger.initBaseline(portfolio, 'r2-pending', { asOf: LAST, snapshotId: 'r2-current', note: 'test fixture, gate left PENDING' });
@@ -125,6 +125,13 @@ ledger.confirmRealAccount(portfolio, 'r2-stock-hold', { confirm: true, note: 'r2
 // 有未交收卖出的账户：现金口径有歧义，不能给出可执行方案。
 ledger.initBaseline(portfolio, 'r2-settle', { asOf: LAST, cashCents: 1_000_000, note: 'test fixture' });
 ledger.confirmRealAccount(portfolio, 'r2-settle', { confirm: true, note: 'r2 test fixture' });
+// V1.0 新增准入：账本完整性必须由用户显式声明（缺省视为存在未上报交易风险）。
+// 受控正例账户声明"已录入到 LAST、无未上报风险"；负例账户保持未声明。
+for (const accountId of ['r2-account', 'r2-stock-hold']) {
+  ledger.setAccountCompleteness(portfolio, accountId, {
+    as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'test fixture declaration',
+  }, { confirm: true, recordedBy: 'test-fixture' });
+}
 ledger.recordEvent(portfolio, {
   event_id: 'r2-settle-buy', account_id: 'r2-settle', event_type: 'TRADE_BUY',
   occurred_on: LAST, ts_code: '600519.SH', quantity: 100, price_milli: 10000, fee_cents: 0, source: 'broker_statement',
@@ -273,11 +280,35 @@ test('R2-9. 快照 is_current=true 但账本 gate PENDING → 不可执行', () 
   assert.equal(rotateOf(d).executable, false);
 });
 
-test('R2-10. 旧截图 + 当前行情 → 不可执行（account_snapshot_stale）', () => {
+// V1.0 改变了 R2 的"旧快照一律不可执行"：状态现在可以由账本按决策日重建。
+// 但旧快照本身仍然只发警告；**没有完整性声明**时依旧不可执行（保守方向）。
+test('R2-10. 旧快照 + 当前行情 + 未声明完整性 → 不可执行，且 stale 以警告出现', () => {
+  const status = decision.evaluateAccountStatus(portfolio, staleSummary, 'r2-stale', LAST);
+  assert.equal(status.ok, false);
+  assert.equal(status.state_basis, 'none');
+  assert.ok(status.warnings.some(w => w.code === 'account_snapshot_stale'), JSON.stringify(status.warnings));
+  assert.ok(status.reasons.some(r => r.code === 'account_completeness_undeclared'), JSON.stringify(status.reasons));
   const d = rotation({ account_id: 'r2-stale', snapshot: staleSummary });
   assert.notEqual(d.status, 'ACTIONABLE');
-  assert.ok(d.reasons.some(r => r.code === 'account_snapshot_stale'), JSON.stringify(d.reasons));
   assert.equal(rotateOf(d).executable, false);
+});
+
+test('R2-10a. 旧快照 + 账本可重建 + 已声明完整性 → 经 ledger_reconstruction 可执行', () => {
+  // 与 R2-10 同一账户，唯一区别是用户显式声明"已录入到 LAST、无未上报风险"。
+  ledger.setAccountCompleteness(portfolio, 'r2-stale', {
+    as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'test fixture declaration',
+  }, { confirm: true, recordedBy: 'test-fixture' });
+  try {
+    const status = decision.evaluateAccountStatus(portfolio, staleSummary, 'r2-stale', LAST);
+    assert.equal(status.ok, true, JSON.stringify(status.reasons));
+    assert.equal(status.state_basis, 'ledger_reconstruction');
+    assert.equal(status.reconstruction_as_of, LAST);
+    assert.ok(status.warnings.some(w => w.code === 'account_snapshot_stale'), '旧快照仍应作为警告披露');
+    assert.equal(status.unreported_trade_risk, false);
+  } finally {
+    // 清理声明，避免影响后续用例（该表按账户唯一）。
+    portfolio.prepare('DELETE FROM account_completeness WHERE account_id = ?').run('r2-stale');
+  }
 });
 
 test('R2-10b. 未交收卖出使现金口径有歧义 → 不可执行', () => {
@@ -437,6 +468,228 @@ test('R2-18. 轮动卖出个股时使用个股费用（含印花税/过户费）
   } finally {
     markSnapshotCurrent(portfolio, 'r2-current', { confirmedBy: 'test-fixture' });
   }
+});
+
+// ---------------------------------------------------------------- 9. A4 决策层可卖数量
+// 该账户从纯现金基线起步：20261016 当日买入 159558.SZ 10000 份（T+1），
+// 因此当日可卖数量为 0；另在 20261015 买入 5000 份作为"历史持仓"。
+// 快照（用于决策输入）与账本保持一致，避免 A2 对账把本用例变成对账失败。
+ledger.initBaseline(portfolio, 'r2-a4', { asOf: PREV, cashCents: 5_000_000, note: 'a4 test fixture' });
+ledger.confirmRealAccount(portfolio, 'r2-a4', { confirm: true, note: 'r2 test fixture' });
+ledger.setAccountCompleteness(portfolio, 'r2-a4', {
+  as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'a4 declaration',
+}, { confirm: true, recordedBy: 'test-fixture' });
+ledger.recordEvent(portfolio, {
+  event_id: 'r2-a4-buy-prior', account_id: 'r2-a4', event_type: 'TRADE_BUY', occurred_on: PREV,
+  ts_code: '159558.SZ', quantity: 5000, price_milli: 935, fee_cents: 0, source: 'broker_statement',
+});
+ledger.recordEvent(portfolio, {
+  event_id: 'r2-a4-buy-today', account_id: 'r2-a4', event_type: 'TRADE_BUY', occurred_on: LAST,
+  ts_code: '159558.SZ', quantity: 10000, price_milli: 935, fee_cents: 0, source: 'broker_statement',
+});
+// 账本：现金 5,000,000 − 467,500 − 935,000 = 3,597,500 分；证券 1,402,500 分。
+const A4_SNAPSHOT = {
+  ...CURRENT_SNAPSHOT,
+  snapshot_id: 'r2-a4-snapshot',
+  is_current: false,
+  positions: [
+    { ts_code: '159558.SZ', name: '半导体设备ETF', quantity: 15000, ref_price_milli: 935, ref_cost_milli: 935, market_value_cents: 1_402_500 },
+  ],
+  totals: {
+    total_assets_cents: 5_000_000,
+    securities_mv_cents: 1_402_500,
+    cash_cents: 3_597_500,
+    wealth_cents: 0,
+    unrealized_pnl_cents: 0,
+  },
+};
+// 决策输入必须是账户库"当前快照"；用例内临时切换，结束后恢复。
+importSnapshot(portfolio, A4_SNAPSHOT);
+const a4Summary = accountSummary({ ...readSnapshot(portfolio, 'r2-a4-snapshot'), is_current: true });
+
+/** 账户库只允许一个当前快照，因此本组用例显式切换并在结束后恢复。 */
+function withA4Current(fn) {
+  markSnapshotCurrent(portfolio, 'r2-a4-snapshot', { confirmedBy: 'test-fixture' });
+  try {
+    return fn();
+  } finally {
+    markSnapshotCurrent(portfolio, 'r2-current', { confirmedBy: 'test-fixture' });
+  }
+}
+
+test('R2-A4-1. 当日买入的权益 ETF 不可卖：卖出请求被拒（insufficient_sellable_position）', () => withA4Current(() => {
+  const status = decision.evaluateAccountStatus(portfolio, a4Summary, 'r2-a4', LAST);
+  assert.equal(status.ok, true, JSON.stringify(status.reasons));
+  assert.equal(status.reconciliation.ok, true, JSON.stringify(status.reconciliation.mismatches));
+  assert.equal(status.sellable['159558.SZ'].quantity, 15000);
+  assert.equal(status.sellable['159558.SZ'].sellable_quantity, 5000, '只有前一交易日的 5000 份可卖');
+
+  const d = rotation({
+    account_id: 'r2-a4',
+    snapshot: a4Summary,
+    action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', buy_kind: 'ETF' },
+  });
+  const codes = d.reasons.map(r => r.code).concat(rotateOf(d).reasons.map(r => r.code));
+  assert.ok(codes.includes('insufficient_sellable_position'), JSON.stringify(codes));
+  assert.notEqual(d.status, 'ACTIONABLE');
+  assert.deepEqual(rotateOf(d).legs, [], '超过可卖数量时不能留下可下单的卖出腿');
+  assert.equal(rotateOf(d).executable, false);
+}));
+
+test('R2-A4-2. 历史持仓可卖：卖出不超过可卖数量 → ACTIONABLE', () => withA4Current(() => {
+  const d = rotation({
+    account_id: 'r2-a4',
+    snapshot: a4Summary,
+    action: { type: 'SELL_AND_BUY', sell_code: '159558.SZ', sell_shares: 5000, buy_code: '510300.SH', buy_kind: 'ETF' },
+  });
+  assert.equal(d.status, 'ACTIONABLE', JSON.stringify(d.reasons));
+  assert.equal(rotateOf(d).executable, true);
+}));
+
+// ---------------------------------------------------------------- 10. A2 决策层对账
+test('R2-A2-1. 同日快照与账本重放冲突 → DATA_INSUFFICIENT / 不可执行', () => {
+  // 账户库的当前快照与账本一致；这里构造一个"同日但现金不同"的快照对象。
+  const conflicted = { ...current, snapshot_id: 'r2-current', totals: { ...current.totals, cash_cents: current.totals.cash_cents + 100 } };
+  const status = decision.evaluateAccountStatus(portfolio, conflicted, 'r2-account', LAST);
+  assert.equal(status.ok, false);
+  assert.equal(status.reconciliation.ok, false);
+  assert.ok(status.reconciliation.mismatches.some(m => m.field === 'cash_cents'), JSON.stringify(status.reconciliation.mismatches));
+  assert.ok(status.reasons.some(r => r.code === 'account_reconciliation_mismatch'), JSON.stringify(status.reasons));
+
+  const d = rotation({ snapshot: conflicted });
+  assert.equal(d.status, 'DATA_INSUFFICIENT', JSON.stringify(d.reasons));
+  assert.ok(d.reasons.some(r => r.code === 'account_reconciliation_mismatch'), JSON.stringify(d.reasons));
+  assert.equal(rotateOf(d).executable, false);
+  assert.deepEqual(rotateOf(d).legs, [], '对账冲突时不得给出主执行腿');
+});
+
+test('R2-A2-2. 对账一致时决策正常；每个决策都披露完整性与未上报风险', () => {
+  const status = decision.evaluateAccountStatus(portfolio, current, 'r2-account', LAST);
+  assert.equal(status.ok, true, JSON.stringify(status.reasons));
+  assert.equal(status.reconciliation.ok, true);
+  assert.equal(status.unreported_trade_risk, false);
+  assert.equal(status.reported_events_through, LAST);
+  assert.equal(status.completeness_as_of, LAST);
+
+  const d = rotation();
+  assert.equal(d.account_status.reconciliation.ok, true);
+  assert.equal(d.account_status.reported_events_through, LAST);
+  assert.equal(d.account_status.last_user_reconciled_at, null);
+  assert.equal(d.account_status.completeness_as_of, LAST);
+  assert.equal(d.account_status.unreported_trade_risk, false);
+});
+
+test('R2-A1-3. 未声明完整性 → 不可执行；声明存在未上报风险 → 可执行但必须披露', () => {
+  ledger.initBaseline(portfolio, 'r2-nocompleteness', { asOf: LAST, snapshotId: 'r2-current', note: 'fixture' });
+  ledger.confirmRealAccount(portfolio, 'r2-nocompleteness', { confirm: true, note: 'r2 test fixture' });
+  try {
+    const status = decision.evaluateAccountStatus(portfolio, current, 'r2-nocompleteness', LAST);
+    assert.equal(status.ok, false);
+    assert.ok(status.reasons.some(r => r.code === 'account_completeness_undeclared'), JSON.stringify(status.reasons));
+
+    ledger.setAccountCompleteness(portfolio, 'r2-nocompleteness', { as_of: LAST }, { confirm: true, recordedBy: 'test-fixture' });
+    const risky = decision.evaluateAccountStatus(portfolio, current, 'r2-nocompleteness', LAST);
+    assert.equal(risky.ok, true, JSON.stringify(risky.reasons));
+    assert.equal(risky.unreported_trade_risk, true, '缺省即存在未上报交易风险');
+    assert.equal(risky.state_basis, 'same_day_snapshot');
+
+    const d = rotation({ account_id: 'r2-nocompleteness' });
+    assert.equal(d.status, 'ACTIONABLE', JSON.stringify(d.reasons));
+    assert.equal(d.account_status.unreported_trade_risk, true);
+    assert.ok(d.warnings.some(w => /unreported_trade_risk/.test(w)), JSON.stringify(d.warnings));
+  } finally {
+    portfolio.prepare('DELETE FROM account_completeness WHERE account_id = ?').run('r2-nocompleteness');
+  }
+});
+
+test('R2-A1-4. 账本存在晚于决策日的事件 → 该日不可重建，不可执行', () => {
+  const status = decision.evaluateAccountStatus(portfolio, current, 'r2-settle', PREV);
+  assert.equal(status.ok, false);
+  assert.ok(status.future_events, 'r2-settle 在 LAST 有事件，PREV 的重建会被未来事件污染');
+  assert.ok(status.reasons.some(r => r.code === 'account_reconstruction_unavailable'), JSON.stringify(status.reasons));
+});
+
+// ---------------------------------------------------------------- 11. A5 证据生命周期
+test('R2-A5-1. VERIFIED → REVOKED：校验翻转为 evidence_revoked，审计恰好一行', () => {
+  const id = 'EV-A5-REVOKE';
+  evidence.recordResearchEvidence(portfolio, {
+    evidence_id: id, kind: 'ROTATION', buy_code: '510300.SH', sell_code: '159558.SZ',
+    strategy_id: 'r2-test', as_of: LAST, valid_until: null, status: 'VERIFIED',
+    recorded_by: 'test-fixture', note: 'A5 生命周期用例',
+  }, { confirm: true });
+
+  const before = evidence.verifyResearchEvidence(portfolio, { evidence_id: id }, {
+    buyCode: '510300.SH', sellCode: '159558.SZ', asOf: LAST,
+  });
+  assert.equal(before.verified, true, JSON.stringify(before));
+  assert.deepEqual(evidence.readEvidenceStatusHistory(portfolio, id), [], '写入时不产生迁移行');
+
+  const result = evidence.revokeResearchEvidence(portfolio, id, {
+    confirm: true, recordedBy: 'test-fixture', reason: '研究结论被后续数据推翻',
+  });
+  assert.equal(result.evidence_id, id);
+  assert.equal(result.previous_status, 'VERIFIED');
+  assert.equal(result.status, 'REVOKED');
+  assert.equal(result.revoked_by, 'test-fixture');
+  assert.equal(result.already_revoked, false);
+  assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(result.revoked_at), result.revoked_at);
+
+  const after = evidence.verifyResearchEvidence(portfolio, { evidence_id: id }, {
+    buyCode: '510300.SH', sellCode: '159558.SZ', asOf: LAST,
+  });
+  assert.equal(after.verified, false);
+  assert.equal(after.reason, 'evidence_revoked', '撤回后仍以 evidence_revoked 拒绝');
+
+  const history = evidence.readEvidenceStatusHistory(portfolio, id);
+  assert.equal(history.length, 1, '每次迁移恰好一行');
+  assert.equal(history[0].from_status, 'VERIFIED');
+  assert.equal(history[0].to_status, 'REVOKED');
+  assert.equal(history[0].recorded_by, 'test-fixture');
+  assert.equal(history[0].reason, '研究结论被后续数据推翻');
+
+  // 原记录的经济字段原样保留，只改状态。
+  const record = evidence.readResearchEvidence(portfolio, id);
+  assert.equal(record.buy_code, '510300.SH');
+  assert.equal(record.sell_code, '159558.SZ');
+  assert.equal(record.as_of, LAST);
+  assert.equal(record.strategy_id, 'r2-test');
+  assert.equal(record.status, 'REVOKED');
+
+  // 重复撤回：幂等形状，不新增审计行。
+  const again = evidence.revokeResearchEvidence(portfolio, id, { confirm: true, recordedBy: 'test-fixture' });
+  assert.equal(again.already_revoked, true);
+  assert.equal(again.status, 'REVOKED');
+  assert.equal(again.previous_status, 'REVOKED');
+  assert.equal(evidence.readEvidenceStatusHistory(portfolio, id).length, 1, '重复撤回不重复记账');
+});
+
+test('R2-A5-2. 撤回缺少 --confirm 或 recordedBy → 拒绝；未知 id → 拒绝', () => {
+  assert.throws(() => evidence.revokeResearchEvidence(portfolio, 'EV-A5-REVOKE', {}), /confirm/);
+  assert.throws(() => evidence.revokeResearchEvidence(portfolio, 'EV-A5-REVOKE', { confirm: false, recordedBy: 'x' }), /confirm/);
+  assert.throws(() => evidence.revokeResearchEvidence(portfolio, 'EV-A5-REVOKE', { confirm: true }), /recordedBy/);
+  assert.throws(() => evidence.revokeResearchEvidence(portfolio, 'EV-A5-REVOKE', { confirm: true, recordedBy: '  ' }), /recordedBy/);
+  assert.throws(() => evidence.revokeResearchEvidence(portfolio, 'EV-DOES-NOT-EXIST', {
+    confirm: true, recordedBy: 'test-fixture',
+  }), /不存在/);
+  // 被拒绝的调用不改变任何状态。
+  assert.equal(evidence.readResearchEvidence(portfolio, 'EV-A5-REVOKE').status, 'REVOKED');
+  assert.equal(evidence.readEvidenceStatusHistory(portfolio, 'EV-A5-REVOKE').length, 1);
+  assert.deepEqual(evidence.readEvidenceStatusHistory(portfolio, 'EV-DOES-NOT-EXIST'), []);
+});
+
+test('R2-A5-3. PENDING → REVOKED 也走同一路径（撤回不要求曾经 VERIFIED）', () => {
+  const id = 'EV-A5-PENDING';
+  evidence.recordResearchEvidence(portfolio, {
+    evidence_id: id, kind: 'ROTATION', buy_code: '510300.SH', sell_code: '159558.SZ',
+    strategy_id: 'r2-test', as_of: LAST, valid_until: null, status: 'PENDING',
+    recorded_by: 'test-fixture', note: 'A5 pending 用例',
+  }, { confirm: true });
+  const result = evidence.revokeResearchEvidence(portfolio, id, { confirm: true, recordedBy: 'test-fixture' });
+  assert.equal(result.previous_status, 'PENDING');
+  assert.equal(evidence.readEvidenceStatusHistory(portfolio, id)[0].from_status, 'PENDING');
+  assert.equal(evidence.verifyResearchEvidence(portfolio, { evidence_id: id }, {
+    buyCode: '510300.SH', sellCode: '159558.SZ', asOf: LAST,
+  }).reason, 'evidence_revoked');
 });
 
 test.after(() => {

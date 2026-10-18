@@ -318,6 +318,9 @@ export async function dispatchPrivateTool(name: string, args: Record<string, any
     const { runDecisionTool } = await import('./portfolio/decisionTool.js');
     return runDecisionTool(args ?? {});
   }
+  // V1.0 研究/日报工具（C2/C6/D1）：与账本工具分开实现，同样只读。
+  const { RESEARCH_PRIVATE_TOOLS, runPortfolioResearchTool } = await import('./portfolio/researchTools.js');
+  if (RESEARCH_PRIVATE_TOOLS.has(name)) return runPortfolioResearchTool(name, args ?? {});
   // 账户账本工具（summary/scenario 及后续新增的 ledger 工具）统一走 portfolio/tools.ts。
   const { runPortfolioTool } = await import('./portfolio/tools.js');
   return runPortfolioTool(name, args ?? {});

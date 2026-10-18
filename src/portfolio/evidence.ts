@@ -68,6 +68,24 @@ CREATE INDEX IF NOT EXISTS idx_research_evidence_codes
   ON research_evidence (buy_code, sell_code, as_of);
 `;
 
+/**
+ * 证据状态变更审计（R2 A5）。**只追加**：每次状态迁移写一行，不删不改。
+ * 原记录的经济字段（代码、日期、结论）永远不会因为撤回而被改写。
+ */
+export const EVIDENCE_STATUS_EVENT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS research_evidence_status_event (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  evidence_id TEXT NOT NULL,
+  from_status TEXT NOT NULL,
+  to_status TEXT NOT NULL,
+  recorded_by TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_research_evidence_status_event
+  ON research_evidence_status_event (evidence_id, id);
+`;
+
 function tableExists(db: DatabaseSync, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 }
@@ -75,6 +93,7 @@ function tableExists(db: DatabaseSync, name: string): boolean {
 /** 建表辅助；不在任何只读读取路径上调用。 */
 export function ensureEvidenceSchema(db: DatabaseSync): void {
   db.exec(EVIDENCE_SCHEMA);
+  db.exec(EVIDENCE_STATUS_EVENT_SCHEMA);
 }
 
 function requireText(value: unknown, label: string): string {
@@ -175,6 +194,103 @@ export function recordResearchEvidence(
     );
   });
   return { evidence_id: record.evidence_id, created: true, record };
+}
+
+export interface EvidenceStatusEvent {
+  evidence_id: string;
+  from_status: string;
+  to_status: string;
+  recorded_by: string;
+  recorded_at: string;
+  reason: string;
+}
+
+/**
+ * 读取一条证据的状态迁移历史（按写入顺序，最早在前）。
+ * 表不存在或没有历史时返回空数组——只读路径不建表、不抛错。
+ */
+export function readEvidenceStatusHistory(
+  db: DatabaseSync | null | undefined, evidenceId: string,
+): EvidenceStatusEvent[] {
+  if (!db || !evidenceId) return [];
+  try {
+    if (!tableExists(db, 'research_evidence_status_event')) return [];
+    const rows = db.prepare(
+      'SELECT * FROM research_evidence_status_event WHERE evidence_id = ? ORDER BY id ASC',
+    ).all(evidenceId) as any[];
+    return rows.map(row => ({
+      evidence_id: row.evidence_id,
+      from_status: row.from_status,
+      to_status: row.to_status,
+      recorded_by: row.recorded_by,
+      recorded_at: row.recorded_at,
+      reason: row.reason ?? '',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export interface RevokeEvidenceResult {
+  evidence_id: string;
+  previous_status: string;
+  status: 'REVOKED';
+  revoked_at: string;
+  revoked_by: string;
+  /** 重复撤回时为 true：状态没有变化，也没有新增审计行。 */
+  already_revoked: boolean;
+}
+
+/**
+ * 显式、受控、可审计的 VERIFIED → REVOKED（R2 A5）。
+ *
+ * 只做状态迁移：**不删除、不改写**原记录的经济字段（代码/日期/策略/结论），
+ * 只把 `status` 改成 REVOKED，并向 `research_evidence_status_event` 追加一行。
+ * 必须 `confirm: true` 且 `recordedBy` 非空；记录不存在或已是 REVOKED 都拒绝
+ * （已撤回时返回同一形状并标 `already_revoked: true`，不重复写审计行）。
+ */
+export function revokeResearchEvidence(
+  db: DatabaseSync, evidenceId: string,
+  options: { confirm?: boolean; recordedBy?: string; reason?: string } = {},
+): RevokeEvidenceResult {
+  if (options.confirm !== true) {
+    throw new Error('撤回研究证据需要显式 confirm: true；该动作不能由读取/决策路径自动完成');
+  }
+  const recordedBy = String(options.recordedBy ?? '').trim();
+  if (!recordedBy) throw new Error('撤回研究证据需要非空 recordedBy（谁撤回的）');
+  const id = requireText(evidenceId, 'evidence_id');
+  const existing = readResearchEvidence(db, id);
+  if (!existing) throw new Error(`研究证据 ${id} 不存在，无法撤回`);
+
+  const at = new Date().toISOString();
+  if (existing.status === 'REVOKED') {
+    const prior = readEvidenceStatusHistory(db, id).filter(e => e.to_status === 'REVOKED').pop();
+    return {
+      evidence_id: id,
+      previous_status: 'REVOKED',
+      status: 'REVOKED',
+      revoked_at: prior?.recorded_at ?? at,
+      revoked_by: prior?.recorded_by ?? recordedBy,
+      already_revoked: true,
+    };
+  }
+
+  ensureEvidenceSchema(db);
+  inPortfolioTransaction(db, () => {
+    // 只改状态列；经济字段原样保留（内容哈希因此只会在状态上变化）。
+    db.prepare('UPDATE research_evidence SET status = ? WHERE evidence_id = ?').run('REVOKED', id);
+    db.prepare(`INSERT INTO research_evidence_status_event
+      (evidence_id, from_status, to_status, recorded_by, recorded_at, reason)
+      VALUES (?,?,?,?,?,?)`).run(id, existing.status, 'REVOKED', recordedBy, at, String(options.reason ?? ''));
+  });
+  return {
+    evidence_id: id,
+    previous_status: existing.status,
+    status: 'REVOKED',
+    revoked_at: at,
+    revoked_by: recordedBy,
+    already_revoked: false,
+  };
 }
 
 /** 只读按 ID 取记录；表不存在返回 undefined（不建表、不抛错）。 */

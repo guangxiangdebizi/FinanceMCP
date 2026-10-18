@@ -136,6 +136,24 @@ CREATE INDEX IF NOT EXISTS idx_account_event_reverses
   ON account_event (reverses_event_id);
 `;
 
+/**
+ * 账本完整性声明（R2 A1/B3）。与账本数据分开：只记录"用户已核对到哪个时点"，
+ * 不改变任何事件或持仓。`unreported_trade_risk` 默认 1（存在未上报交易风险）。
+ * 另有 `recorded_by` 列记录声明人，便于审计（任务书 DDL 之外的最小增量列）。
+ */
+export const PORTFOLIO_COMPLETENESS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS account_completeness (
+  account_id TEXT PRIMARY KEY,
+  as_of TEXT NOT NULL,
+  last_user_reconciled_at TEXT,
+  reported_events_through TEXT,
+  unreported_trade_risk INTEGER NOT NULL DEFAULT 1,
+  note TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  recorded_by TEXT
+);
+`;
+
 /** 只读连接不会执行写 schema，因此读取前单独探测账本表是否存在。 */
 export function ledgerTablesPresent(db: DatabaseSync): boolean {
   const row = db.prepare(
@@ -150,6 +168,7 @@ export function ledgerTablesPresent(db: DatabaseSync): boolean {
  */
 export function ensurePortfolioLedgerSchema(db: DatabaseSync): void {
   db.exec(PORTFOLIO_LEDGER_SCHEMA);
+  db.exec(PORTFOLIO_COMPLETENESS_SCHEMA);
 }
 
 /**
@@ -208,6 +227,7 @@ export function openPortfolioDb(path = portfolioDbPath(), options: { writable?: 
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000;');
     db.exec(PORTFOLIO_SCHEMA);
     db.exec(PORTFOLIO_LEDGER_SCHEMA);
+    db.exec(PORTFOLIO_COMPLETENESS_SCHEMA);
     return db;
   }
   const db = new DatabaseSync(resolved, { readOnly: true });

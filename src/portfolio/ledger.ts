@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { inPortfolioTransaction, ledgerTablesPresent } from './db.js';
+import { inPortfolioTransaction, ledgerTablesPresent, PORTFOLIO_COMPLETENESS_SCHEMA } from './db.js';
 import { readSnapshot, round, valueCents } from './account.js';
 
 /**
@@ -54,6 +54,7 @@ export const ASSUMPTIONS: readonly string[] = [
   '成本采用平均成本法：买入佣金与税费计入成本，卖出费用与印花税冲减卖出收入',
   '撤销（REVERSE）立即按已结算现金回退，不恢复原卖出的未交收状态；reversed_by 是对原行的状态索引更新',
   '净值按单位净值法（unitisation）处理外部现金流：采用日终现金流口径，按当日扣流前估值折算，初始单位净值 1.00 元',
+  '可卖数量：T+1 品种排除决策日当日买入的批次（FIFO 消耗）；缺少 trade_cal 时仍排除当日买入并标注 calendar_assumed',
 ];
 
 /** 事件输入：派生字段可省略，由 `normalizeEvent` 校验后补齐。 */
@@ -142,6 +143,18 @@ export interface PositionState {
   /** 派生均价（厘），保留 6 位小数；总额始终为整数厘。 */
   cost_milli_avg: number;
   realized_pnl_cents: number;
+  /**
+   * `as_of` 当日可卖出的数量（R2 A4）：
+   * - 股票/权益 ETF（T+1）：`as_of` 当日买入的份额不可卖，之前持有的可卖；
+   * - 债券/黄金/规则内跨境 ETF（T+0）：全部可卖。
+   * 卖出按先进先出消耗份额，同日买入只有在老份额卖完后才会被卖出——
+   * 这是保守方向（尽量少报可卖数量），绝不把当日买入当成可卖。
+   */
+  sellable_quantity: number;
+  /** 该标的适用的回转规则（来自 `settlementRuleFor`）。 */
+  settlement_rule: SettlementRule;
+  /** 品种无法可靠分类时为 true（按保守 T+1 处理）。 */
+  settlement_rule_assumed: boolean;
 }
 
 export interface ReplayResult {
@@ -187,6 +200,24 @@ export interface ReplayResult {
   last_event_date: string | null;
   /** 账本数据是否已被用户确认为真实账户；未确认时为 REAL_ACCOUNT_PENDING。 */
   real_account_status: RealAccountStatus;
+  /**
+   * 重建依据（R2 A1/A4）：说明这个状态是"基线 + 事件"推导出来的，而不是
+   * 某天刷新的快照；可卖数量的"前一交易日"是否取自真实 trade_cal 也在这里披露。
+   */
+  reconstruction: {
+    basis: 'baseline_plus_events';
+    baseline_as_of: string;
+    baseline_snapshot_id: string;
+    as_of: string | null;
+    events_applied: number;
+    last_event_date: string | null;
+    /** 该状态由基线重放得到（不是当日快照）。 */
+    from_snapshot: false;
+    /** `as_of` 之前的最近开市日；日历缺失时为 null。 */
+    previous_trading_day: string | null;
+    /** 可卖数量判定依据：真实 trade_cal，或日历缺失时的保守假设。 */
+    sellable_basis: 'trade_calendar' | 'calendar_assumed';
+  };
   assumptions: readonly string[];
 }
 
@@ -360,9 +391,11 @@ export function settlementRuleFor(
   return decision(tsCode, 'UNKNOWN', 'T+1', true, '代码与声明都无法分类，按保守 T+1 处理');
 }
 
-/** 交易日历的最小抽象：只要"下一个开市日"。缺失/无法回答时返回 undefined。 */
+/** 交易日历的最小抽象：只要"上一个/下一个开市日"。缺失/无法回答时返回 undefined。 */
 export interface SettlementCalendar {
   nextOpenDay(ymd: string): string | undefined;
+  /** 严格早于 ymd 的最近开市日；用于 T+1 可卖数量的"前一交易日"判定。 */
+  previousOpenDay?(ymd: string): string | undefined;
 }
 
 /**
@@ -382,6 +415,17 @@ export function settlementCalendarFromDb(db: DatabaseSync): SettlementCalendar {
       try {
         const row = db.prepare(
           'SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date > ? ORDER BY cal_date ASC LIMIT 1',
+        ).get(ymd) as any;
+        return row?.cal_date ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    previousOpenDay(ymd: string): string | undefined {
+      if (!ready) return undefined;
+      try {
+        const row = db.prepare(
+          'SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date < ? ORDER BY cal_date DESC LIMIT 1',
         ).get(ymd) as any;
         return row?.cal_date ?? undefined;
       } catch {
@@ -930,6 +974,8 @@ interface AppliedEffect {
   settlement_id: string | null;
   /** 拆分：原方向比例；撤销时取倒数。 */
   split: { num: number; den: number } | null;
+  /** 撤销卖出时，按 FIFO 把份额放回原来被消耗的批次（含买入日）。 */
+  restored_lots: { date: string; quantity: number }[] | null;
   totals: { dividends: number; fees: number; taxes: number; external_flow: number };
 }
 
@@ -937,6 +983,16 @@ interface Pos {
   quantity: number;
   cost_milli: number;
   realized_cents: number;
+  /**
+   * 可卖数量所需的持有批次（R2 A4）。`date` 为空串表示基线自带的持仓：
+   * 基线是重放起点，视为"重放开始前已持有"，因此不受当日 T+1 限制。
+   */
+  lots: { date: string; quantity: number }[];
+}
+
+interface RunnerOptions {
+  asOf: string | null;
+  calendar?: SettlementCalendar;
 }
 
 class LedgerRunner {
@@ -952,12 +1008,16 @@ class LedgerRunner {
   eventsApplied = 0;
   lastEventDate: string | null = null;
 
-  constructor(private readonly baseline: BaselineRow) {}
+  constructor(private readonly baseline: BaselineRow, private readonly options: RunnerOptions = { asOf: null }) {}
 
   seed(positions: { ts_code: string; quantity: number; ref_cost_milli: number }[]): void {
     for (const p of positions) {
       if (p.quantity === 0) continue;
-      this.positions.set(p.ts_code, { quantity: p.quantity, cost_milli: p.quantity * p.ref_cost_milli, realized_cents: 0 });
+      this.positions.set(p.ts_code, {
+        quantity: p.quantity, cost_milli: p.quantity * p.ref_cost_milli, realized_cents: 0,
+        // 基线持仓视为重放起点之前已持有（可卖），用空日期标记。
+        lots: [{ date: '', quantity: p.quantity }],
+      });
     }
     this.settled = this.baseline.cash_cents;
     this.minCash = this.settled;
@@ -968,8 +1028,43 @@ class LedgerRunner {
 
   private pos(code: string): Pos {
     let p = this.positions.get(code);
-    if (!p) { p = { quantity: 0, cost_milli: 0, realized_cents: 0 }; this.positions.set(code, p); }
+    if (!p) { p = { quantity: 0, cost_milli: 0, realized_cents: 0, lots: [] }; this.positions.set(code, p); }
     return p;
+  }
+
+  /** 撤销买入：从最晚的批次开始移除，避免把"历史持仓"误当成当日买入。 */
+  private removeLot(p: Pos, quantity: number): void {
+    let rest = quantity;
+    while (rest > 0 && p.lots.length > 0) {
+      const lot = p.lots[p.lots.length - 1];
+      const take = Math.min(lot.quantity, rest);
+      lot.quantity -= take;
+      rest -= take;
+      if (lot.quantity === 0) p.lots.pop();
+    }
+  }
+
+  /**
+   * `as_of` 当日可卖数量（R2 A4）。
+   *
+   * - T+0 品种：全部可卖；
+   * - T+1 品种：只有"在 `as_of` 之前的交易日"买入的批次可卖。有真实 trade_cal 时，
+   *   前一交易日 = `previousOpenDay(as_of)`，买入日必须 <= 该日（周末/节假日录入的
+   *   买入不算前一交易日）；日历缺失时退回"买入日 < as_of"的保守口径并标注
+   *   `calendar_assumed`——两种情况都不会把当日买入当成可卖。
+   */
+  sellableOf(p: Pos, rule: SettlementRule): number {
+    if (rule === 'T+0') return Math.max(p.quantity, 0);
+    const asOf = this.options.asOf;
+    if (!asOf) return Math.max(p.quantity, 0);
+    const previousTradingDay = this.options.calendar?.previousOpenDay?.(asOf);
+    const cutoff = previousTradingDay ?? asOf; // 无日历时以 as_of 为界，等价于"严格早于"
+    let sellable = 0;
+    for (const lot of p.lots) {
+      if (lot.date === '') sellable += lot.quantity; // 基线持仓：视为已持有
+      else if (previousTradingDay ? lot.date <= cutoff : lot.date < cutoff) sellable += lot.quantity;
+    }
+    return Math.max(sellable, 0);
   }
 
   private unsettledTotal(): number {
@@ -1047,12 +1142,14 @@ class LedgerRunner {
         const costAdded = q * price + (row.fee_cents + row.tax_cents) * 10;
         p.quantity += q;
         p.cost_milli += costAdded;
+        // 买入批次记录发生日：T+1 品种当日买入的份额不可卖（R2 A4）。
+        p.lots.push({ date, quantity: q });
         this.spend(cashOut);
         this.totals.fees_cents += row.fee_cents;
         this.totals.taxes_cents += row.tax_cents;
         this.effects.set(row.event_id, {
           ts_code: code, qty_delta: q, cost_milli_delta: costAdded, realized_cents_delta: 0,
-          settled_cash_delta: -cashOut, settlement_id: null, split: null,
+          settled_cash_delta: -cashOut, settlement_id: null, split: null, restored_lots: null,
           totals: { dividends: 0, fees: row.fee_cents, taxes: row.tax_cents, external_flow: 0 },
         });
         break;
@@ -1067,6 +1164,18 @@ class LedgerRunner {
         const removed = q >= p.quantity ? p.cost_milli : Math.round((p.cost_milli * q) / Math.max(p.quantity, 1));
         p.quantity -= q;
         p.cost_milli -= removed;
+        // 记录被消耗的批次（含买入日），撤销卖出时按原样放回。
+        const consumed: { date: string; quantity: number }[] = [];
+        let rest = q;
+        while (rest > 0 && p.lots.length > 0) {
+          const lot = p.lots[0];
+          const take = Math.min(lot.quantity, rest);
+          lot.quantity -= take;
+          rest -= take;
+          consumed.push({ date: lot.date, quantity: take });
+          if (lot.quantity === 0) p.lots.shift();
+        }
+        if (rest > 0) consumed.push({ date, quantity: rest }); // 越卖：把缺口也记下来，撤销时可回退
         const proceeds = gross - row.fee_cents - row.tax_cents;
         const realized = proceeds - Math.round(removed / 10);
         p.realized_cents += realized;
@@ -1090,7 +1199,7 @@ class LedgerRunner {
         }
         this.effects.set(row.event_id, {
           ts_code: code, qty_delta: -q, cost_milli_delta: -removed, realized_cents_delta: realized,
-          settled_cash_delta: settledDelta, settlement_id: settlementId, split: null,
+          settled_cash_delta: settledDelta, settlement_id: settlementId, split: null, restored_lots: consumed,
           totals: { dividends: 0, fees: row.fee_cents, taxes: row.tax_cents, external_flow: 0 },
         });
         break;
@@ -1103,7 +1212,7 @@ class LedgerRunner {
         this.flowByDate.set(date, (this.flowByDate.get(date) ?? 0) + delta);
         this.effects.set(row.event_id, {
           ts_code: null, qty_delta: 0, cost_milli_delta: 0, realized_cents_delta: 0,
-          settled_cash_delta: delta, settlement_id: null, split: null,
+          settled_cash_delta: delta, settlement_id: null, split: null, restored_lots: null,
           totals: { dividends: 0, fees: 0, taxes: 0, external_flow: delta },
         });
         break;
@@ -1114,7 +1223,7 @@ class LedgerRunner {
         this.totals.dividends_cents += delta;
         this.effects.set(row.event_id, {
           ts_code: code, qty_delta: 0, cost_milli_delta: 0, realized_cents_delta: 0,
-          settled_cash_delta: delta, settlement_id: null, split: null,
+          settled_cash_delta: delta, settlement_id: null, split: null, restored_lots: null,
           totals: { dividends: delta, fees: 0, taxes: 0, external_flow: 0 },
         });
         break;
@@ -1125,7 +1234,7 @@ class LedgerRunner {
         this.totals.fees_cents += -delta;
         this.effects.set(row.event_id, {
           ts_code: code, qty_delta: 0, cost_milli_delta: 0, realized_cents_delta: 0,
-          settled_cash_delta: delta, settlement_id: null, split: null,
+          settled_cash_delta: delta, settlement_id: null, split: null, restored_lots: null,
           totals: { dividends: 0, fees: -delta, taxes: 0, external_flow: 0 },
         });
         break;
@@ -1142,11 +1251,20 @@ class LedgerRunner {
             this.violation('split_non_integer_quantity', `${code} ${p.quantity}×${num}/${den} 不是整数份，按向下取整处理`, date, row.event_id);
           }
           // 总成本不变，均价随数量变化：拆分不产生盈亏，也不影响现金。
-          p.quantity = Math.floor(exact);
+          const scaled = Math.floor(exact);
+          // 批次按比例缩放，持有日保持不变（拆分不改变"哪天买的"）。
+          for (const lot of p.lots) lot.quantity = Math.floor((lot.quantity * num) / den);
+          p.quantity = scaled;
+          // 取整误差并入最后一批，保证批次合计等于持仓数量。
+          const lotSum = p.lots.reduce((sum, lot) => sum + lot.quantity, 0);
+          if (lotSum !== scaled) {
+            if (p.lots.length === 0) p.lots.push({ date, quantity: scaled });
+            else p.lots[p.lots.length - 1].quantity += scaled - lotSum;
+          }
         }
         this.effects.set(row.event_id, {
           ts_code: code, qty_delta: 0, cost_milli_delta: 0, realized_cents_delta: 0,
-          settled_cash_delta: 0, settlement_id: null, split: { num, den },
+          settled_cash_delta: 0, settlement_id: null, split: { num, den }, restored_lots: null,
           totals: { dividends: 0, fees: 0, taxes: 0, external_flow: 0 },
         });
         break;
@@ -1160,12 +1278,30 @@ class LedgerRunner {
         }
         if (eff.split) {
           const p = this.pos(eff.ts_code!);
-          p.quantity = Math.floor((p.quantity * eff.split.den) / eff.split.num);
+          const restored = Math.floor((p.quantity * eff.split.den) / eff.split.num);
+          // 批次按倒数比例还原；取整误差并入最后一批，保证批次合计等于持仓。
+          for (const lot of p.lots) lot.quantity = Math.floor((lot.quantity * eff.split.den) / eff.split.num);
+          p.quantity = restored;
+          const lotSum = p.lots.reduce((sum, lot) => sum + lot.quantity, 0);
+          if (lotSum !== restored) {
+            if (p.lots.length === 0) p.lots.push({ date, quantity: restored });
+            else p.lots[p.lots.length - 1].quantity += restored - lotSum;
+          }
         } else if (eff.ts_code) {
           const p = this.pos(eff.ts_code);
           p.quantity -= eff.qty_delta;
           p.cost_milli -= eff.cost_milli_delta;
           p.realized_cents -= eff.realized_cents_delta;
+          // 撤销买入：按买入日移除对应批次；撤销卖出：把原先消耗的批次按原日期放回。
+          if (eff.qty_delta > 0) {
+            this.removeLot(p, eff.qty_delta);
+          } else if (eff.qty_delta < 0) {
+            for (const lot of eff.restored_lots ?? [{ date, quantity: -eff.qty_delta }]) {
+              p.lots.push({ date: lot.date, quantity: lot.quantity });
+            }
+            // 批次按日期排序，保证 FIFO 消耗顺序确定。
+            p.lots.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
+          }
           if (p.quantity < 0) {
             this.violation('reverse_creates_negative_position', `${eff.ts_code} 撤销后数量 ${p.quantity} < 0`, date, row.event_id);
           }
@@ -1197,16 +1333,21 @@ class LedgerRunner {
 
   flowOn(date: string): number { return this.flowByDate.get(date) ?? 0; }
 
-  snapshot(): Omit<ReplayResult, 'account_id' | 'as_of' | 'baseline' | 'events_applied' | 'last_event_date' | 'source' | 'data_source' | 'assumptions' | 'real_account_status'> {
+  snapshot(): Omit<ReplayResult, 'account_id' | 'as_of' | 'baseline' | 'events_applied' | 'last_event_date' | 'source' | 'data_source' | 'assumptions' | 'real_account_status' | 'reconstruction'> {
     const positions: PositionState[] = [];
     for (const [tsCode, p] of [...this.positions.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       if (p.quantity === 0) continue; // 零持仓清理：输出里不出现零数量行
+      const rule = settlementRuleFor(tsCode);
       positions.push({
         ts_code: tsCode,
         quantity: p.quantity,
         cost_milli_total: p.cost_milli,
         cost_milli_avg: p.quantity > 0 ? round(p.cost_milli / p.quantity, 6) : 0,
         realized_pnl_cents: p.realized_cents,
+        // 可卖数量是派生值：T+1 品种排除 as_of 当日买入的批次。
+        sellable_quantity: this.sellableOf(p, rule.rule),
+        settlement_rule: rule.rule,
+        settlement_rule_assumed: rule.assumed,
       });
     }
     const pending = [...this.settlements.values()]
@@ -1260,8 +1401,8 @@ function loadEvents(db: DatabaseSync, accountId: string, asOf?: string): EventRo
   return rows.map(rowFromDb);
 }
 
-function seedRunner(db: DatabaseSync, baseline: BaselineRow): LedgerRunner {
-  const runner = new LedgerRunner(baseline);
+function seedRunner(db: DatabaseSync, baseline: BaselineRow, options: RunnerOptions = { asOf: null }): LedgerRunner {
+  const runner = new LedgerRunner(baseline, options);
   if (baseline.snapshot_id) {
     const snapshot = readSnapshot(db, baseline.snapshot_id);
     if (!snapshot) throw new Error(`基线引用的快照 ${baseline.snapshot_id} 已不存在，无法重放`);
@@ -1282,8 +1423,16 @@ function dataSourceOf(rows: EventRow[], _hasBaselineSnapshot: boolean): ReplayRe
 /**
  * 确定性重放：持仓、现金、成本、已实现盈亏全部从基线 + 事件推导。
  * `asOf` 过滤 `occurred_on <= asOf`；不读当前时间，也没有任何随机性。
+ *
+ * R2 A1：`asOf` 可以是**没有任何事件**的日期（纯按市价重估的重建），此时状态等于
+ * 基线 + 之前事件，输出 `reconstruction` 说明重建依据。
+ * R2 A4：`options.calendar` 提供真实交易日历，用于可卖数量的"前一交易日"判定；
+ * 缺失时退回"排除 as_of 当日买入"的保守口径并标注 `calendar_assumed`。
  */
-export function replayAccount(db: DatabaseSync, accountId: string, options: { asOf?: string } = {}): ReplayResult {
+export function replayAccount(
+  db: DatabaseSync, accountId: string,
+  options: { asOf?: string; calendar?: SettlementCalendar } = {},
+): ReplayResult {
   const id = requireText(accountId, 'account_id');
   const baseline = requireBaseline(db, id);
   const asOf = options.asOf ? assertYmd(options.asOf, 'as_of') : null;
@@ -1293,7 +1442,7 @@ export function replayAccount(db: DatabaseSync, accountId: string, options: { as
     return row.occurred_on >= baseline.as_of;
   });
 
-  const runner = seedRunner(db, baseline);
+  const runner = seedRunner(db, baseline, { asOf, calendar: options.calendar });
   let currentDate: string | null = null;
   for (const row of rows) {
     if (row.occurred_on !== currentDate) {
@@ -1305,6 +1454,9 @@ export function replayAccount(db: DatabaseSync, accountId: string, options: { as
   if (asOf) runner.releaseUpTo(asOf);
 
   const state = runner.snapshot();
+  const previousTradingDay = asOf && options.calendar?.previousOpenDay
+    ? (options.calendar.previousOpenDay(asOf) ?? null)
+    : null;
   return {
     account_id: id,
     as_of: asOf,
@@ -1318,6 +1470,19 @@ export function replayAccount(db: DatabaseSync, accountId: string, options: { as
     events_applied: runner.eventsApplied,
     last_event_date: runner.lastEventDate,
     real_account_status: realAccountGate(db, id).status,
+    reconstruction: {
+      basis: 'baseline_plus_events',
+      baseline_as_of: baseline.as_of,
+      baseline_snapshot_id: baseline.snapshot_id,
+      as_of: asOf,
+      events_applied: runner.eventsApplied,
+      last_event_date: runner.lastEventDate,
+      from_snapshot: false,
+      previous_trading_day: previousTradingDay,
+      sellable_basis: asOf && options.calendar?.previousOpenDay && previousTradingDay
+        ? 'trade_calendar'
+        : 'calendar_assumed',
+    },
     assumptions: ASSUMPTIONS,
   };
 }
@@ -1483,8 +1648,11 @@ export function buildNavSeries(
   const dateSet = new Set<string>([baseline.as_of, from, to]);
   for (const row of rows) dateSet.add(row.occurred_on);
   for (const date of Object.keys(prices)) dateSet.add(date);
-  const dates = [...dateSet]
-    .filter(d => d >= baseline.as_of && d <= to && d >= from)
+  // A3 修复：**始终**从基线起模拟并折算份额，`from` 只裁剪输出点。
+  // 若把 from 当作新的起点，等于在 from 日重新锚定 1.00 元，重叠日期的单位净值
+  // 会随 from 变化——同一历史被算出两套业绩。
+  const simulationDates = [...dateSet]
+    .filter(d => d >= baseline.as_of && d <= to)
     .sort();
 
   const snapshot = baseline.snapshot_id ? readSnapshot(db, baseline.snapshot_id) : undefined;
@@ -1504,7 +1672,7 @@ export function buildNavSeries(
   const priceDates = Object.keys(prices).sort();
   let priceIndex = 0;
 
-  for (const date of dates) {
+  for (const date of simulationDates) {
     // 把当日及更早的价格并入"最近已知价"。
     while (priceIndex < priceDates.length && priceDates[priceIndex] <= date) {
       const day = priceDates[priceIndex];
@@ -1598,8 +1766,11 @@ export function buildNavSeries(
     });
   }
 
+  // `from` 只裁剪输出（回撤也只看输出点），不参与份额折算。
+  const visiblePoints = points.filter(p => p.date >= from);
+
   let maxDrawdown: NavSeries['max_drawdown'];
-  const usable = points.filter(p => p.nav_per_unit !== null);
+  const usable = visiblePoints.filter(p => p.nav_per_unit !== null);
   if (usable.length < 2) maxDrawdown = { available: false, reason: 'insufficient_history' };
   else {
     let peak = Number.NEGATIVE_INFINITY;
@@ -1614,7 +1785,7 @@ export function buildNavSeries(
         if (dd < worst) { worst = dd; ddFrom = peakDate; ddTo = p.date; }
       }
     }
-    const incompleteDates = points.filter(p => p.confidence !== 'exact').map(p => p.date);
+    const incompleteDates = visiblePoints.filter(p => p.confidence !== 'exact').map(p => p.date);
     const valuationQuality = incompleteDates.length === 0 ? 'exact' : 'incomplete';
     maxDrawdown = {
       available: true, value: worst, from: ddFrom, to: ddTo,
@@ -1630,11 +1801,234 @@ export function buildNavSeries(
   return {
     ...pending,
     data_source: dataSource,
-    from: dates.length ? dates[0] : from,
+    from: visiblePoints.length ? visiblePoints[0].date : from,
     to,
-    points,
+    points: visiblePoints,
     max_drawdown: maxDrawdown,
   };
+}
+
+// ---------------------------------------------------------------- 完整性声明（R2 A1/B3）
+
+/**
+ * 账本完整性声明：用户声明"我已把截至哪个时点的交易/资金都录进来了"。
+ *
+ * 这是跨日重建的产品前提：账本可以重建任意交易日的状态，但**不知道**用户是否
+ * 还有未录入的成交。因此默认 `unreported_trade_risk: true`（存在未上报交易风险），
+ * 只有用户显式 `--unreported-risk no` 才可能变成 false，并且永远需要 `confirm:true`。
+ */
+export interface AccountCompleteness {
+  account_id: string;
+  /** 声明的基准日（YYYYMMDD）。 */
+  as_of: string;
+  /** 用户上次人工核对的时间（ISO），可空。 */
+  last_user_reconciled_at: string | null;
+  /** 用户声明已录入到哪个交易日的全部事件（YYYYMMDD），可空。 */
+  reported_events_through: string | null;
+  /** true = 可能存在未录入/未上报的交易，不能声称与券商实时一致。 */
+  unreported_trade_risk: boolean;
+  note: string;
+  /** 声明人；写入时必填，历史行可能为空。 */
+  recorded_by: string;
+  updated_at: string;
+}
+
+export interface AccountCompletenessPatch {
+  as_of: string;
+  last_user_reconciled_at?: string | null;
+  reported_events_through?: string | null;
+  unreported_trade_risk?: boolean;
+  note?: string;
+}
+
+function completenessTablePresent(db: DatabaseSync): boolean {
+  try {
+    return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'account_completeness'").get();
+  } catch {
+    return false;
+  }
+}
+
+function rowToCompleteness(row: any): AccountCompleteness {
+  return {
+    account_id: row.account_id,
+    as_of: row.as_of,
+    last_user_reconciled_at: row.last_user_reconciled_at ?? null,
+    reported_events_through: row.reported_events_through ?? null,
+    unreported_trade_risk: row.unreported_trade_risk === 1,
+    note: row.note ?? '',
+    recorded_by: row.recorded_by ?? '',
+    updated_at: row.updated_at,
+  };
+}
+
+/**
+ * 读取完整性声明。表不存在或没有声明时返回 null——**不建表、不抛错**，
+ * 也不补默认值（默认"有风险"由调用方在缺失时自行采用）。
+ */
+export function readAccountCompleteness(
+  db: DatabaseSync | null | undefined, accountId: string,
+): AccountCompleteness | null {
+  if (!db || !accountId) return null;
+  try {
+    if (!completenessTablePresent(db)) return null;
+    const row = db.prepare('SELECT * FROM account_completeness WHERE account_id = ?').get(accountId) as any;
+    return row ? rowToCompleteness(row) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 唯一写路径。必须 `confirm: true` 且给出非空 `recordedBy`
+ * （与真实账户确认、研究证据一致），因为这条声明会被决策层当作
+ * "账本是否完整"的依据。
+ *
+ * `unreported_trade_risk` 缺省为 true；只有显式 false 才会落成 0。
+ * 返回落库后的完整声明（写入后回读，保证返回的就是库里的值）。
+ *
+ * 返回值在 `AccountCompleteness` 之上附带一个同内容的 `completeness` 字段：
+ * 契约锁定返回声明本身，而 CLI 用 `{...result}` 直接打印，两者都能取到
+ * `unreported_trade_risk`（不是自引用，JSON 可序列化）。
+ */
+export type SetAccountCompletenessResult = AccountCompleteness & { completeness: AccountCompleteness };
+
+export function setAccountCompleteness(
+  db: DatabaseSync, accountId: string, patch: AccountCompletenessPatch,
+  options: { confirm?: boolean; recordedBy?: string } = {},
+): SetAccountCompletenessResult {
+  if (options.confirm !== true) {
+    throw new Error('声明账本完整性需要显式 confirm: true；该动作只能由用户本人执行');
+  }
+  const recordedBy = String(options.recordedBy ?? '').trim();
+  if (!recordedBy) throw new Error('声明账本完整性需要非空 recordedBy（谁声明的）');
+  const id = requireText(accountId, 'account_id');
+  const asOf = assertYmd(patch.as_of, 'as_of');
+  const reconciledAt = patch.last_user_reconciled_at == null || String(patch.last_user_reconciled_at).trim() === ''
+    ? null : String(patch.last_user_reconciled_at).trim();
+  const through = patch.reported_events_through == null || String(patch.reported_events_through).trim() === ''
+    ? null : assertYmd(patch.reported_events_through, 'reported_events_through');
+  if (through !== null && through > asOf) {
+    throw new Error(`reported_events_through (${through}) 不能晚于 as_of (${asOf})`);
+  }
+  const unreported = patch.unreported_trade_risk !== false; // 缺省保守为 true
+  const note = String(patch.note ?? '');
+  const at = new Date().toISOString();
+
+  inPortfolioTransaction(db, () => {
+    db.exec(PORTFOLIO_COMPLETENESS_SCHEMA);
+    db.prepare(`INSERT INTO account_completeness
+      (account_id, as_of, last_user_reconciled_at, reported_events_through, unreported_trade_risk, note, updated_at, recorded_by)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(account_id) DO UPDATE SET
+        as_of = excluded.as_of, last_user_reconciled_at = excluded.last_user_reconciled_at,
+        reported_events_through = excluded.reported_events_through,
+        unreported_trade_risk = excluded.unreported_trade_risk,
+        note = excluded.note, updated_at = excluded.updated_at, recorded_by = excluded.recorded_by`)
+      .run(id, asOf, reconciledAt, through, unreported ? 1 : 0, note, at, recordedBy);
+  });
+  return { ...readAccountCompleteness(db, id)!, completeness: readAccountCompleteness(db, id)! };
+}
+
+// ---------------------------------------------------------------- 双账对账（R2 A2）
+
+export interface LedgerMismatch {
+  field: 'quantity' | 'cash_cents' | 'securities_mv_cents';
+  code: string | null;
+  snapshot_value: number;
+  ledger_value: number;
+  delta: number;
+}
+
+export interface ReconciliationResult {
+  ok: boolean;
+  account_id: string;
+  /** 被核对快照的日期与 ID（只读回显）。 */
+  snapshot_id: string;
+  as_of: string;
+  mismatches: LedgerMismatch[];
+  checked_at: string;
+  note: string;
+}
+
+/**
+ * 快照 vs 账本重放的双账对账（R2 A2）。
+ *
+ * 对同一交易日（`snapshot.as_of`），逐项比较：
+ * 1. 每个代码的持仓数量（双向：快照有而账本没有、账本有而快照没有都算差异）；
+ * 2. 现金（快照 `cash_cents` vs 重放 `cash.balance_cents`）；
+ * 3. 证券市值（快照 `securities_mv_cents` vs 快照参考价 × 重放数量的合计）。
+ *
+ * 市值按**快照自己的参考价**折算，因此只检验"数量 + 现金"是否一致；价格变动
+ * 不会被误报成对账差异。任何差异都返回 `ok:false`，决策层据此降级。
+ */
+export function reconcileAccountVsLedger(
+  db: DatabaseSync, accountId: string, snapshot: AccountSnapshotLike,
+): ReconciliationResult {
+  const id = requireText(accountId, 'account_id');
+  const asOf = assertYmd(String(snapshot.as_of ?? '').replace(/-/g, ''), 'snapshot.as_of');
+  const replay = replayAccount(db, id, { asOf });
+  const mismatches: LedgerMismatch[] = [];
+
+  const snapshotQty = new Map<string, number>();
+  const snapshotPrice = new Map<string, number>();
+  for (const p of snapshot.positions) {
+    snapshotQty.set(p.ts_code, (snapshotQty.get(p.ts_code) ?? 0) + p.quantity);
+    snapshotPrice.set(p.ts_code, p.ref_price_milli);
+  }
+  const ledgerQty = new Map<string, number>();
+  for (const p of replay.positions) ledgerQty.set(p.ts_code, p.quantity);
+
+  for (const code of [...new Set([...snapshotQty.keys(), ...ledgerQty.keys()])].sort()) {
+    const snap = snapshotQty.get(code) ?? 0;
+    const led = ledgerQty.get(code) ?? 0;
+    if (snap !== led) {
+      mismatches.push({ field: 'quantity', code, snapshot_value: snap, ledger_value: led, delta: snap - led });
+    }
+  }
+
+  if (snapshot.totals.cash_cents !== replay.cash.balance_cents) {
+    mismatches.push({
+      field: 'cash_cents', code: null,
+      snapshot_value: snapshot.totals.cash_cents, ledger_value: replay.cash.balance_cents,
+      delta: snapshot.totals.cash_cents - replay.cash.balance_cents,
+    });
+  }
+
+  // 用快照参考价给重放数量估值；账本里多出来的代码若快照没有价，按 0 计并已在数量项报出。
+  let ledgerSecurities = 0;
+  for (const [code, qty] of ledgerQty) {
+    const price = snapshotPrice.get(code);
+    if (price === undefined) continue;
+    ledgerSecurities += valueCents(qty, price);
+  }
+  if (snapshot.totals.securities_mv_cents !== ledgerSecurities) {
+    mismatches.push({
+      field: 'securities_mv_cents', code: null,
+      snapshot_value: snapshot.totals.securities_mv_cents, ledger_value: ledgerSecurities,
+      delta: snapshot.totals.securities_mv_cents - ledgerSecurities,
+    });
+  }
+
+  return {
+    ok: mismatches.length === 0,
+    account_id: id,
+    snapshot_id: snapshot.snapshot_id,
+    as_of: asOf,
+    mismatches,
+    checked_at: new Date().toISOString(),
+    note: mismatches.length === 0
+      ? '快照与账本重放在数量、现金、证券市值上一致（市值按快照参考价折算）'
+      : '快照与账本重放不一致：账本可能漏录/多录事件，或快照不是同一时点；决策必须降级',
+  };
+}
+
+/** 对账只需要快照的这几个字段，避免把 account.ts 的类型强耦合进来。 */
+export interface AccountSnapshotLike {
+  snapshot_id: string;
+  as_of: string;
+  positions: { ts_code: string; quantity: number; ref_price_milli: number }[];
+  totals: { cash_cents: number; securities_mv_cents: number };
 }
 
 // ---------------------------------------------------------------- 真实账户门控

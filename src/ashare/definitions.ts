@@ -261,6 +261,49 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
     },
     annotations: READ_ONLY,
   },
+  {
+    name: 'ashare_portfolio_daily_report',
+    description: `收盘日报（D1，确定性、只读）：首屏是"下一交易日最值得做的 0–3 个动作及理由"，随后是市场判断与反证、五只真实持仓的持有/减仓/换仓/等待理由、候选与资金竞争、集中度与回撤披露、条件化交易预案（费用与参考数量）、失效条件与历史预案跟踪。状态为 ACTIONABLE / ILLUSTRATIVE / NO_ACTION / DATA_INSUFFICIENT；没有证据支持时返回 NO_ACTION 并给出观察触发条件。所有数字由程序计算，研究性主张标 UNVERIFIED；只有账户门控全部满足时才会出现可执行数量，否则一律 executable:false。行情来自本地只读缓存的收盘价，不是下一交易日可成交价。${PORTFOLIO_NOTE} 只在 /private/mcp 提供。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        account_id: { type: 'string', description: '账户标识，缺省 default' },
+        as_of_trade_date: { type: 'string', description: '日报目标交易日 YYYYMMDD；缺省为最近交易日' },
+        snapshot_id: { type: 'string', description: '账户快照 ID；缺省为最新快照' },
+        max_actions: { type: 'number', description: '动作上限 0–3，默认 3' },
+        categories: { type: 'array', items: { type: 'string' }, description: '候选 ETF 类别子集：broad/industry/bond/gold/cross_border' },
+      },
+      required: [],
+    },
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'ashare_etf_candidates',
+    description: `适格 ETF 动态研究候选（C2，只读本地 fund_* 缓存）：按宽基/行业主题/债券/黄金/跨境分类，给出数据覆盖、规模（份额×价格，万份/元口径）、流动性（20 日成交额中位数）、跟踪质量与风险特征，并逐项给出纳入或剔除原因。数据缺失时显式 DEGRADED（列出缺哪张表/哪个日期），绝不静默丢弃；溢折价在缓存缺少 NAV/IOPV 时标 unavailable，不估算。五只真实持仓永远包含且不被流动性/规模过滤（held:true）。这是研究候选筛选，不是买入信号，评分是启发式排序。${PORTFOLIO_NOTE} 只在 /private/mcp 提供。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        as_of_trade_date: { type: 'string', description: '交易日 YYYYMMDD；缺省为最近交易日' },
+        categories: { type: 'array', items: { type: 'string' }, description: '类别子集：broad/industry/bond/gold/cross_border；缺省全部' },
+        limit: { type: 'number', description: 'OK 且非持仓候选的返回上限；不隐藏 DEGRADED 与被剔除行' },
+      },
+      required: [],
+    },
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'ashare_portfolio_benchmarks',
+    description: `事先固定的对照基准比较（C6，只读）：沪深300 ETF（510300.SH）被动持有、固定权重的多资产 ETF 篮子（权重为暂定值，状态 provisional_pending_user_approval，待用户批准）、以及原五只 ETF 按起始数量不交易。统一时间窗、费用与现金流口径，给出总收益、最大回撤与波动率。任一所需 ETF 无缓存数据时该基准标 UNAVAILABLE 并说明原因，绝不缩短窗口或用代理替代。基准在观察结果之前固定，不得事后挑选。${PORTFOLIO_NOTE} 只在 /private/mcp 提供。`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '窗口起点 YYYYMMDD；缺省按固定窗口长度回溯' },
+        end_date: { type: 'string', description: '窗口终点 YYYYMMDD；缺省为最近交易日' },
+      },
+      required: [],
+    },
+    annotations: READ_ONLY,
+  },
 ];
 
 export const PORTFOLIO_TOOL_NAMES = new Set(portfolioToolDefinitions.map(t => t.name));
