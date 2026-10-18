@@ -10,6 +10,7 @@ import { fundamentalRisk, fundamentalsAsOf } from './fundamentals.js';
 import { loadVerdicts } from './evidence.js';
 import { financialHistory, marketData, resolveCode, stockBasic, stockHistory } from './data.js';
 import { factorSnapshot } from './engine.js';
+import { etfQuotes, etfStatus } from './etf.js';
 
 export { ashareToolDefinitions, ASHARE_TOOL_NAMES } from './definitions.js';
 
@@ -304,6 +305,28 @@ function sectorRankTool(args: Record<string, any>): ToolResult {
   return text(lines.filter(l => l !== '').join('\n'));
 }
 
+// ---------------------------------------------------------------- ETF
+
+/**
+ * ETF 工具在旧库（未运行过 etf-sync）上必须返回明确提示而不是崩溃，
+ * 因此这里不使用 db()：只读打开连接，表不存在时由 etf.ts 抛出可读错误。
+ */
+function etfDb(): DatabaseSync {
+  if (!existsSync(ashareDbPath())) throw new Error(`A股缓存不存在（${ashareDbPath()}），请先运行 finance-ashare sync`);
+  return getAshareDb();
+}
+
+function etfQuotesTool(args: Record<string, any>): ToolResult {
+  const codes = args.ts_codes == null || args.ts_codes === '' ? undefined
+    : Array.isArray(args.ts_codes) ? args.ts_codes : String(args.ts_codes).split(/[,，\s]+/).filter(Boolean);
+  // 未指定 end_date 时，按上海时区今天判断“预期最近交易日”，避免默认窗口终点让滞后行情看起来正常。
+  return json(etfQuotes(etfDb(), codes, { start: args.start_date, end: args.end_date, adjust: args.adjust, asOfDate: shanghaiToday() }));
+}
+
+function etfStatusTool(args: Record<string, any>): ToolResult {
+  return json(etfStatus(etfDb(), { date: args.date }));
+}
+
 export async function runAshareTool(name: string, args: Record<string, any>): Promise<ToolResult> {
   switch (name) {
     case 'ashare_data_status': return dataStatus(args);
@@ -316,6 +339,8 @@ export async function runAshareTool(name: string, args: Record<string, any>): Pr
     case 'ashare_financial_data': return json(financialHistory(db(), args));
     case 'ashare_market_data': return json(marketData(db(), args));
     case 'ashare_stock_basic': return json(stockBasic(db(), args));
+    case 'ashare_etf_quotes': return etfQuotesTool(args);
+    case 'ashare_etf_status': return etfStatusTool(args);
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }

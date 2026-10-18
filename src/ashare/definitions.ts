@@ -153,3 +153,31 @@ ashareToolDefinitions.push(
 );
 
 export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name));
+
+// ETF 数据纵切（R0）。与既有工具并列新增，不改变原有 10 个工具的名称与描述。
+ashareToolDefinitions.push(
+  {
+    name: 'ashare_etf_quotes',
+    description: `ETF 行情快照（只读本地 fund_* 缓存）：基础信息、最新行情与明确单位换算、复权价格、份额时点值与质量标记。字段单位：价格=元/份，vol=手（1 手 = 100 份，volume_shares=份），amount=千元（amount_cny=元）。fund_share 是份额时点存量，份额变化不是资金净流入，也不等于成交额；仅在两个可比份额日期与价格代理都存在时才给出 net_creation_estimate（净申购规模估计）。行情缺失返回 NOT_READY 且价格字段为 null；行情落后于预期交易日时仍返回真实行情日期并标记 STALE/DEGRADED，不伪造、不用旧数据冒充当日。${DATA_NOTE}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ts_codes: { type: 'array', items: { type: 'string' }, description: 'ETF 代码列表，如 159558.SZ 或 159558；缺省为持仓五只 159241.SZ,159278.SZ,159558.SZ,516080.SH,560390.SH' },
+        start_date: { type: 'string', description: 'YYYYMMDD，闭区间起点；缺省为 end_date 往前 30 个自然日（用于流动性统计）' },
+        end_date: { type: 'string', description: 'YYYYMMDD，闭区间终点（也是前复权基准日）；缺省为最近交易日' },
+        adjust: { type: 'string', enum: ['none', 'qfq', 'hfq'], description: '复权方式，默认 none；qfq 以 end_date 之前最后一个复权因子为基准，不使用之后的因子' },
+      },
+    },
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'ashare_etf_status',
+    description: `ETF 数据状态：缓存最新 ETF 日线日期、预期最近交易日、五只 ETF 的基础信息/行情/份额覆盖、逐只就绪度（READY/DEGRADED/NOT_READY）与最近同步记录。空缓存返回 NOT_READY 与原因，不抛异常。${DATA_NOTE}`,
+    inputSchema: {
+      type: 'object',
+      properties: { date: dateProp },
+    },
+    annotations: READ_ONLY,
+  },
+);
+

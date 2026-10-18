@@ -128,6 +128,40 @@ CREATE TABLE IF NOT EXISTS report (
 CREATE INDEX IF NOT EXISTS report_date ON report(trade_date);
 `;
 
+// ETF vertical slice (R0). Additive only: these tables are created next to the
+// stock schema and never alter an existing table, so opening an older cache
+// (including the production database read-only) keeps working unchanged.
+const ETF_SCHEMA = `
+CREATE TABLE IF NOT EXISTS fund_basic (
+  ts_code TEXT PRIMARY KEY,
+  name TEXT, management TEXT, custodian TEXT, fund_type TEXT,
+  found_date TEXT, due_date TEXT, list_date TEXT, issue_date TEXT, delist_date TEXT,
+  issue_amount REAL, m_fee REAL, c_fee REAL, benchmark TEXT, status TEXT,
+  invest_type TEXT, type TEXT, market TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS fund_daily (
+  ts_code TEXT NOT NULL, trade_date TEXT NOT NULL,
+  open REAL, high REAL, low REAL, close REAL, pre_close REAL, change REAL, pct_chg REAL,
+  vol REAL, amount REAL,
+  PRIMARY KEY (ts_code, trade_date)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS fund_daily_date ON fund_daily(trade_date);
+CREATE TABLE IF NOT EXISTS fund_adj (
+  ts_code TEXT NOT NULL, trade_date TEXT NOT NULL, adj_factor REAL,
+  PRIMARY KEY (ts_code, trade_date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS fund_share (
+  ts_code TEXT NOT NULL, trade_date TEXT NOT NULL, fd_share REAL, fund_type TEXT, market TEXT,
+  PRIMARY KEY (ts_code, trade_date)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS fund_sync_log (
+  dataset TEXT NOT NULL, key TEXT NOT NULL,
+  rows INTEGER NOT NULL, status TEXT NOT NULL, message TEXT,
+  synced_at TEXT NOT NULL,
+  PRIMARY KEY (dataset, key)
+) WITHOUT ROWID;
+`;
+
 // Per-stock tables are keyed (ts_code, trade_date) so a stock's history is one
 // contiguous range; the trade_date index serves whole-market daily queries.
 const STOCK_FIRST_TABLES = ['daily', 'adj_factor', 'stk_limit'];
@@ -221,7 +255,7 @@ export function openAshareDb(path = ashareDbPath()): DatabaseSync {
   // temp_store=MEMORY: the container root and /tmp are small; large scans must not spill to disk.
   // mmap avoids a read syscall per page on full-market scans.
   db.exec(PRAGMAS);
-  db.exec(MARKET_SCHEMA + STATE_SCHEMA);
+  db.exec(MARKET_SCHEMA + STATE_SCHEMA + ETF_SCHEMA);
   ensureReportRunMode(db);
   ensureSyncColumns(db);
   if (STOCK_FIRST_TABLES.some(t => isDateFirst(db, t))) {

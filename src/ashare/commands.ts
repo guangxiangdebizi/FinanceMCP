@@ -180,6 +180,25 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       }));
       return true;
     }
+    case 'etf-sync': {
+      const { syncEtf } = await import('./etf.js');
+      const start = h.ymd(h.arg('start'), '--start');
+      const end = h.arg('end') ? h.ymd(h.arg('end'), '--end') : shanghaiToday();
+      h.print(await syncEtf(db, start, end, { refresh: h.flag('refresh') }));
+      return true;
+    }
+    case 'etf-status': {
+      const { etfStatus } = await import('./etf.js');
+      h.print(etfStatus(db, { date: h.arg('date') }));
+      return true;
+    }
+    case 'etf-quotes': {
+      const { etfQuotes } = await import('./etf.js');
+      h.print(etfQuotes(db, h.arg('codes')?.split(',').map(c => c.trim()).filter(Boolean), {
+        start: h.arg('start'), end: h.arg('end'), adjust: h.arg('adjust'),
+      }));
+      return true;
+    }
     case 'status': {
       const result = await runAshareTool('ashare_data_status', { date: h.arg('date') });
       process.stdout.write(result.content[0].text + '\n');

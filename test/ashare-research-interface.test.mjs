@@ -26,9 +26,11 @@ const { seedMarket, weekdays, STOCKS } = await import('./ashare-fixture.mjs');
 const EXPECTED_TOOLS = [
   'ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank',
   'ashare_factor_snapshot', 'ashare_stock_history', 'ashare_financial_data', 'ashare_market_data', 'ashare_stock_basic',
+  // R0 ETF 纵切：追加在既有工具之后，不改变上面十个的名称、顺序与描述。
+  'ashare_etf_quotes', 'ashare_etf_status',
 ];
 // The nine tools that already existed before this phase; ashare_factor_snapshot is the addition.
-const EXISTING_TOOLS = EXPECTED_TOOLS.filter(name => name !== 'ashare_factor_snapshot');
+const EXISTING_TOOLS = EXPECTED_TOOLS.slice(0, 10).filter(name => name !== 'ashare_factor_snapshot');
 
 const db = openAshareDb();
 const dates = weekdays('20260105', 150);
@@ -41,12 +43,15 @@ upsertRows(db, 'fina_indicator', ['ts_code', 'end_date', 'ann_date', 'roe', 'net
 
 const call = async args => JSON.parse((await runAshareTool('ashare_factor_snapshot', args)).content[0].text);
 
-test('the research surface is the documented ten read-only tools, and the snapshot is one of them', () => {
+test('the research surface is the documented read-only tools, and the snapshot is one of them', () => {
   assert.deepEqual(ashareToolDefinitions.map(t => t.name), EXPECTED_TOOLS);
   assert.deepEqual([...ASHARE_TOOL_NAMES].sort(), [...EXPECTED_TOOLS].sort());
+  // The nine tools that predate the factor snapshot are still the same names in the same slots.
   assert.equal(EXISTING_TOOLS.length, 9, 'the nine pre-existing tools are untouched');
-  // Adding the snapshot did not reorder, rename or drop any pre-existing tool.
-  assert.deepEqual(EXPECTED_TOOLS.slice(0, 5), ['ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank']);
+  assert.deepEqual(EXPECTED_TOOLS.slice(0, 10), [
+    'ashare_data_status', 'ashare_daily_report', 'ashare_watchlist', 'ashare_stock_analysis', 'ashare_sector_rank',
+    'ashare_factor_snapshot', 'ashare_stock_history', 'ashare_financial_data', 'ashare_market_data', 'ashare_stock_basic',
+  ]);
   for (const tool of ashareToolDefinitions) assert.equal(tool.annotations.readOnlyHint, true, tool.name);
   const snapshot = ashareToolDefinitions.find(t => t.name === 'ashare_factor_snapshot');
   assert.match(snapshot.description, /RESEARCH_ONLY/);
