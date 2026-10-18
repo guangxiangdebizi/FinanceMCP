@@ -28,6 +28,20 @@ const imported = spawnSync(process.execPath, [join(ROOT, 'build', 'ashare', 'cli
 });
 assert.equal(imported.status, 0, imported.stderr);
 
+// 创建一个市场缓存文件：schema 完整但没有 fund_* 表，模拟"生产缓存尚未同步 ETF 数据"
+// 的真实状态。这样公网市场工具能正常返回（V1-P7 需要），而 ETF 相关能力必须显式降级
+// （V1-P4/P5 需要）。
+{
+  const { openAshareDb } = await import('../build/ashare/db.js');
+  const market = openAshareDb(MARKET_DB);
+  for (const t of ['fund_basic', 'fund_daily', 'fund_adj', 'fund_share', 'fund_sync_log']) {
+    market.exec(`DROP TABLE IF EXISTS ${t}`);
+  }
+  // 最小交易日历：公网 ashare_data_status 需要它才不会直接报"日历为空"。
+  market.prepare('INSERT OR REPLACE INTO trade_cal (cal_date, is_open) VALUES (?,?)').run('20261016', 1);
+  market.close();
+}
+
 async function reservePort() {
   const server = http.createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -44,6 +58,8 @@ async function startServer(env) {
       ...process.env,
       TUSHARE_TOKEN: '', QVERIS_API_KEY: '', TWINGLY_API_KEY: '',
       NODE_ENV: 'production', PORT: String(port), MCP_HTTP_HOST: '127.0.0.1',
+      // 公网 profile 必须暴露九个市场工具，V1-P7 才能验证它们没被私有工具破坏。
+      FINANCE_TOOL_PROFILE: 'ashare_daily',
       ASHARE_DATA_DIR: dir, ASHARE_DB_PATH: MARKET_DB, ASHARE_PORTFOLIO_DB_PATH: PORTFOLIO_DB,
       ...env,
     },
@@ -187,4 +203,55 @@ test('V1-P6 an unauthenticated caller cannot reach any V1.0 tool', async () => {
       assert.equal(res.text, '', '401 不得泄露任何内容');
     }
   } finally { await server.stop(); }
+});
+
+// ---------------------------------------------------------------- 7. 共享连接不得被关闭
+
+test('V1-P7 调用私有研究工具后，公网九个市场工具必须仍然可用', async () => {
+  // 生产事故复现：私有工具若关闭了进程级共享的市场连接，随后每个公网市场工具调用
+  // 都会返回 "database is not open"，直到进程重启。这里在**同一个服务进程**里按
+  // 顺序调用，用公网工具是否还能读到数据来判定。
+  const server = await startServer({ ASHARE_PRIVATE_PORTFOLIO_TOKEN: TOKEN });
+  try {
+    // 先确认公网市场工具本身可用（该库没有任何 A 股行情，但工具应正常返回而不是报错）。
+    const before = await server.rpc('/mcp', 'tools/call', { name: 'ashare_data_status', arguments: {} });
+    assert.equal(before.status, 200, `公网工具初始不可用：${before.text}`);
+
+    for (const name of V1_TOOLS) {
+      const res = await server.rpc('/private/mcp', 'tools/call', { name, arguments: {} }, AUTH);
+      assert.equal(res.status, 200, `${name}: ${res.text}`);
+    }
+
+    // 关键断言：共享连接若被私有工具关闭，这里会得到 "database is not open"。
+    const after = await server.rpc('/mcp', 'tools/call', { name: 'ashare_data_status', arguments: {} });
+    assert.equal(after.status, 200, `私有工具破坏了公网市场工具：${after.text}`);
+    assert.equal(/database is not open/.test(after.text), false, after.text);
+  } finally { await server.stop(); }
+});
+
+test('V1-P8 私有研究工具在进程内不得关闭共享市场连接（句柄身份不变）', async () => {
+  // V1-P7 只能观察到"没有停机"，而 getAshareDb 的自愈会掩盖"工具关闭了共享连接"
+  // 这个根因。这里在同一个进程内直接调用实现，断言共享句柄身份不变。
+  const { openAshareDb, getAshareDb, closeAshareDb } = await import('../build/ashare/db.js');
+  const { runPortfolioResearchTool } = await import('../build/portfolio/researchTools.js');
+
+  const saved = { ...process.env };
+  process.env.ASHARE_DATA_DIR = dir;
+  process.env.ASHARE_DB_PATH = MARKET_DB;
+  process.env.ASHARE_PORTFOLIO_DB_PATH = PORTFOLIO_DB;
+  process.env.ASHARE_PORTFOLIO_ENABLED = '1';
+  try {
+    openAshareDb(MARKET_DB).close();
+    const before = getAshareDb();
+    for (const name of V1_TOOLS) {
+      assert.doesNotThrow(() => runPortfolioResearchTool(name, {}), name);
+    }
+    const after = getAshareDb();
+    assert.equal(after, before, '私有研究工具关闭了共享市场连接（公网九个市场工具会全部失效）');
+    assert.doesNotThrow(() => after.prepare('SELECT 1').get());
+    closeAshareDb();
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
 });

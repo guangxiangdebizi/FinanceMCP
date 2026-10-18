@@ -294,17 +294,29 @@ export function isResearchDb(db: DatabaseSync): boolean {
  * Process-wide connection used by the MCP tools. It is always read-only: the
  * schema is created and migrated by the CLI (the container runs `migrate`
  * before starting the server), never by a tool call.
+ *
+ * 共享连接一旦被误关（例如某个工具在 finally 里 close 了它），后续每个调用都会报
+ * "database is not open"，公网九个市场工具全部失效直到重启。这里每次取用前做一次
+ * 极廉价的存活检查，失效就重开，避免一次误用演变成整段停机。
  */
 export function getAshareDb(): DatabaseSync {
-  if (!shared) {
-    const db = new DatabaseSync(ashareDbPath(), { readOnly: true });
-    db.exec('PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;');
-    if (!schemaCurrent(db)) {
-      db.close();
-      throw new Error('A股缓存结构版本过旧，请先运行 `finance-ashare migrate`');
+  if (shared) {
+    try {
+      shared.prepare('SELECT 1').get();
+      return shared;
+    } catch {
+      // 连接已失效（被关闭或底层句柄失效）：丢弃并重开。
+      try { shared.close(); } catch { /* 已经不可用 */ }
+      shared = undefined;
     }
-    shared = db;
   }
+  const db = new DatabaseSync(ashareDbPath(), { readOnly: true });
+  db.exec('PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;');
+  if (!schemaCurrent(db)) {
+    db.close();
+    throw new Error('A股缓存结构版本过旧，请先运行 `finance-ashare migrate`');
+  }
+  shared = db;
   return shared;
 }
 

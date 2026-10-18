@@ -32,7 +32,11 @@ function readDb(): DatabaseSync {
   return openPortfolioDb(path, { writable: false });
 }
 
-/** 只读市场缓存；缺失时返回 null，由调用方降级。 */
+/** 只读市场缓存；缺失时返回 null，由调用方降级。
+ *
+ * 注意：这是**进程级共享**连接（`getAshareDb()`）。调用方**不得**关闭它——关闭会让
+ * 公网 /mcp 的九个市场工具全部报 "database is not open"，直到进程重启。
+ */
 function readOnlyMarket(): DatabaseSync | null {
   try {
     if (!existsSync(ashareDbPath())) return null;
@@ -94,7 +98,7 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
           categories,
         }));
       } finally {
-        market?.close();
+        // 只关闭账户库；市场缓存是共享连接，关闭会让公网市场工具全部失效。
         db.close();
       }
     }
@@ -120,7 +124,7 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
         }
         return json(screenEtfCandidates(market, { asOf, categories, limit }));
       } finally {
-        market?.close();
+        // 共享连接不关闭（见 readOnlyMarket 注释）。
       }
     }
 
@@ -133,7 +137,7 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
           end: ymd(args.end_date, 'end_date'),
         }));
       } finally {
-        market?.close();
+        // 共享连接不关闭（见 readOnlyMarket 注释）。
       }
     }
 
