@@ -14,7 +14,7 @@ import {
   EVALUATION_VERSION, correlation, distribution, evaluateEvents, type EvaluationEvent,
 } from './evaluation.js';
 import { INDICATOR_VERSION } from './indicators.js';
-import { checkQuality, shanghaiToday, tradeDaysBetween, type QualityReport } from './ingest.js';
+import { checkQuality, previousTradeDay, shanghaiToday, tradeDaysBetween, type QualityReport } from './ingest.js';
 import { SIGNAL_VERSION } from './signals.js';
 import { WATCHLIST_RULES, WATCHLIST_VERSION, updateWatchlist } from './watchlist.js';
 
@@ -28,14 +28,33 @@ import { WATCHLIST_RULES, WATCHLIST_VERSION, updateWatchlist } from './watchlist
  * research-only pool advanced day by day from its own stored state, so it can
  * be observed from the first snapshot onward without pretending to be the
  * formal list.
+ *
+ * Chain rules (fwd-snapshot-1.1.0):
+ * - `pool_state` holds the chain of ORIGINAL snapshots only (plus an optional
+ *   one-time research seed); a REVISED snapshot never writes or overwrites it.
+ * - A new snapshot inherits the state of the immediately preceding trade day.
+ *   When that state is absent the command returns CHAIN_GAP and writes nothing
+ *   instead of silently continuing from an older date.
+ * - Each snapshot records the ORIGINAL snapshot id it actually inherited.
+ * - `observation_type` (PROSPECTIVE / BACKFILLED) is an independent attribute
+ *   of the observation time, stored beside status (ORIGINAL / REVISED).
  */
-export const SNAPSHOT_PROTOCOL_VERSION = 'fwd-snapshot-1.0.0';
+export const SNAPSHOT_PROTOCOL_VERSION = 'fwd-snapshot-1.1.0';
 export const DEFAULT_HORIZON = 10;
 export const SNAPSHOT_COSTS = { buy_fee_bps: 3, sell_fee_bps: 8, slippage_bps: 5, max_exit_delay: 5 };
 export const SNAPSHOT_POOL_SOURCES = {
   v1: 'formal_live_watchlist',
   v2: 'research_v2_sequential',
 } as const;
+
+/** First trade date that counts as a true prospective observation (2026-10-19). */
+export const PROSPECTIVE_START = '20261019';
+/** Allowed delay from the live report's generated_at to the snapshot's created_at. */
+export const PROSPECTIVE_WINDOW_HOURS = 24;
+export const OBSERVATION_TYPES = { prospective: 'PROSPECTIVE', backfilled: 'BACKFILLED' } as const;
+export type ObservationType = typeof OBSERVATION_TYPES[keyof typeof OBSERVATION_TYPES];
+/** Where a pool_state row set came from: an ORIGINAL snapshot or the one-time research seed. */
+export const POOL_STATE_SOURCES = { snapshot: 'original_snapshot', seed: 'seed' } as const;
 
 const SNAPSHOT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS snapshot (
@@ -45,7 +64,12 @@ CREATE TABLE IF NOT EXISTS snapshot (
   revises TEXT,
   created_at TEXT NOT NULL,
   content_digest TEXT NOT NULL,
-  content TEXT NOT NULL
+  content TEXT NOT NULL,
+  observation_type TEXT,
+  observation_reason TEXT,
+  report_generated_at TEXT,
+  prospective_start TEXT,
+  window_hours REAL
 );
 CREATE INDEX IF NOT EXISTS snapshot_date ON snapshot(trade_date);
 CREATE TABLE IF NOT EXISTS snapshot_member (
@@ -64,12 +88,28 @@ CREATE TABLE IF NOT EXISTS snapshot_evaluation (
   status TEXT NOT NULL, created_at TEXT NOT NULL, content TEXT NOT NULL,
   PRIMARY KEY (snapshot_id, version, as_of, horizon)
 ) WITHOUT ROWID;
--- Latest persisted V2 pool per trade date; the previous pool for a new
--- snapshot is the latest row set strictly before its date.
+-- The V2 state chain. Only ORIGINAL snapshots and the one-time research seed
+-- write here; REVISED snapshots never do. previous_snapshot_id names the
+-- ORIGINAL snapshot whose state was inherited (null for a chain start/seed).
 CREATE TABLE IF NOT EXISTS pool_state (
   version TEXT NOT NULL, trade_date TEXT NOT NULL, ts_code TEXT NOT NULL, entered_on TEXT NOT NULL,
+  score REAL, rank INTEGER, industry TEXT, status TEXT,
+  previous_snapshot_id TEXT, state_source TEXT, source_id TEXT, seed_id TEXT,
   PRIMARY KEY (version, trade_date, ts_code)
 ) WITHOUT ROWID;
+-- One-time common starting state for the V1/V2 comparison, taken from the last
+-- formal V1 watchlist before the prospective window opens.
+CREATE TABLE IF NOT EXISTS pool_seed (
+  seed_id TEXT PRIMARY KEY,
+  version TEXT NOT NULL,
+  trade_date TEXT NOT NULL,
+  source_report_id TEXT NOT NULL,
+  source_report_generated_at TEXT,
+  members_digest TEXT NOT NULL,
+  member_count INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  content TEXT NOT NULL
+);
 `;
 
 const LIVE_PRAGMAS = 'PRAGMA busy_timeout = 15000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -65536; PRAGMA mmap_size = 2147483648;';
@@ -137,17 +177,73 @@ export function assertSeparateFromLive(researchPath: string, livePath: string = 
   return research;
 }
 
+const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+const canonical = (value: unknown) => JSON.stringify(value);
+
+function ensureColumns(db: DatabaseSync, table: string, columns: Record<string, string>): void {
+  const have = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(r => r.name as string));
+  for (const [name, type] of Object.entries(columns)) {
+    if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  }
+}
+
+/**
+ * Add the columns introduced by fwd-snapshot-1.1.0 to a database created by an
+ * earlier build, and classify rows written before the column existed from the
+ * facts they already stored. Existing snapshot ids and content are untouched.
+ */
+function migrateSnapshotDb(db: DatabaseSync): void {
+  ensureColumns(db, 'snapshot', {
+    observation_type: 'TEXT', observation_reason: 'TEXT', report_generated_at: 'TEXT',
+    prospective_start: 'TEXT', window_hours: 'REAL',
+  });
+  ensureColumns(db, 'pool_state', {
+    score: 'REAL', rank: 'INTEGER', industry: 'TEXT', status: 'TEXT',
+    previous_snapshot_id: 'TEXT', state_source: 'TEXT', source_id: 'TEXT', seed_id: 'TEXT',
+  });
+  const pending = db.prepare('SELECT snapshot_id, trade_date, created_at, content FROM snapshot WHERE observation_type IS NULL').all() as any[];
+  if (!pending.length) return;
+  const update = db.prepare(`UPDATE snapshot SET observation_type = ?, observation_reason = ?, report_generated_at = ?,
+    prospective_start = ?, window_hours = ? WHERE snapshot_id = ?`);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const row of pending) {
+      let content: any = {};
+      try { content = JSON.parse(row.content); } catch { content = {}; }
+      const observation = classifyObservation({
+        tradeDate: row.trade_date,
+        dataCutoff: content.data_cutoff ?? null,
+        reportGeneratedAt: content.report?.generated_at ?? null,
+        createdAt: row.created_at,
+      });
+      update.run(observation.type, observation.reason, observation.report_generated_at,
+        observation.prospective_start, observation.window_hours, row.snapshot_id);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  // Older builds only wrote pool_state from the original snapshot flow; label
+  // those rows so the chain lookup can treat them as original-derived.
+  db.prepare(`UPDATE pool_state SET state_source = '${POOL_STATE_SOURCES.snapshot}'
+    WHERE state_source IS NULL AND version = ?`).run(RESEARCH_SCORE_VERSION);
+  db.prepare(`UPDATE pool_state SET source_id = (
+      SELECT s.snapshot_id FROM snapshot s WHERE s.trade_date = pool_state.trade_date AND s.status = 'ORIGINAL'
+      ORDER BY s.created_at, s.snapshot_id LIMIT 1)
+    WHERE source_id IS NULL AND state_source = ?`).run(POOL_STATE_SOURCES.snapshot);
+}
+
 function openSnapshotDb(path: string, livePath: string = ashareDbPath()): DatabaseSync {
+  // Path identity is checked before anything is created or opened writable.
   const resolved = assertSeparateFromLive(path, livePath);
   mkdirSync(dirname(resolved), { recursive: true });
   const db = new DatabaseSync(resolved);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 15000;');
   db.exec(SNAPSHOT_SCHEMA);
+  migrateSnapshotDb(db);
   return db;
 }
-
-const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
-const canonical = (value: unknown) => JSON.stringify(value);
 
 let cachedBuild: string | undefined;
 /** SHA256 over every built ashare module, so a snapshot names the code that produced it. */
@@ -206,10 +302,232 @@ function plannedExitDate(db: DatabaseSync, date: string, horizon: number): strin
   return i >= 0 ? days[i + horizon] ?? null : null;
 }
 
-interface PoolMember {
+// ------------------------------------------------------------- observation time
+
+export interface ObservationFacts {
+  tradeDate: string;
+  dataCutoff: string | null;
+  reportGeneratedAt: string | null;
+  createdAt: string;
+}
+
+export interface Observation {
+  type: ObservationType;
+  reason: string | null;
+  report_generated_at: string | null;
+  prospective_start: string;
+  window_hours: number;
+}
+
+/**
+ * Deterministic classification of the observation time from stored facts only:
+ * - the trade date must be on/after PROSPECTIVE_START;
+ * - the snapshot must have been created within PROSPECTIVE_WINDOW_HOURS after
+ *   the live report's generated_at (parsed with its +08:00 offset);
+ * - the data cutoff must equal the trade date (no later data was used).
+ * Everything else is BACKFILLED with a machine-readable reason.
+ */
+export function classifyObservation(facts: ObservationFacts): Observation {
+  const base = {
+    report_generated_at: facts.reportGeneratedAt ?? null,
+    prospective_start: PROSPECTIVE_START,
+    window_hours: PROSPECTIVE_WINDOW_HOURS,
+  };
+  const backfilled = (reason: string): Observation => ({ ...base, type: OBSERVATION_TYPES.backfilled, reason });
+  if (facts.tradeDate < PROSPECTIVE_START) return backfilled('before_prospective_start');
+  const generated = Date.parse(facts.reportGeneratedAt ?? '');
+  const created = Date.parse(facts.createdAt ?? '');
+  if (!Number.isFinite(generated)) return backfilled('report_time_unknown');
+  if (!Number.isFinite(created)) return backfilled('snapshot_time_unknown');
+  if (created < generated) return backfilled('report_generated_after_snapshot');
+  if (created - generated > PROSPECTIVE_WINDOW_HOURS * 3600_000) return backfilled('created_after_window');
+  if (facts.dataCutoff !== facts.tradeDate) return backfilled('data_cutoff_after_trade_date');
+  return { ...base, type: OBSERVATION_TYPES.prospective, reason: null };
+}
+
+// ------------------------------------------------------------------ state chain
+
+export interface PoolMember {
   ts_code: string; name?: string | null; score: number; rank: number; industry: string; status: string; reason: string;
   entered_on: string; signals: string[];
 }
+
+export interface ChainSeed {
+  seed_id: string; seed_date: string; source_report_id: string; members_digest: string; member_count: number;
+}
+
+export interface ChainPredecessor {
+  /** Trade date of the inherited state (null for a chain start). */
+  previous_date: string | null;
+  /** ORIGINAL snapshot id whose state was inherited (null for a seed or a chain start). */
+  previous_snapshot_id: string | null;
+  previous_state_source: 'snapshot' | 'seed' | 'chain_start';
+  seed: ChainSeed | null;
+  rows: any[];
+}
+
+export interface ChainGap {
+  status: 'CHAIN_GAP';
+  date: string;
+  expected_previous_trade_date: string | null;
+  found_state_date: string | null;
+  missing: string;
+  note: string;
+}
+
+export type ChainResolution = { ok: true; predecessor: ChainPredecessor } | { ok: false; gap: ChainGap };
+
+const CHAIN_GAP_NOTE = '按顺序补齐缺失交易日后再继续';
+
+function previousStateRows(snap: DatabaseSync, date: string): { date: string | null; rows: any[] } {
+  const prevDate = (snap.prepare('SELECT MAX(trade_date) d FROM pool_state WHERE version = ? AND trade_date < ?')
+    .get(RESEARCH_SCORE_VERSION, date) as any)?.d as string | null;
+  if (!prevDate) return { date: null, rows: [] };
+  const rows = snap.prepare(`SELECT trade_date, ts_code, entered_on, score, rank, industry, status,
+      previous_snapshot_id, state_source, source_id, seed_id
+    FROM pool_state WHERE version = ? AND trade_date = ? ORDER BY ts_code`).all(RESEARCH_SCORE_VERSION, prevDate) as any[];
+  return { date: prevDate, rows };
+}
+
+function seedBefore(snap: DatabaseSync, date: string): ChainSeed | null {
+  const row = snap.prepare(`SELECT seed_id, trade_date, source_report_id, members_digest, member_count
+    FROM pool_seed WHERE version = ? AND trade_date < ? ORDER BY trade_date DESC LIMIT 1`)
+    .get(RESEARCH_SCORE_VERSION, date) as any;
+  return row ? {
+    seed_id: row.seed_id, seed_date: row.trade_date, source_report_id: row.source_report_id,
+    members_digest: row.members_digest, member_count: row.member_count,
+  } : null;
+}
+
+/**
+ * Resolve the state a new ORIGINAL snapshot of `date` inherits. The predecessor
+ * must be the immediately preceding trade day's ORIGINAL snapshot state (or the
+ * seed on that day); otherwise the chain is broken and nothing may be written.
+ */
+function resolveChain(live: DatabaseSync, snap: DatabaseSync, date: string): ChainResolution {
+  const prev = previousStateRows(snap, date);
+  const expected = previousTradeDay(live, date) ?? null;
+  const gap = (missing: string, found: string | null, note = CHAIN_GAP_NOTE): ChainResolution => ({
+    ok: false,
+    gap: { status: 'CHAIN_GAP', date, expected_previous_trade_date: expected, found_state_date: found, missing, note },
+  });
+
+  if (!prev.date) {
+    const seedOnDate = snap.prepare('SELECT seed_id FROM pool_seed WHERE version = ? AND trade_date = ?')
+      .get(RESEARCH_SCORE_VERSION, date) as any;
+    if (seedOnDate) {
+      return gap('seed_date_conflict', null, '该日期已是共同起点种子，不能在种子当日再写入原始快照；请从下一交易日起记录');
+    }
+    if (seedBefore(snap, date)) return gap('seed_state_missing', null, '种子状态缺失：pool_state 中没有种子行，拒绝以空池初始化');
+    const earlier = snap.prepare("SELECT snapshot_id, trade_date FROM snapshot WHERE trade_date < ? AND status = 'ORIGINAL' ORDER BY trade_date DESC LIMIT 1").get(date) as any;
+    if (earlier) return gap('pool_state_missing', earlier.trade_date, '存在更早的原始快照但没有对应的池状态，拒绝以空池初始化');
+    // A chain start may only be appended at the end of the recorded chain.
+    const later = snap.prepare("SELECT snapshot_id, trade_date FROM snapshot WHERE trade_date > ? AND status = 'ORIGINAL' ORDER BY trade_date LIMIT 1").get(date) as any;
+    if (later) {
+      return gap('preceding_original_snapshot', null, `该日期之后已有原始快照（${later.trade_date}），不能在此插入新的链首；请按交易日顺序补齐`);
+    }
+    return {
+      ok: true,
+      predecessor: { previous_date: null, previous_snapshot_id: null, previous_state_source: 'chain_start', seed: null, rows: [] },
+    };
+  }
+
+  if (!expected) return gap('trade_calendar_missing', prev.date, '交易日历中找不到该日期之前的交易日');
+  if (prev.date !== expected) return gap('original_snapshot', prev.date);
+
+  const source = prev.rows[0]?.state_source ?? POOL_STATE_SOURCES.snapshot;
+  if (source === POOL_STATE_SOURCES.seed) {
+    const seedId = prev.rows[0]?.seed_id ?? null;
+    const row = seedId ? snap.prepare('SELECT * FROM pool_seed WHERE seed_id = ?').get(seedId) as any : undefined;
+    if (!row) return gap('seed_state_missing', prev.date);
+    return {
+      ok: true,
+      predecessor: {
+        previous_date: prev.date, previous_snapshot_id: null, previous_state_source: 'seed',
+        seed: {
+          seed_id: row.seed_id, seed_date: row.trade_date, source_report_id: row.source_report_id,
+          members_digest: row.members_digest, member_count: row.member_count,
+        },
+        rows: prev.rows,
+      },
+    };
+  }
+
+  const original = snap.prepare("SELECT snapshot_id FROM snapshot WHERE trade_date = ? AND status = 'ORIGINAL' ORDER BY created_at, snapshot_id LIMIT 1")
+    .get(prev.date) as any;
+  if (!original) return gap('original_snapshot', prev.date);
+  const recorded = prev.rows[0]?.source_id ?? null;
+  if (recorded && recorded !== original.snapshot_id) {
+    return gap('pool_state_source_mismatch', prev.date, '池状态记录来源与当日原始快照不一致');
+  }
+  return {
+    ok: true,
+    predecessor: {
+      previous_date: prev.date, previous_snapshot_id: original.snapshot_id,
+      previous_state_source: 'snapshot', seed: seedBefore(snap, date), rows: prev.rows,
+    },
+  };
+}
+
+/**
+ * The predecessor a REVISED snapshot (or an EXISTS recomputation) must use: the
+ * one the ORIGINAL row recorded. A revision only appends evidence, so it never
+ * changes the chain and must not be blocked by later dates.
+ */
+function recordedPredecessor(snap: DatabaseSync, originalRow: any, date: string): ChainResolution {
+  let content: any = {};
+  try { content = JSON.parse(originalRow.content); } catch { content = {}; }
+  const pool = content.v2_pool ?? {};
+  const gap = (missing: string, found: string | null, note = CHAIN_GAP_NOTE): ChainResolution => ({
+    ok: false,
+    gap: { status: 'CHAIN_GAP', date, expected_previous_trade_date: null, found_state_date: found, missing, note },
+  });
+  const source = pool.previous_state_source
+    ?? (pool.previous_date == null ? 'chain_start' : POOL_STATE_SOURCES.snapshot);
+  if (source === 'chain_start') {
+    return {
+      ok: true,
+      predecessor: { previous_date: null, previous_snapshot_id: null, previous_state_source: 'chain_start', seed: null, rows: [] },
+    };
+  }
+  if (source === 'seed') {
+    const seedId = pool.seed?.seed_id ?? null;
+    const seedRow = seedId ? snap.prepare('SELECT * FROM pool_seed WHERE seed_id = ?').get(seedId) as any : undefined;
+    if (!seedRow) return gap('seed_state_missing', pool.previous_date ?? null);
+    const prev = previousStateRows(snap, date);
+    if (prev.date !== seedRow.trade_date) return gap('seed_state_missing', prev.date);
+    return {
+      ok: true,
+      predecessor: {
+        previous_date: prev.date, previous_snapshot_id: null, previous_state_source: 'seed',
+        seed: {
+          seed_id: seedRow.seed_id, seed_date: seedRow.trade_date, source_report_id: seedRow.source_report_id,
+          members_digest: seedRow.members_digest, member_count: seedRow.member_count,
+        },
+        rows: prev.rows,
+      },
+    };
+  }
+  const prev = previousStateRows(snap, date);
+  if (!prev.date || (pool.previous_date != null && prev.date !== pool.previous_date)) {
+    return gap('predecessor_state_missing', prev.date);
+  }
+  const original = snap.prepare("SELECT snapshot_id FROM snapshot WHERE trade_date = ? AND status = 'ORIGINAL' ORDER BY created_at, snapshot_id LIMIT 1")
+    .get(prev.date) as any;
+  if (!original) return gap('original_snapshot', prev.date);
+  if (pool.previous_snapshot_id && pool.previous_snapshot_id !== original.snapshot_id) {
+    return gap('predecessor_state_missing', prev.date, '记录的上一快照 ID 与当日原始快照不一致');
+  }
+  return {
+    ok: true,
+    predecessor: {
+      previous_date: prev.date, previous_snapshot_id: original.snapshot_id,
+      previous_state_source: 'snapshot', seed: seedBefore(snap, date), rows: prev.rows,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------- compute
 
 interface ComputedSnapshot {
   snapshot_id: string;
@@ -253,12 +571,6 @@ function v1Parity(live: DatabaseSync, date: string, scan: ReturnType<typeof scan
   };
 }
 
-function previousV2Pool(snap: DatabaseSync, date: string) {
-  return snap.prepare(`SELECT trade_date, ts_code, entered_on FROM pool_state
-    WHERE version = ? AND trade_date = (SELECT MAX(trade_date) FROM pool_state WHERE version = ? AND trade_date < ?)
-    ORDER BY ts_code`).all(RESEARCH_SCORE_VERSION, RESEARCH_SCORE_VERSION, date) as any[];
-}
-
 /**
  * In-memory state database for the V2 pool: the same watchlist schema and the
  * live trade calendar (needed by tradeDaysHeld), seeded with the previous V2 pool.
@@ -274,12 +586,13 @@ function buildV2StateDb(live: DatabaseSync, previous: any[]): DatabaseSync {
   if (previous.length) {
     const pdate = previous[0].trade_date as string;
     const w = state.prepare('INSERT INTO watchlist (trade_date, ts_code, score, rank, industry, status, reason, entered_on) VALUES (?,?,?,?,?,?,?,?)');
-    for (const p of previous) w.run(pdate, p.ts_code, 0, 0, null, 'kept', '', p.entered_on);
+    for (const p of previous) w.run(pdate, p.ts_code, p.score ?? 0, p.rank ?? 0, p.industry ?? null, 'kept', '', p.entered_on);
   }
   return state;
 }
 
-function computeSnapshot(live: DatabaseSync, snap: DatabaseSync, date: string, horizon: number, report: any, quality: QualityReport): ComputedSnapshot {
+function computeSnapshot(live: DatabaseSync, date: string, horizon: number, report: any, quality: QualityReport,
+  predecessor: ChainPredecessor): ComputedSnapshot {
   const cutoff = dataCutoff(live);
   const scan = scanMarket(live, date);
   const sourceQuality = sourceQualityForDate(live, date);
@@ -328,7 +641,7 @@ function computeSnapshot(live: DatabaseSync, snap: DatabaseSync, date: string, h
     return { ...m, name: row?.name ?? null, signals: signalsOf(m.ts_code) };
   });
 
-  const previous = previousV2Pool(snap, date);
+  const previous = predecessor.rows;
   const state = buildV2StateDb(live, previous);
   let v2Pool: PoolMember[];
   try {
@@ -421,10 +734,24 @@ function computeSnapshot(live: DatabaseSync, snap: DatabaseSync, date: string, h
     v2_pool: {
       source: SNAPSHOT_POOL_SOURCES.v2,
       count: v2Pool.length,
-      previous_date: previous.length ? previous[0].trade_date : null,
+      previous_date: predecessor.previous_date,
+      previous_snapshot_id: predecessor.previous_snapshot_id,
+      previous_state_source: predecessor.previous_state_source,
+      seed: predecessor.previous_snapshot_id === null ? (predecessor.seed
+        ? { ...predecessor.seed, source: 'seed' }
+        : {
+          source: 'chain_start', trade_date: null,
+          note: '链首快照：此前没有原始快照或种子状态，V2 池按 wl-1.0.0 初始建池规则初始化。',
+        }) : null,
       members: v2Pool,
       note: '研究用 V2 股票池，按 wl-1.0.0 规则从上一份 V2 研究池逐日推进，与正式 V1 股票池相互独立；不是正式发布列表。',
     },
+    comparison_baseline: predecessor.seed ? {
+      seed_date: predecessor.seed.seed_date,
+      seed_report_id: predecessor.seed.source_report_id,
+      seed_members_digest: predecessor.seed.members_digest,
+      note: 'V1 与 V2 的共同初始状态；此后两版成员差异只能归因于评分规则与由评分驱动的状态演化。',
+    } : null,
     pool_diff: poolDiff,
     v1_v2: {
       changed_scores: diffs.length,
@@ -445,6 +772,7 @@ function computeSnapshot(live: DatabaseSync, snap: DatabaseSync, date: string, h
       '行业、名称与 ST 标记为当前 stock_basic 口径，不是当日历史时点。',
       'V2 股票池是独立研究池，成员与正式 V1 池不同不构成正式建议。',
       '快照只记录当日及之前缓存可见的数据；后续数据修订不会覆盖原始快照，只能另存 REVISED 记录。',
+      'pool_state 只记录原始快照与共同起点种子；修订记录不进入状态链。',
     ],
   };
 
@@ -457,6 +785,8 @@ function computeSnapshot(live: DatabaseSync, snap: DatabaseSync, date: string, h
     v2Pool,
   };
 }
+
+// ------------------------------------------------------------------- snapshot
 
 export interface ResearchSnapshotOptions {
   date: string;
@@ -474,9 +804,23 @@ export interface ResearchEvaluateOptions {
   liveDbPath?: string;
 }
 
+interface StoredObservation {
+  type: string | null; reason: string | null; report_generated_at: string | null;
+  prospective_start: string | null; window_hours: number | null;
+}
+
+const observationOf = (row: any): StoredObservation => ({
+  type: row?.observation_type ?? null,
+  reason: row?.observation_reason ?? null,
+  report_generated_at: row?.report_generated_at ?? null,
+  prospective_start: row?.prospective_start ?? null,
+  window_hours: row?.window_hours ?? null,
+});
+
 /**
  * `research-snapshot --date YYYYMMDD [--db PATH] [--revise] [--horizon 10]`.
  * Writes only to the research snapshot database; returns a JSON summary.
+ * A REVISED snapshot appends evidence but never touches the pool_state chain.
  */
 export function runResearchSnapshot(options: ResearchSnapshotOptions) {
   const date = validateDate(options.date);
@@ -506,30 +850,120 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
     if (!report) return { status: 'PENDING', date, reason: 'no_live_report', data_cutoff: cutoff, quality_status: quality.status };
 
     snap = openSnapshotDb(dbPath, livePath);
-    const existing = snap.prepare('SELECT snapshot_id, status, revises, created_at, content_digest, content FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
+    const existing = snap.prepare('SELECT * FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
+    const createdAt = new Date().toISOString();
+    const originalRow = existing.find(r => r.status === 'ORIGINAL') ?? existing[0] ?? null;
 
-    if (existing.length && !options.revise) {
-      const computed = computeSnapshot(live, snap, date, horizon, report, quality);
+    if (existing.length) {
+      // Recomputing a stored date (EXISTS or --revise) reuses the predecessor the
+      // ORIGINAL row recorded, so a revision can never pick up a later chain.
+      const recorded = recordedPredecessor(snap, originalRow, date);
+      if (!options.revise) {
+        if (!recorded.ok) {
+          return {
+            status: 'EXISTS',
+            snapshot_id: existing[0].snapshot_id,
+            trade_date: date,
+            stored_status: existing[0].status,
+            revisions: existing.filter(r => r.status === 'REVISED').length,
+            content_digest: existing[0].content_digest,
+            recomputed_snapshot_id: null,
+            content_matches_stored: null,
+            observation: observationOf(existing[0]),
+            chain_gap: recorded.gap,
+            db: dbPath,
+          };
+        }
+        const recomputed = computeSnapshot(live, date, horizon, report, quality, recorded.predecessor);
+        return {
+          status: 'EXISTS',
+          snapshot_id: existing[0].snapshot_id,
+          trade_date: date,
+          stored_status: existing[0].status,
+          revisions: existing.filter(r => r.status === 'REVISED').length,
+          content_digest: existing[0].content_digest,
+          recomputed_snapshot_id: recomputed.snapshot_id,
+          content_matches_stored: recomputed.content_digest === existing[0].content_digest,
+          observation: observationOf(existing[0]),
+          db: dbPath,
+        };
+      }
+      // --revise: append evidence only; the state chain stays untouched.
+      if (!recorded.ok) return { ...recorded.gap, db: dbPath };
+      const predecessor = recorded.predecessor;
+      const computed = computeSnapshot(live, date, horizon, report, quality, predecessor);
+      const revisionSeq = existing.filter(r => r.status === 'REVISED').length + 1;
+      const snapshotId = `${computed.snapshot_id}-R${revisionSeq}`;
+      const status = 'REVISED';
+      const revises = originalRow?.snapshot_id ?? null;
+      // The observation-time attribute belongs to the original observation: a
+      // revision keeps it verbatim and can never be relabelled by re-running.
+      const observation: Observation | StoredObservation = observationOf(originalRow);
+
+      computed.content.snapshot_id = snapshotId;
+      computed.content.status = status;
+      computed.content.revises = revises;
+      const contentDigest = sha256(canonical(computed.content));
+
+      snap.exec('BEGIN IMMEDIATE');
+      try {
+        snap.prepare(`INSERT INTO snapshot (snapshot_id, trade_date, status, revises, created_at, content_digest, content,
+            observation_type, observation_reason, report_generated_at, prospective_start, window_hours)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(snapshotId, date, status, revises, createdAt, contentDigest, canonical(computed.content),
+            observation.type, observation.reason, observation.report_generated_at,
+            observation.prospective_start, observation.window_hours);
+        const insMember = snap.prepare('INSERT INTO snapshot_member (snapshot_id, version, ts_code, score, rank, industry, status, reason, entered_on, signals) VALUES (?,?,?,?,?,?,?,?,?,?)');
+        for (const { version, row } of computed.members) {
+          insMember.run(snapshotId, version, row.ts_code, row.score, row.rank, row.industry, row.status, row.reason, row.entered_on, canonical(row.signals));
+        }
+        const insFactor = snap.prepare('INSERT INTO snapshot_factor (snapshot_id, ts_code, industry, eligible, raw, v1, v2) VALUES (?,?,?,?,?,?,?)');
+        for (const f of computed.factors) {
+          insFactor.run(snapshotId, f.ts_code, f.industry, 1, canonical(f.raw), canonical(f.v1), canonical(f.v2));
+        }
+        snap.exec('COMMIT');
+      } catch (error) {
+        snap.exec('ROLLBACK');
+        throw error;
+      }
       return {
-        status: 'EXISTS',
-        snapshot_id: existing[0].snapshot_id,
-        trade_date: date,
-        stored_status: existing[0].status,
-        revisions: existing.filter(r => r.status === 'REVISED').length,
-        content_digest: existing[0].content_digest,
-        recomputed_snapshot_id: computed.snapshot_id,
-        content_matches_stored: computed.content_digest === existing[0].content_digest,
+        status, snapshot_id: snapshotId, revises, trade_date: date, data_cutoff: cutoff,
+        report_id: report.report_id, report_status: report.status, quality_status: quality.status,
+        created_at: createdAt, content_digest: contentDigest, observation,
+        chain: {
+          previous_date: predecessor.previous_date,
+          previous_snapshot_id: predecessor.previous_snapshot_id,
+          previous_state_source: predecessor.previous_state_source,
+          seed_id: predecessor.seed?.seed_id ?? null,
+          chain_updated: false,
+        },
+        comparison_baseline: computed.content.comparison_baseline,
+        universe: computed.content.universe,
+        v1_pool: { source: SNAPSHOT_POOL_SOURCES.v1, count: computed.content.v1_pool.count },
+        v2_pool: {
+          source: SNAPSHOT_POOL_SOURCES.v2, count: computed.content.v2_pool.count,
+          previous_date: computed.content.v2_pool.previous_date,
+          previous_snapshot_id: computed.content.v2_pool.previous_snapshot_id,
+        },
+        pool_diff: { common: computed.content.pool_diff.common.length, v1_only: computed.content.pool_diff.v1_only.length, v2_only: computed.content.pool_diff.v2_only.length },
+        v1_parity: { ok: true, eligible: computed.content.v1_parity.eligible, stock_score_rows: computed.content.v1_parity.stock_score_rows },
+        changed_scores: computed.content.v1_v2.changed_scores,
         db: dbPath,
       };
     }
 
-    const computed = computeSnapshot(live, snap, date, horizon, report, quality);
-    const original = existing.find(r => r.status === 'ORIGINAL') ?? existing[0];
-    const revisionSeq = existing.filter(r => r.status === 'REVISED').length + 1;
-    const snapshotId = existing.length ? `${computed.snapshot_id}-R${revisionSeq}` : computed.snapshot_id;
-    const status = existing.length ? 'REVISED' : 'ORIGINAL';
-    const revises = existing.length ? (original?.snapshot_id ?? null) : null;
-    const createdAt = new Date().toISOString();
+    const chain = resolveChain(live, snap, date);
+    // A broken chain must never be papered over.
+    if (!chain.ok) return { ...chain.gap, db: dbPath };
+    const predecessor = chain.predecessor;
+    const computed = computeSnapshot(live, date, horizon, report, quality, predecessor);
+    const snapshotId = computed.snapshot_id;
+    const status = 'ORIGINAL';
+    const revises = null;
+    const observation = classifyObservation({
+      tradeDate: date, dataCutoff: cutoff,
+      reportGeneratedAt: report.generated_at ?? null, createdAt,
+    });
 
     computed.content.snapshot_id = snapshotId;
     computed.content.status = status;
@@ -538,8 +972,12 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
 
     snap.exec('BEGIN IMMEDIATE');
     try {
-      snap.prepare('INSERT INTO snapshot (snapshot_id, trade_date, status, revises, created_at, content_digest, content) VALUES (?,?,?,?,?,?,?)')
-        .run(snapshotId, date, status, revises, createdAt, contentDigest, canonical(computed.content));
+      snap.prepare(`INSERT INTO snapshot (snapshot_id, trade_date, status, revises, created_at, content_digest, content,
+          observation_type, observation_reason, report_generated_at, prospective_start, window_hours)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(snapshotId, date, status, revises, createdAt, contentDigest, canonical(computed.content),
+          observation.type, observation.reason, observation.report_generated_at,
+          observation.prospective_start, observation.window_hours);
       const insMember = snap.prepare('INSERT INTO snapshot_member (snapshot_id, version, ts_code, score, rank, industry, status, reason, entered_on, signals) VALUES (?,?,?,?,?,?,?,?,?,?)');
       for (const { version, row } of computed.members) {
         insMember.run(snapshotId, version, row.ts_code, row.score, row.rank, row.industry, row.status, row.reason, row.entered_on, canonical(row.signals));
@@ -548,9 +986,14 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
       for (const f of computed.factors) {
         insFactor.run(snapshotId, f.ts_code, f.industry, 1, canonical(f.raw), canonical(f.v1), canonical(f.v2));
       }
+      // Only ORIGINAL snapshots enter the state chain.
       snap.prepare('DELETE FROM pool_state WHERE version = ? AND trade_date = ?').run(RESEARCH_SCORE_VERSION, date);
-      const insPool = snap.prepare('INSERT INTO pool_state (version, trade_date, ts_code, entered_on) VALUES (?,?,?,?)');
-      for (const m of computed.v2Pool) insPool.run(RESEARCH_SCORE_VERSION, date, m.ts_code, m.entered_on);
+      const insPool = snap.prepare(`INSERT INTO pool_state (version, trade_date, ts_code, entered_on, score, rank, industry, status,
+          previous_snapshot_id, state_source, source_id, seed_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const m of computed.v2Pool) {
+        insPool.run(RESEARCH_SCORE_VERSION, date, m.ts_code, m.entered_on, m.score, m.rank, m.industry, m.status,
+          predecessor.previous_snapshot_id, POOL_STATE_SOURCES.snapshot, snapshotId, null);
+      }
       snap.exec('COMMIT');
     } catch (error) {
       snap.exec('ROLLBACK');
@@ -568,9 +1011,22 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
       quality_status: quality.status,
       created_at: createdAt,
       content_digest: contentDigest,
+      observation,
+      chain: {
+        previous_date: predecessor.previous_date,
+        previous_snapshot_id: predecessor.previous_snapshot_id,
+        previous_state_source: predecessor.previous_state_source,
+        seed_id: predecessor.seed?.seed_id ?? null,
+        chain_updated: true,
+      },
+      comparison_baseline: computed.content.comparison_baseline,
       universe: computed.content.universe,
       v1_pool: { source: SNAPSHOT_POOL_SOURCES.v1, count: computed.content.v1_pool.count },
-      v2_pool: { source: SNAPSHOT_POOL_SOURCES.v2, count: computed.content.v2_pool.count, previous_date: computed.content.v2_pool.previous_date },
+      v2_pool: {
+        source: SNAPSHOT_POOL_SOURCES.v2, count: computed.content.v2_pool.count,
+        previous_date: computed.content.v2_pool.previous_date,
+        previous_snapshot_id: computed.content.v2_pool.previous_snapshot_id,
+      },
       pool_diff: { common: computed.content.pool_diff.common.length, v1_only: computed.content.pool_diff.v1_only.length, v2_only: computed.content.pool_diff.v2_only.length },
       v1_parity: { ok: true, eligible: computed.content.v1_parity.eligible, stock_score_rows: computed.content.v1_parity.stock_score_rows },
       changed_scores: computed.content.v1_v2.changed_scores,
@@ -579,6 +1035,134 @@ export function runResearchSnapshot(options: ResearchSnapshotOptions) {
   } finally {
     snap?.close();
     live.close();
+  }
+}
+
+// ----------------------------------------------------------------------- seed
+
+export interface ResearchSeedOptions {
+  date: string;
+  dbPath?: string;
+  liveDbPath?: string;
+}
+
+export interface SeedMember {
+  ts_code: string; score: number | null; rank: number | null; industry: string | null;
+  status: string | null; reason: string | null; entered_on: string;
+}
+
+/**
+ * `research-seed --date YYYYMMDD [--db PATH]`: write the one-time common starting
+ * state for the V1/V2 comparison from the last formal V1 watchlist. V1 stays the
+ * formal published list; V2 advances in the research database from this state,
+ * keeping every member's entry date. Idempotent for identical content; refuses
+ * once the research chain has started.
+ */
+export function runResearchSeed(options: ResearchSeedOptions) {
+  const date = validateDate(options.date);
+  const livePath = options.liveDbPath ?? ashareDbPath();
+  const dbPath = options.dbPath ?? researchSnapshotDbPath();
+  assertSeparateFromLive(dbPath, livePath);
+  const live = openLiveReadOnly(livePath);
+  let snap: DatabaseSync | undefined;
+  try {
+    const cal = live.prepare('SELECT is_open FROM trade_cal WHERE cal_date = ?').get(date) as any;
+    if (!cal || cal.is_open !== 1) return { status: 'REFUSED', reason: 'not_trade_day', trade_date: date, db: dbPath };
+    const members = live.prepare(`SELECT ts_code, score, rank, industry, status, reason, entered_on
+      FROM watchlist WHERE trade_date = ? ORDER BY rank, ts_code`).all(date) as unknown as SeedMember[];
+    if (!members.length) return { status: 'REFUSED', reason: 'no_formal_watchlist', trade_date: date, db: dbPath };
+    const report = liveReport(live, date);
+    if (!report) return { status: 'REFUSED', reason: 'no_live_report', trade_date: date, db: dbPath };
+
+    const membersDigest = sha256(canonical(members));
+    const seedId = `SEED-${date}-${membersDigest.slice(0, 16)}`;
+    snap = openSnapshotDb(dbPath, livePath);
+    const existingSeed = snap.prepare('SELECT * FROM pool_seed WHERE version = ?').all(RESEARCH_SCORE_VERSION) as any[];
+    const sameDate = existingSeed.find(r => r.trade_date === date);
+    if (sameDate) {
+      if (sameDate.members_digest !== membersDigest) {
+        throw new Error(`种子内容冲突：${date} 已存在成员摘要 ${sameDate.members_digest}，当前正式股票池摘要为 ${membersDigest}；种子只能设置一次`);
+      }
+      return {
+        status: 'EXISTS', seed_id: sameDate.seed_id, trade_date: date, version: RESEARCH_SCORE_VERSION,
+        source_report_id: sameDate.source_report_id, source_report_generated_at: sameDate.source_report_generated_at,
+        member_count: sameDate.member_count, members_digest: sameDate.members_digest,
+        created_at: sameDate.created_at, db: dbPath,
+      };
+    }
+    if (existingSeed.length) {
+      return {
+        status: 'REFUSED', reason: 'seed_already_exists', trade_date: date,
+        existing_seed: existingSeed.map(r => ({ seed_id: r.seed_id, trade_date: r.trade_date })), db: dbPath,
+      };
+    }
+    const later = snap.prepare("SELECT snapshot_id, trade_date FROM snapshot WHERE status = 'ORIGINAL' AND trade_date > ? ORDER BY trade_date")
+      .all(date) as any[];
+    if (later.length) {
+      return { status: 'REFUSED', reason: 'later_original_snapshot_exists', trade_date: date, later_snapshots: later, db: dbPath };
+    }
+    const sameDay = snap.prepare("SELECT snapshot_id FROM snapshot WHERE status = 'ORIGINAL' AND trade_date = ?").get(date) as any;
+    if (sameDay) {
+      return {
+        status: 'REFUSED', reason: 'original_snapshot_on_seed_date', trade_date: date,
+        snapshot_id: sameDay.snapshot_id, note: '该日期已有原始快照及其池状态；种子只能写入没有快照链的日期', db: dbPath,
+      };
+    }
+
+    const createdAt = new Date().toISOString();
+    const content = {
+      seed_id: seedId, version: RESEARCH_SCORE_VERSION, trade_date: date,
+      source_report_id: report.report_id, source_report_generated_at: report.generated_at,
+      members_digest: membersDigest, member_count: members.length, created_at: createdAt, members,
+    };
+    snap.exec('BEGIN IMMEDIATE');
+    try {
+      snap.prepare(`INSERT INTO pool_seed (seed_id, version, trade_date, source_report_id, source_report_generated_at,
+          members_digest, member_count, created_at, content) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(seedId, RESEARCH_SCORE_VERSION, date, report.report_id, report.generated_at,
+          membersDigest, members.length, createdAt, canonical(content));
+      snap.prepare('DELETE FROM pool_state WHERE version = ? AND trade_date = ?').run(RESEARCH_SCORE_VERSION, date);
+      const insPool = snap.prepare(`INSERT INTO pool_state (version, trade_date, ts_code, entered_on, score, rank, industry, status,
+          previous_snapshot_id, state_source, source_id, seed_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const m of members) {
+        insPool.run(RESEARCH_SCORE_VERSION, date, m.ts_code, m.entered_on, m.score, m.rank, m.industry, m.status,
+          null, POOL_STATE_SOURCES.seed, seedId, seedId);
+      }
+      snap.exec('COMMIT');
+    } catch (error) {
+      snap.exec('ROLLBACK');
+      throw error;
+    }
+    return {
+      status: 'SEEDED', seed_id: seedId, trade_date: date, version: RESEARCH_SCORE_VERSION,
+      source_report_id: report.report_id, source_report_generated_at: report.generated_at,
+      member_count: members.length, members_digest: membersDigest, created_at: createdAt, db: dbPath,
+    };
+  } finally {
+    snap?.close();
+    live.close();
+  }
+}
+
+// ------------------------------------------------------------------ evaluate
+
+/**
+ * Only true prospective observations, so later statistics can exclude
+ * backfilled history. The observation attribute is stored at write time and is
+ * never updated by any command.
+ */
+export function prospectiveSnapshots(dbPath = researchSnapshotDbPath()) {
+  if (!existsSync(dbPath)) return [];
+  // Opening through openSnapshotDb also applies the fwd-snapshot-1.1.0 column
+  // migration to databases written by the previous build; the path guard runs first.
+  const snap = openSnapshotDb(dbPath);
+  try {
+    return snap.prepare(`SELECT snapshot_id, trade_date, status, revises, created_at,
+        observation_type, observation_reason, report_generated_at, prospective_start, window_hours
+      FROM snapshot WHERE observation_type = ? ORDER BY trade_date, created_at, snapshot_id`)
+      .all(OBSERVATION_TYPES.prospective);
+  } finally {
+    snap.close();
   }
 }
 
@@ -600,7 +1184,7 @@ export function runResearchEvaluate(options: ResearchEvaluateOptions) {
   const live = openLiveReadOnly(livePath);
   const snap = openSnapshotDb(dbPath, livePath);
   try {
-    const rows = snap.prepare('SELECT snapshot_id, status, revises, created_at, content FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
+    const rows = snap.prepare('SELECT * FROM snapshot WHERE trade_date = ? ORDER BY created_at, snapshot_id').all(date) as any[];
     if (!rows.length) return { status: 'PENDING', reason: 'no_snapshot_for_date', trade_date: date, db: dbPath };
     const cutoff = dataCutoff(live);
     if (!cutoff) throw new Error('正式缓存没有日线数据');
@@ -651,6 +1235,7 @@ export function runResearchEvaluate(options: ResearchEvaluateOptions) {
         snapshot_id: row.snapshot_id,
         stored_status: row.status,
         revises: row.revises,
+        observation: observationOf(row),
         as_of: asOf,
         horizon,
         matured,

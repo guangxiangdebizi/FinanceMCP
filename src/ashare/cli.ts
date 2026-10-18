@@ -19,6 +19,7 @@ const USAGE = `用法: finance-ashare <command> [options]
                                                                  保存指定交易日的 V1/V2 前瞻研究快照（只读正式库，写入独立研究库）
   research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
                                                                  用已保存的快照评价持有期收益；未到期保持 PENDING
+  research-seed --date YYYYMMDD [--db PATH]                      以该日正式 V1 股票池写入一次性 V1/V2 共同起点（只读正式库）
   migrate                                                        将旧版缓存主键布局迁移为按股票连续存储`;
 
 function arg(name: string): string | undefined {
@@ -41,7 +42,7 @@ async function main() {
   const command = process.argv[2];
   // Research commands open the live cache read-only themselves and must not
   // create or migrate a writable live connection.
-  if (command === 'research-snapshot' || command === 'research-evaluate') {
+  if (command === 'research-snapshot' || command === 'research-evaluate' || command === 'research-seed') {
     const { runCommand } = await import('./commands.js');
     if (!(await runCommand(undefined as any, command, { arg, flag, ymd, print }))) process.exitCode = 2;
     return;

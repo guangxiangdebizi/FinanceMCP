@@ -171,6 +171,15 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       }));
       return true;
     }
+    case 'research-seed': {
+      // One-time common starting state for V1/V2, read from the formal live watchlist.
+      const { runResearchSeed } = await import('./snapshot.js');
+      h.print(runResearchSeed({
+        date: h.ymd(h.arg('date'), '--date'),
+        dbPath: h.arg('db'),
+      }));
+      return true;
+    }
     case 'status': {
       const result = await runAshareTool('ashare_data_status', { date: h.arg('date') });
       process.stdout.write(result.content[0].text + '\n');
