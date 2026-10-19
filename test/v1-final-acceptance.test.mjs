@@ -267,3 +267,29 @@ test('V1F-5 未显式给 end 时，窗口必须落在行情实际覆盖的最后
     assert.equal(benchmark.status, 'OK', `${benchmark.id} 在默认窗口下应可用，实际 ${benchmark.reason}`);
   }
 });
+
+test('V1F-6 默认窗口的起点也不得早于行情覆盖范围；显式 start 仍严格按调用方要求', () => {
+  const dates = weekdays('20260818', 44);
+  const closes = {
+    '510300.SH': 4.0, '511010.SH': 1.0, '518880.SH': 5.0, '513100.SH': 2.0,
+    '159241.SZ': 1.005, '159278.SZ': 0.796, '159558.SZ': 0.935, '516080.SH': 0.636, '560390.SH': 0.742,
+  };
+  const { db } = marketWith({ dates, closes });
+  // 交易日历比行情早很多（行情只从 dates[20] 开始）。
+  const firstBar = dates[20];
+  db.prepare('DELETE FROM fund_daily WHERE trade_date < ?').run(firstBar);
+  db.prepare('DELETE FROM fund_adj WHERE trade_date < ?').run(firstBar);
+
+  // 默认调用：窗口应落在行情覆盖范围内，基准可用。
+  const defaulted = buildBenchmarkComparison({ marketDb: db });
+  assert.ok(defaulted.window.start >= firstBar, `默认起点 ${defaulted.window.start} 早于行情起点 ${firstBar}`);
+  for (const benchmark of defaulted.benchmarks) {
+    assert.equal(benchmark.status, 'OK', `${benchmark.id} 默认窗口下应可用：${benchmark.reason}`);
+  }
+
+  // 显式要求一个没有行情的起点：仍如实 unavailable，不静默缩短窗口。
+  const explicit = buildBenchmarkComparison({ marketDb: db, start: dates[0], end: dates.at(-1) });
+  const csi300 = explicit.benchmarks.find(item => item.id === 'csi300_etf_buy_hold');
+  assert.equal(csi300.status, 'UNAVAILABLE');
+  assert.equal(csi300.reason, 'window_coverage_incomplete');
+});

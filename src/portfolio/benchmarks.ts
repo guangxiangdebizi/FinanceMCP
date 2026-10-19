@@ -376,9 +376,11 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
   // 用日历上界会把窗口末端定在没有 bar 的未来日期，使三个基准全部 unavailable。
   let dates: string[] = [];
   let latestBarDate: string | null = null;
+  let earliestBarDate: string | null = null;
   if (db && tables.fund_daily) {
-    const row = db.prepare('SELECT MAX(trade_date) AS d FROM fund_daily').get() as any;
-    latestBarDate = row?.d ? String(row.d) : null;
+    const row = db.prepare('SELECT MIN(trade_date) AS a, MAX(trade_date) AS b FROM fund_daily').get() as any;
+    earliestBarDate = row?.a ? String(row.a) : null;
+    latestBarDate = row?.b ? String(row.b) : null;
   }
   if (db && tables.trade_cal) {
     const endBound = endRaw ?? latestBarDate ?? '99991231';
@@ -389,6 +391,10 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
     const rows = db.prepare('SELECT DISTINCT trade_date FROM fund_daily ORDER BY trade_date').all() as any[];
     dates = rows.map(row => String(row.trade_date));
   }
+  // 未显式给 start 时，默认窗口也只能使用行情实际覆盖到的日期：
+  // 日历可能比行情早很多，否则默认调用会因起点缺价而把基准全部判为不可用。
+  // 显式给了 start 则严格按调用方要求执行（缺价就如实 unavailable，不缩短）。
+  if (!startRaw && earliestBarDate) dates = dates.filter(date => date >= earliestBarDate);
   if (startRaw) dates = dates.filter(date => date >= startRaw);
   if (endRaw) dates = dates.filter(date => date <= endRaw);
   if (!startRaw && dates.length > 0) dates = dates.slice(-252);
