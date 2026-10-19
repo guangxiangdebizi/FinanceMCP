@@ -200,6 +200,50 @@ export interface HoldingResearch {
   availability: { available: boolean; unavailable: string[]; invalid_if: string[] };
 }
 
+/**
+ * 主动轮动与风险比较（任务书 D4）。
+ *
+ * 这不是收益预测，也不是下单计划：五个方案并列给出同一套可复核的数字
+ * （资金来源、可卖数量、一手金额、费用、交易前后集中度、压力情景），
+ * 并各自说明“为什么当前不可执行”。没有 RESEARCH_VERIFIED 证据时，
+ * REDUCE / ROTATE / DEFENSIVE 一律只是研究比较，绝不自动生成卖出指令。
+ */
+export type RotationScenario = 'HOLD' | 'REDUCE' | 'ROTATE' | 'DEFENSIVE' | 'NO_ACTION';
+
+export interface DecisionComparison {
+  as_of_trade_date: string;
+  /** 研究起点：集中度最高的持仓（不是“必须卖出的标的”）。 */
+  focus: { ts_code: string; name: string | null; weight: number; market_value_cents: number; quantity: number } | null;
+  cash: { before_cents: number; min_equity_lot_cents: number | null; sufficient_for_one_lot: boolean | null };
+  concentration_before: { hhi: number | null; effective_positions: number | null; top_weight: number | null; equity_weight: number | null };
+  /** 卖出资金的来源与可卖性（来自账本门控；缺失时为 null）。 */
+  sellable: Record<string, { quantity: number; sellable_quantity: number; settlement_rule: string }>;
+  options: {
+    action: RotationScenario;
+    label: string;
+    summary: string;
+    executable: false;
+    not_actionable_because: string[];
+    cash_after_cents: number | null;
+    concentration_after: { hhi: number | null; effective_positions: number | null };
+    exposure_after: { equity_weight: number | null };
+    stress_after: { equity_shock_pct: number; loss_cents: number | null; note: string } | null;
+    opportunity_cost: string;
+    sell_plan: {
+      ts_code: string; quantity: number; sellable_quantity: number; settlement_rule: string;
+      one_lot_cents: number; gross_cents: number; fees_cents: number; net_cents: number; cash_after_cents: number;
+    } | null;
+    rotation_plan: {
+      buy_code: string; buy_name: string | null; category: string; price_milli: number | null;
+      one_lot_cents: number | null; cash_sufficient_for_one_lot: boolean | null;
+      spend_cents: number | null; cash_after_cents: number | null; advantage_status: 'UNVERIFIED';
+    } | null;
+    invalidation_conditions: string[];
+    fact_meta: FactMeta;
+  }[];
+  note: string;
+}
+
 export interface CandidateCashCompetition {
   available: boolean;
   cash_cents: number | null;
@@ -267,6 +311,8 @@ export interface DailyReportResult {
   account_id_source: 'explicit' | 'default';
   /** 账户口径对照：快照参考价 vs 当日收盘重估（C4）。 */
   account_view: ReturnType<typeof buildAccountView>;
+  /** 主动轮动与风险比较：五个方案并列，全部不可执行（D4）。 */
+  decision_comparison: DecisionComparison;
   data_quality: {
     status: 'OK' | 'DEGRADED' | 'INSUFFICIENT';
     summary_status: string;
@@ -717,6 +763,276 @@ function buildQualityTiers(
         ? '账户门控与行情质量满足可执行前提'
         : '不可执行：账户门控未满足或 ETF 行情未全部 READY',
     },
+  };
+}
+
+// ---------------------------------------------------------------- 主动轮动比较（D4）
+
+/**
+ * 五个方案的资金/风险测算。每个数字都可从当日缓存与快照独立复算：
+ * - 卖出：可卖数量来自账本门控（T+1 由 replayAccount 决定），费用用 rules.ts 的假设值；
+ * - 轮动：候选来自同一套 ETF 候选筛选，一手金额 = 100 × 收盘价；
+ * - 集中度：HHI = Σ(持仓市值 / 总资产)²，交易后按“卖出所得现金 + 买入支出”重算；
+ * - 压力：全部权益仓位施加声明式冲击（默认 −10%），不是历史回撤。
+ *
+ * 所有方案恒为 `executable: false`：本模块没有经过验证的轮换优势，也不替用户下单。
+ */
+function buildDecisionComparison(input: {
+  asOf: string;
+  holdings: HoldingAssessment[];
+  summary: any;
+  accountView: ReturnType<typeof buildAccountView>;
+  accountEvaluation: AccountStatusEvaluation | null;
+  screening: EtfCandidateScreenResult | null;
+  fees: FeeRules;
+  lots: LotRules;
+  gateReasons: { code: string; detail: string }[];
+  gateSatisfied: boolean;
+}): DecisionComparison {
+  const { asOf, holdings, accountView, accountEvaluation, screening, fees, lots, gateReasons, gateSatisfied } = input;
+  const cash = accountView.revalued_basis.cash_cents;
+  const equityHoldings = holdings.filter(holding => (holding as any).research?.quote?.one_lot_cents !== undefined);
+  const focus = holdings.length
+    ? holdings.reduce((best, holding) => (holding.weight > best.weight ? holding : best))
+    : null;
+  const concentrationBefore = {
+    hhi: accountView.revalued_basis.hhi,
+    effective_positions: accountView.revalued_basis.hhi && accountView.revalued_basis.hhi > 0
+      ? r6(1 / accountView.revalued_basis.hhi) : null,
+    top_weight: focus?.weight ?? null,
+    equity_weight: input.summary?.portfolio?.by_asset_class?.find((row: any) => row.asset_class === 'EQUITY')?.weight ?? null,
+  };
+  const sellable: DecisionComparison['sellable'] = {};
+  for (const [code, row] of Object.entries(accountEvaluation?.sellable ?? {})) {
+    sellable[code] = { quantity: row.quantity, sellable_quantity: row.sellable_quantity, settlement_rule: row.settlement_rule };
+  }
+  const minEquityLot = holdings.length
+    ? Math.min(...holdings.map(holding => (holding as any).research?.quote?.one_lot_cents ?? Number.POSITIVE_INFINITY))
+    : null;
+  const minEquityLotCents = Number.isFinite(minEquityLot) ? minEquityLot : null;
+
+  const priceOf = (holding: HoldingAssessment) => holding.price_milli > 0 ? holding.price_milli : null;
+  const totalAssets = accountView.revalued_basis.total_assets_cents;
+  /** 交易后的 HHI：卖出持仓换成现金（现金权重上升），买入则从现金换成候选。 */
+  const concentrationAfter = (delta: { sellCode?: string; sellCents?: number; buyCents?: number }) => {
+    let sec = 0;
+    for (const holding of holdings) {
+      let value = holding.market_value_cents;
+      if (delta.sellCode && holding.ts_code === delta.sellCode) value = Math.max(0, value - (delta.sellCents ?? 0));
+      sec += value;
+    }
+    sec += delta.buyCents ?? 0;
+    const cashAfter = cash - (delta.buyCents ?? 0) + (delta.sellCents ?? 0);
+    const total = sec + cashAfter;
+    if (!(total > 0)) return { hhi: null, effective_positions: null };
+    const hhi = r6(holdings.reduce((sum, holding) => {
+      const value = delta.sellCode && holding.ts_code === delta.sellCode
+        ? Math.max(0, holding.market_value_cents - (delta.sellCents ?? 0))
+        : holding.market_value_cents;
+      return sum + (value / total) ** 2;
+    }, 0) + (cashAfter / total) ** 2);
+    return { hhi, effective_positions: hhi > 0 ? r6(1 / hhi) : null };
+  };
+  const stressOf = (equityCents: number, shockPct: number) => ({
+    equity_shock_pct: shockPct,
+    loss_cents: Math.round(equityCents * shockPct),
+    note: `声明式压力：对权益仓位施加 ${(shockPct * 100).toFixed(1)}% 冲击；不是收益预测，也不是历史回撤。`,
+  });
+
+  const notActionable = [
+    ...(gateSatisfied ? [] : gateReasons.map(reason => `${reason.code}: ${reason.detail}`)),
+    '没有可追溯的 RESEARCH_VERIFIED 轮动证据：相对优势未经前瞻检验（PRD §6）。',
+  ];
+  if (!focus) notActionable.push('账户库中没有持仓，无法比较交易方案。');
+
+  // HOLD：不交易；机会成本来自持仓自身的下行风险与集中度。
+  const holdStress = stressOf(accountView.revalued_basis.securities_mv_cents, -0.10);
+  // REDUCE：以集中度最高的持仓为起点，卖出到“权益持仓不超过总资产 50%”所需的最小整手。
+  let reducePlan: DecisionComparison['options'][number]['sell_plan'] = null;
+  if (focus) {
+    const sellableRow = sellable[focus.ts_code] ?? { quantity: focus.quantity, sellable_quantity: focus.quantity, settlement_rule: 'unknown_no_ledger' };
+    const priceMilli = priceOf(focus);
+    if (priceMilli !== null) {
+      const oneLot = valueCents(lots.etf_lot_size, priceMilli);
+      const targetCents = Math.round(totalAssets * 0.5);
+      const excessCents = Math.max(0, focus.market_value_cents - targetCents);
+      const sharesForExcess = Math.ceil((excessCents * 10) / priceMilli);
+      const lotsToSell = Math.ceil(sharesForExcess / lots.etf_sell_multiple);
+      const maxLots = Math.floor(sellableRow.sellable_quantity / lots.etf_sell_multiple);
+      const quantity = Math.max(0, Math.min(lotsToSell, maxLots)) * lots.etf_sell_multiple;
+      if (quantity > 0) {
+        const gross = valueCents(quantity, priceMilli);
+        const fee = sellFeesCents(gross, fees);
+        const net = gross - fee;
+        reducePlan = {
+          ts_code: focus.ts_code, quantity, sellable_quantity: sellableRow.sellable_quantity,
+          settlement_rule: sellableRow.settlement_rule, one_lot_cents: oneLot,
+          gross_cents: gross, fees_cents: fee, net_cents: net, cash_after_cents: cash + net,
+        };
+      }
+    }
+  }
+  // ROTATE：从候选池里选一个“买得起一手且不是持仓”的候选；只是资金可行性，不是优势。
+  const heldCodes = new Set(holdings.map(holding => holding.ts_code));
+  const candidate = (screening?.candidates ?? [])
+    .filter((row: EtfCandidateRow) => !heldCodes.has(row.ts_code) && row.data.latest_close_milli !== null)
+    .sort((a: EtfCandidateRow, b: EtfCandidateRow) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
+  const candidateLot = candidate?.data.latest_close_milli != null
+    ? valueCents(lots.etf_lot_size, candidate.data.latest_close_milli) : null;
+  const rotationSpend = reducePlan && candidateLot !== null ? Math.min(candidateLot, reducePlan.net_cents) : null;
+  const rotationPlan: DecisionComparison['options'][number]['rotation_plan'] = candidate ? {
+    buy_code: candidate.ts_code,
+    buy_name: candidate.name ?? null,
+    category: candidate.category,
+    price_milli: candidate.data.latest_close_milli,
+    one_lot_cents: candidateLot,
+    cash_sufficient_for_one_lot: candidateLot === null ? null : cash >= candidateLot,
+    spend_cents: rotationSpend,
+    cash_after_cents: rotationSpend === null ? null : cash + (reducePlan?.net_cents ?? 0) - rotationSpend,
+    advantage_status: 'UNVERIFIED',
+  } : null;
+
+  // DEFENSIVE：把权益仓位降到零（只保留现金），用于衡量下行敞口的上限。
+  const defensiveCash = cash + accountView.revalued_basis.securities_mv_cents;
+
+  const reasonSummary = (extra: string) => [...notActionable, extra];
+  const options: DecisionComparison['options'] = [
+    {
+      action: 'HOLD',
+      label: '继续持有，不交易',
+      summary: `不改变任何持仓与现金；当前权益权重 ${((concentrationBefore.equity_weight ?? 0) * 100).toFixed(2)}%，HHI ${concentrationBefore.hhi ?? '不可用'}。`,
+      executable: false,
+      not_actionable_because: reasonSummary('HOLD 是“不操作”的研究姿态；在行情与账户门控齐全时仍然不是下单动作。'),
+      cash_after_cents: cash,
+      concentration_after: concentrationAfter({}),
+      exposure_after: { equity_weight: concentrationBefore.equity_weight },
+      stress_after: holdStress,
+      opportunity_cost: '继续持有承担集中度与主题下行风险；若持仓后续跑输宽基，机会成本即相对收益差。',
+      sell_plan: null,
+      rotation_plan: null,
+      invalidation_conditions: [
+        '任一只持仓收盘跌破最近 20 日最低收盘后重新评估。',
+        '相对沪深300 的 20 日超额收益持续为负且扩大。',
+        '出现可追溯的 RESEARCH_VERIFIED 轮动证据。',
+      ],
+      fact_meta: {
+        as_of: asOf, source: 'portfolio_daily_report:hold', quality: 'OK', claim_status: 'FACT',
+        detail: '权重、HHI 与压力损失由程序从当日缓存计算。',
+      },
+    },
+    {
+      action: 'REDUCE',
+      label: '部分降低集中暴露',
+      summary: reducePlan
+        ? `卖出 ${reducePlan.quantity} 份 ${focus?.ts_code}（占可卖 ${reducePlan.sellable_quantity} 份），净回款 ${(reducePlan.net_cents / 100).toFixed(2)} 元，预计现金升至 ${(reducePlan.cash_after_cents / 100).toFixed(2)} 元。`
+        : '无法给出最小整手卖出量：缺少可卖数量或当日价格；不臆造数量。',
+      executable: false,
+      not_actionable_because: reasonSummary('集中度是风险披露；没有经过验证的相对优势时，降低集中度不是被证明更优的动作。'),
+      cash_after_cents: reducePlan?.cash_after_cents ?? null,
+      concentration_after: concentrationAfter(reducePlan ? { sellCode: reducePlan.ts_code, sellCents: reducePlan.gross_cents } : {}),
+      exposure_after: { equity_weight: concentrationBefore.equity_weight === null || !reducePlan || !totalAssets
+        ? null : r6(Math.max(0, accountView.revalued_basis.securities_mv_cents - reducePlan.gross_cents) / (totalAssets - reducePlan.fees_cents)) },
+      stress_after: reducePlan
+        ? stressOf(Math.max(0, accountView.revalued_basis.securities_mv_cents - reducePlan.gross_cents), -0.10)
+        : null,
+      opportunity_cost: '卖出后若持仓反弹，未实现的上涨由用户承担；费用与滑点按假设值扣除。',
+      sell_plan: reducePlan,
+      rotation_plan: null,
+      invalidation_conditions: [
+        '该持仓的可卖数量因 T+1 或未上报成交而变化。',
+        '集中度降至研究阈值以下后不再需要审视。',
+      ],
+      fact_meta: {
+        as_of: asOf, source: 'portfolio_daily_report:reduce', quality: reducePlan ? 'OK' : 'DEGRADED', claim_status: 'FACT',
+        detail: '数量与费用由程序计算；费率为假设值。',
+      },
+    },
+    {
+      action: 'ROTATE',
+      label: '权益内部轮动',
+      summary: rotationPlan
+        ? `候选 ${rotationPlan.buy_code}（${rotationPlan.category}）一手 ${((rotationPlan.one_lot_cents ?? 0) / 100).toFixed(2)} 元；现金${rotationPlan.cash_sufficient_for_one_lot ? '足够' : '不足'}买入一手。`
+        : '候选池没有可用的非持仓候选，无法给出轮动测算。',
+      executable: false,
+      not_actionable_because: reasonSummary('轮动候选只是启发式排序；优势状态为 UNVERIFIED，不能据此换仓。'),
+      cash_after_cents: rotationPlan?.cash_after_cents ?? null,
+      // 轮动只比较“卖出所得资金 + 现有现金是否够买一手”。若资金不足，不假设
+      // 额外卖出（那会变成第二个未测算的卖出计划），交易后组合保持与 HOLD 相同。
+      concentration_after: rotationPlan && rotationPlan.spend_cents !== null && reducePlan
+        ? concentrationAfter({ sellCode: reducePlan.ts_code, sellCents: reducePlan.gross_cents, buyCents: rotationPlan.spend_cents })
+        : concentrationAfter({}),
+      exposure_after: { equity_weight: concentrationBefore.equity_weight },
+      stress_after: rotationPlan ? stressOf(accountView.revalued_basis.securities_mv_cents, -0.10) : null,
+      opportunity_cost: '换仓可能卖掉后续表现更好的持仓；新候选的跟踪误差、流动性与折溢价未经验证。',
+      sell_plan: null,
+      rotation_plan: rotationPlan,
+      invalidation_conditions: [
+        '候选在下一交易日停牌、涨跌停或流动性不足。',
+        '候选相对持仓的相对强弱转为不利。',
+        '证据被撤回、过期或无法复核。',
+      ],
+      fact_meta: {
+        as_of: candidate?.data.latest_bar_date ?? asOf, source: 'etf_candidate_screen', quality: candidate?.status === 'OK' ? 'OK' : 'DEGRADED', claim_status: 'UNVERIFIED',
+        detail: '候选筛选分数是启发式排序，不是相对优势证据。',
+      },
+    },
+    {
+      action: 'DEFENSIVE',
+      label: '必要时降低权益风险',
+      summary: `若清空权益仓位，证券市值 ${(accountView.revalued_basis.securities_mv_cents / 100).toFixed(2)} 元转为现金，总现金 ${(defensiveCash / 100).toFixed(2)} 元；损失上限换为机会成本。`,
+      executable: false,
+      not_actionable_because: reasonSummary('这是压力情景的上限测算，不是建议清仓；没有证据支持把全部权益转为现金。'),
+      cash_after_cents: defensiveCash,
+      concentration_after: { hhi: totalAssets > 0 ? 1 : null, effective_positions: totalAssets > 0 ? 1 : null },
+      exposure_after: { equity_weight: 0 },
+      stress_after: stressOf(0, -0.10),
+      opportunity_cost: '清仓后市场反弹的收益全部放弃；现金长期跑输权益的历史经验不构成未来保证。',
+      sell_plan: null,
+      rotation_plan: null,
+      invalidation_conditions: ['仅在出现可复核的系统性风险事实时重新评估；不得由单一阈值自动触发。'],
+      fact_meta: {
+        as_of: asOf, source: 'portfolio_daily_report:defensive', quality: 'OK', claim_status: 'FACT',
+        detail: '只是把当前证券市值记为可转为现金的上限；未计算真实卖出冲击。',
+      },
+    },
+    {
+      action: 'NO_ACTION',
+      label: '没有充分证据时不操作',
+      summary: '在行情、账户完整性或研究证据不足时，明确不操作，并保留观察触发条件。',
+      executable: false,
+      not_actionable_because: reasonSummary('NO_ACTION 本身就是结论：缺少可复核的优势证据。'),
+      cash_after_cents: cash,
+      concentration_after: concentrationAfter({}),
+      exposure_after: { equity_weight: concentrationBefore.equity_weight },
+      stress_after: holdStress,
+      opportunity_cost: '不操作的代价与 HOLD 相同；区别是它明确承认“没有证据”，而不是把缺失当结论。',
+      sell_plan: null,
+      rotation_plan: null,
+      invalidation_conditions: [
+        '行情补齐并 READY。',
+        '账户交易完整性声明覆盖目标交易日。',
+        '出现可追溯的 RESEARCH_VERIFIED 证据。',
+      ],
+      fact_meta: {
+        as_of: asOf, source: 'portfolio_daily_report:no_action', quality: 'OK', claim_status: 'FACT',
+        detail: '状态语义事实，不是市场判断。',
+      },
+    },
+  ];
+
+  return {
+    as_of_trade_date: asOf,
+    focus: focus ? { ts_code: focus.ts_code, name: focus.name, weight: focus.weight, market_value_cents: focus.market_value_cents, quantity: focus.quantity } : null,
+    cash: {
+      before_cents: cash,
+      min_equity_lot_cents: minEquityLotCents,
+      sufficient_for_one_lot: minEquityLotCents === null ? null : cash >= minEquityLotCents,
+    },
+    concentration_before: concentrationBefore,
+    sellable,
+    options,
+    note: '五个方案都只是研究比较，全部 executable=false。集中度阈值只用于选择研究起点，'
+      + '不作为自动卖出指令；费用、滑点与压力幅度均为假设值。',
   };
 }
 
@@ -1294,6 +1610,10 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
   // （是否使用当日收盘重估、是否含现金/理财），避免同一个账户在两处出现相互矛盾的 HHI
   // 或“证券数量 / 现金 / 总资产”不一致（任务书 C4）。
   const accountView = buildAccountView(snapshot, accountId, holdings, concentration, asOf);
+  const decisionComparison = buildDecisionComparison({
+    asOf, holdings, summary, accountView, accountEvaluation: accountEvaluation ?? null, screening, fees, lots,
+    gateReasons, gateSatisfied,
+  });
 
   return {
     schema: DAILY_REPORT_SCHEMA,
@@ -1331,6 +1651,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     account_id: accountId,
     account_id_source: input.accountIdSource ?? 'explicit',
     account_view: accountView,
+    decision_comparison: decisionComparison,
     data_quality: {
       status: summary.data_quality?.status ?? 'INSUFFICIENT',
       summary_status: summary.status,
