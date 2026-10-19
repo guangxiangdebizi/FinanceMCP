@@ -1,5 +1,13 @@
 .env
 !.env.example
+# Never track environment backups: they have repeatedly contained the real
+# Tushare token and the private-endpoint token (2026-10-19 incident).
+.env.*
+!.env.example
+!.env.*.example
+*.env.bak
+*.env.bak.*
+deploy/ashare/.env.bak*
 
 # Node/TypeScript
 node_modules/

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Block commits that add environment files or credential-shaped values.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec node scripts/check-secrets.mjs

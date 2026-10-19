@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the account research report after the market pipeline (Asia/Shanghai)
+
+[Timer]
+# 比市场流水线晚 5 分钟：ETF/市场同步（含逐只兜底）通常 < 1 分钟，留出余量。
+OnCalendar=Mon..Fri *-*-* 21:15:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

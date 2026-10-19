@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { ashareDbPath, getAshareDb } from '../ashare/db.js';
-import { latestSnapshot, readSnapshot } from './account.js';
+import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
 import { buildDailyReport } from './dailyReport.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
@@ -70,13 +70,11 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
       const db = readDb();
       const market = readOnlyMarket();
       try {
-        const snapshotId = args.snapshot_id ? String(args.snapshot_id) : undefined;
-        const snapshot = snapshotId ? readSnapshot(db, snapshotId) : latestSnapshot(db);
-        if (!snapshot) {
-          throw new Error(snapshotId
-            ? `账户快照 ${snapshotId} 不存在`
-            : '账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
-        }
+        // 账户身份与持仓快照一起解析：缺省 account_id 指向本部署唯一的真实账户，
+        // 且不再静默使用演示快照（C1）。
+        const account = resolveAccountId(db, args.account_id);
+        const resolved = resolveAccountSnapshot(db, account.account_id, args.snapshot_id);
+        const snapshot = resolved.snapshot;
         const asOf = ymd(args.as_of_trade_date, 'as_of_trade_date')
           ?? latestTradeDayOf(market)
           ?? snapshot.as_of.replace(/-/g, '');
@@ -88,15 +86,17 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
         const categories = Array.isArray(args.categories)
           ? args.categories.map(String)
           : args.categories ? [String(args.categories)] : undefined;
-        return json(buildDailyReport({
+        const report = buildDailyReport({
           portfolioDb: db,
           marketDb: market,
-          accountId: String(args.account_id ?? 'default'),
+          accountId: account.account_id,
+          accountIdSource: account.source,
           asOfTradeDate: asOf,
-          snapshotId,
+          snapshotId: resolved.snapshot_id,
           maxActions,
           categories,
-        }));
+        });
+        return json(report);
       } finally {
         // 只关闭账户库；市场缓存是共享连接，关闭会让公网市场工具全部失效。
         db.close();

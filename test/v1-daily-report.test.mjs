@@ -313,10 +313,14 @@ test('D1-3b 候选 vs 现金：现金不足一手时显式标注，不臆造买�
 
 // ---------------------------------------------------------------- 4. 行情过期
 
-test('D1-4 持仓行情过期 → NO_ACTION（等待不是交易动作），阻塞原因与触发条件明确', () => {
+// 语义修复（任务书 D2）：持仓行情缺失/过期是 DATA_INSUFFICIENT —— 行情缺失
+// 不等于“已证明继续持有最优”。旧断言 NO_ACTION 正是被修复的缺陷：五只持仓全部
+// NOT_READY 时报告仍声称“数据完整、没有可靠优势”。
+test('D1-4 持仓行情过期 → DATA_INSUFFICIENT（行情缺失不等于已证明继续持有），阻塞原因与触发条件明确', () => {
   const stale = seedMarket(join(dir, 'market-stale.sqlite'), { staleCodes: ['159278.SZ'] });
   const report = build({ marketDb: stale });
-  assert.equal(report.status, 'NO_ACTION');
+  assert.equal(report.status, 'DATA_INSUFFICIENT');
+  assert.equal(report.actionable, false);
   assert.equal(report.first_section.count, 0, '“等待行情补齐”不是 0–3 个交易动作之一');
   assert.deepEqual(report.first_section.actions, []);
   assert.ok(report.first_section.no_action_reason.includes('159278.SZ'), report.first_section.no_action_reason);
@@ -328,6 +332,15 @@ test('D1-4 持仓行情过期 → NO_ACTION（等待不是交易动作），阻�
     || report.data_quality.quotes.not_ready.includes('159278.SZ'));
   // 过期持仓的立场是 WAIT，而不是 HOLD。
   assert.equal(report.holdings.find(holding => holding.ts_code === '159278.SZ').stance, 'WAIT');
+  // 数据质量分层：行情不足与账户身份必须分开披露。
+  assert.equal(report.data_quality.tiers.etf_price.status, 'PARTIAL');
+  assert.ok(report.data_quality.tiers.etf_price.not_ready.includes('159278.SZ'));
+  assert.equal(report.data_quality.tiers.trade_plan_executability.status, 'NOT_EXECUTABLE');
+  // 持有/观察/减仓/轮动条件逐只给出（D3），且不复用“行业收益代替 ETF 收益”。
+  const staleHolding = report.holdings.find(holding => holding.ts_code === '159278.SZ');
+  assert.deepEqual(staleHolding.research.conditions.map(c => c.stance), ['HOLD', 'WATCH', 'REDUCE', 'ROTATE']);
+  assert.equal(staleHolding.research.data.fresh, false);
+  assert.ok(staleHolding.research.availability.unavailable.some(line => line.includes('NOT_READY') || line.includes('行情质量')));
 });
 
 // ---------------------------------------------------------------- 5. 门控满足

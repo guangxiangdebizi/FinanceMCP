@@ -17,6 +17,7 @@ import { buildScenario, type EtfQuoteInput, type ScenarioAction } from './scenar
 import { DEFAULT_FEE_RULES, DEFAULT_STRESS_RULES } from './rules.js';
 import { runDecisionCommand } from './decisionCli.js';
 import { defaultTradeDate, runResearchSummaryCommand } from './researchCli.js';
+import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { buildDailyReport } from './dailyReport.js';
 import { screenEtfCandidates } from '../ashare/etfUniverse.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
@@ -515,23 +516,23 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
     }
     case 'portfolio-daily-report': {
       // D1 收盘日报：首屏就是"下一交易日最值得做的 0–3 个动作"。
-      const accountId = requireArg(h, 'account');
+      // --account 可选：缺省与私有 MCP 同一口径（本部署唯一真实账户），不再落到 'default'。
       const dbPath = h.arg('db') ?? portfolioDbPath();
       if (!existsSync(dbPath)) throw new Error(`账户数据库不存在（${dbPath}），请先运行 finance-ashare portfolio-import`);
       const db = openPortfolioDb(dbPath, { writable: false });
       const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
       try {
-        const snapshotId = h.arg('snapshot');
-        const snapshot = snapshotId ? readSnapshot(db, snapshotId) : latestSnapshot(db);
-        if (!snapshot) throw new Error(snapshotId ? `账户快照 ${snapshotId} 不存在` : '账户库中没有任何快照，请先运行 portfolio-import');
-        const asOf = h.arg('date') ? h.ymd(h.arg('date'), '--date') : defaultTradeDate(market, snapshot);
+        const account = resolveAccountId(db, h.arg('account'));
+        const resolved = resolveAccountSnapshot(db, account.account_id, h.arg('snapshot'));
+        const asOf = h.arg('date') ? h.ymd(h.arg('date'), '--date') : defaultTradeDate(market, resolved.snapshot);
         const maxActions = intArg(h.arg('max-actions'), '--max-actions');
         const report = buildDailyReport({
           portfolioDb: db,
           marketDb: market,
-          accountId,
+          accountId: account.account_id,
+          accountIdSource: account.source,
           asOfTradeDate: asOf,
-          snapshotId,
+          snapshotId: resolved.snapshot_id,
           maxActions: maxActions === undefined ? undefined : maxActions,
         });
         h.print(report);

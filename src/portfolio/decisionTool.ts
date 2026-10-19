@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { ashareDbPath, getAshareDb } from '../ashare/db.js';
-import { accountSummary, latestSnapshot, readSnapshot } from './account.js';
+import { accountSummary } from './account.js';
+import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
 import { buildDecision, type DecisionAction, type DecisionInput, type RotationClaim } from './decision.js';
 
@@ -48,7 +49,10 @@ function ymd(raw: unknown, label: string, fallback: string): string {
 
 /** 把 MCP 参数映射成 DecisionInput。任何价格参数都不会被读取。 */
 export function decisionInputFromArgs(args: Record<string, any>, db: DatabaseSync, market: DatabaseSync | null): DecisionInput {
-  const snapshot = args.snapshot_id ? readSnapshot(db, String(args.snapshot_id)) : latestSnapshot(db);
+  // 账户身份先解析：缺省时指向本部署唯一的真实账户，而不是字符串 'default'。
+  const resolvedAccount = resolveAccountId(db, args.account_id);
+  const resolvedSnapshot = resolveAccountSnapshot(db, resolvedAccount.account_id, args.snapshot_id);
+  const snapshot = resolvedSnapshot.snapshot;
   if (!snapshot) throw new Error('账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
   const summary = accountSummary(snapshot);
   const asOf = ymd(args.as_of_trade_date, 'as_of_trade_date', snapshot.as_of.replace(/-/g, ''));
@@ -97,7 +101,7 @@ export function decisionInputFromArgs(args: Record<string, any>, db: DatabaseSyn
     : null;
 
   return {
-    account_id: String(args.account_id ?? 'default'),
+    account_id: resolvedAccount.account_id,
     snapshot: summary,
     as_of_trade_date: asOf,
     market_db: market,

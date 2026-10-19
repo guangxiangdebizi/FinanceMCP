@@ -5,6 +5,8 @@ import { buildResearchSummary } from './researchSummary.js';
 import { evaluateAccountStatus, type AccountStatusEvaluation } from './decision.js';
 import { DEFAULT_FEE_RULES, DEFAULT_LOT_RULES, type FeeRules, type LotRules } from './rules.js';
 import { screenEtfCandidates, type EtfCandidateRow, type EtfCandidateScreenResult } from '../ashare/etfUniverse.js';
+import { fundBaseFactor } from '../ashare/etf.js';
+import { adjustmentRatio } from '../ashare/data.js';
 
 /**
  * D1 收盘日报：先给“下一交易日最值得做的 0–3 个动作及理由”。
@@ -57,6 +59,8 @@ export interface DailyReportInput {
   /** 只读市场缓存；缺失时返回 DATA_INSUFFICIENT，不伪造行情。 */
   marketDb: DatabaseSync | null | undefined;
   accountId: string;
+  /** accountId 是调用方显式给出，还是由本部署唯一真实账户推导（C1）。 */
+  accountIdSource?: 'explicit' | 'default';
   /** 目标交易日 YYYYMMDD（收盘日报即该交易日）。 */
   asOfTradeDate: string;
   snapshotId?: string;
@@ -138,7 +142,62 @@ export interface HoldingAssessment {
   stance: 'HOLD' | 'REDUCE' | 'ROTATE' | 'WAIT';
   reasons: string[];
   counter_evidence: string[];
+  /** 单只 ETF 的研究切片（D3）：当日行情、趋势/相对强弱/风险、条件与失效。 */
+  research: HoldingResearch;
   fact_meta: FactMeta;
+}
+
+/**
+ * 单只持仓的研究切片（任务书 D3）。所有数字都由本地只读缓存计算：
+ * - 不使用宽泛行业中位收益替代 ETF 自身收益；
+ * - 数据缺失时字段为 null 并在 `unavailable` 说明，而不是补 0 或沿用旧值。
+ */
+export interface HoldingResearch {
+  /** 切片依据的行情日期与可用性；与 as_of 不同即过期。 */
+  data: {
+    bar_date: string | null;
+    as_of_trade_date: string;
+    fresh: boolean;
+    /** 用于计算的 bar 根数（最多 60）。 */
+    bars_used: number;
+    price_basis: 'qfq_adjusted' | 'raw_close_no_adj_factor';
+  };
+  /** 1. 当日行情。 */
+  quote: {
+    close_cny: number | null;
+    pct_chg: number | null;
+    amount_cny: number | null;
+    vol_shares: number | null;
+    /** 一手成本（100 份，分）。 */
+    one_lot_cents: number | null;
+  };
+  /** 2. 趋势 / 相对强弱 / 波动与风险。 */
+  trend: {
+    ret5_pct: number | null;
+    ret20_pct: number | null;
+    ret60_pct: number | null;
+    ma20_cny: number | null;
+    ma60_cny: number | null;
+    above_ma20: boolean | null;
+    above_ma60: boolean | null;
+    /** 相对沪深300（或可用宽基）的同窗口超额收益，单位百分点。 */
+    excess_ret20_vs_broad_pct: number | null;
+    /** 相对持有主题行业 20 日中位收益的差额，单位百分点（ETF 自身收益，不是行业中位）。 */
+    excess_ret20_vs_theme_pct: number | null;
+    realized_vol_60d_pct: number | null;
+    max_drawdown_60d_pct: number | null;
+    /** 最新 bar 距最近 20 日最低收盘的距离（%），用于观察触发。 */
+    distance_to_20d_low_pct: number | null;
+  };
+  /** 3. 与相关行业/宽基的对比对象（真实代码与窗口，便于复核）。 */
+  comparison: { kind: 'index' | 'sector' | 'benchmark'; reference: string; window_bars: number; as_of: string | null }[];
+  /** 4. 投资逻辑与反证。 */
+  investment_thesis: string[];
+  counter_thesis: string[];
+  /** 5. 持有 / 观察 / 减仓 / 轮动的研究条件（条件化，不是指令）。 */
+  conditions: { stance: 'HOLD' | 'WATCH' | 'REDUCE' | 'ROTATE'; when: string[] }[];
+  /** 6. 数据日期、可用性与失效条件。 */
+  availability: { available: boolean; unavailable: string[]; invalid_if: string[] };
 }
 
 export interface CandidateCashCompetition {
@@ -203,6 +262,9 @@ export interface DailyReportResult {
     generated_at: string | null;
   };
   account_status: string;
+  /** 本次日报实际使用的账户标识，以及它来自显式参数还是默认解析（C1）。 */
+  account_id: string;
+  account_id_source: 'explicit' | 'default';
   data_quality: {
     status: 'OK' | 'DEGRADED' | 'INSUFFICIENT';
     summary_status: string;
@@ -210,6 +272,16 @@ export interface DailyReportResult {
     quotes: { ready: string[]; stale: string[]; not_ready: string[]; missing: string[] };
     market_report: { available: boolean; report_id: string | null; as_of_trade_date: string | null; freshness: string };
     screening: { status: string; missing_tables: string[] };
+    /** 市场 / ETF 价格 / ETF 份额与复权 / 账户身份 / 交易完整性 / 研究证据 / 可执行性。 */
+    tiers: {
+      market_data: { status: string; as_of: string | null; detail: string };
+      etf_price: { status: string; ready: string[]; not_ready: string[]; detail: string };
+      etf_share_adjustment: { status: string; detail: string };
+      account_identity: { status: string; verified: boolean; detail: string };
+      account_trade_completeness: { status: string; detail: string };
+      research_evidence: { status: string; detail: string };
+      trade_plan_executability: { status: string; detail: string };
+    };
     notes: string[];
   };
   market_judgement: {
@@ -320,6 +392,330 @@ function sellFeesCents(grossCents: number, fees: FeeRules): number {
     + Math.round(grossCents * fees.transfer_fee_rate)
     + Math.round(grossCents * fees.stamp_duty_rate)
     + Math.round(grossCents * fees.slippage_rate_per_side);
+}
+
+// ---------------------------------------------------------------- 单只持仓研究（D3）
+
+const RESEARCH_WINDOW_BARS = 60;
+const BROAD_INDEX_CODES = ['000300.SH', '000905.SH', '000852.SH', '000001.SH'];
+
+function pctChange(from: number, to: number): number | null {
+  if (!(from > 0) || !Number.isFinite(to)) return null;
+  return r2((to / from - 1) * 100);
+}
+
+function mean(values: number[]): number | null {
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
+function stdev(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const m = mean(values)!;
+  return Math.sqrt(values.reduce((sum, value) => sum + (value - m) ** 2, 0) / (values.length - 1));
+}
+
+function maxDrawdown(values: number[]): number | null {
+  if (values.length < 2) return null;
+  let peak = values[0];
+  let worst = 0;
+  for (const value of values) {
+    if (value > peak) peak = value;
+    if (peak > 0) worst = Math.min(worst, value / peak - 1);
+  }
+  return r2(worst * 100);
+}
+
+/**
+ * 单只 ETF 的研究切片。价格口径与候选筛选一致：有复权因子时用 qfq（基准 = as_of
+ * 之前最后一个因子），缺因子时显式退化为原始收盘并标注。
+ *
+ * 关键约束（D3）：不使用宽泛行业中位收益替代 ETF 自身收益。相对强弱分两部分：
+ * 1) ETF 自身 20 日收益 vs 宽基指数 20 日收益；
+ * 2) ETF 自身 20 日收益 vs 其主题行业 20 日中位收益（行业数字只作为对照，不是 ETF 的收益）。
+ */
+function buildHoldingResearch(
+  marketDb: DatabaseSync | null | undefined,
+  holding: any,
+  asOf: string,
+  market: any,
+  lots: LotRules,
+): HoldingResearch {
+  const code = String(holding.ts_code);
+  const unavailable: string[] = [];
+  const empty: HoldingResearch = {
+    data: { bar_date: holding.latest_bar_date ?? null, as_of_trade_date: asOf, fresh: false, bars_used: 0, price_basis: 'raw_close_no_adj_factor' },
+    quote: { close_cny: null, pct_chg: null, amount_cny: null, vol_shares: null, one_lot_cents: null },
+    trend: {
+      ret5_pct: null, ret20_pct: null, ret60_pct: null, ma20_cny: null, ma60_cny: null,
+      above_ma20: null, above_ma60: null, excess_ret20_vs_broad_pct: null, excess_ret20_vs_theme_pct: null,
+      realized_vol_60d_pct: null, max_drawdown_60d_pct: null, distance_to_20d_low_pct: null,
+    },
+    comparison: [],
+    investment_thesis: [],
+    counter_thesis: [],
+    conditions: [],
+    availability: { available: false, unavailable, invalid_if: [] },
+  };
+  if (!marketDb) {
+    unavailable.push('市场缓存不可用');
+    return empty;
+  }
+  let bars: any[];
+  try {
+    bars = marketDb.prepare(`
+      SELECT trade_date, open, high, low, close, pct_chg, vol, amount
+      FROM fund_daily WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT ?`)
+      .all(code, asOf, RESEARCH_WINDOW_BARS) as any[];
+  } catch {
+    unavailable.push('fund_daily 不可读');
+    return empty;
+  }
+  bars.reverse();
+  const validBars = bars.filter(bar => typeof bar.close === 'number' && bar.close > 0 && Number.isFinite(bar.close));
+  if (!validBars.length) {
+    unavailable.push('窗口内没有合法的基金日线');
+    return empty;
+  }
+
+  // 复权：基准取 asOf 之前最后一个因子；逐日因子缺失的 bar 不参与收益计算。
+  const base = safeFundBaseFactor(marketDb, code, asOf);
+  const factors = new Map<string, number>();
+  if (base) {
+    for (const row of marketDb.prepare('SELECT trade_date, adj_factor FROM fund_adj WHERE ts_code = ? AND trade_date <= ? AND adj_factor > 0')
+      .all(code, asOf) as any[]) {
+      factors.set(String(row.trade_date), Number(row.adj_factor));
+    }
+  }
+  const priced = validBars
+    .map(bar => {
+      const factor = factors.get(String(bar.trade_date));
+      const ratio = base && typeof factor === 'number' && factor > 0
+        ? adjustmentRatio('qfq', factor, base.adj_factor)
+        : 1;
+      return { ...bar, price: Number.isFinite(ratio) ? bar.close * ratio : null };
+    })
+    .filter(bar => bar.price !== null && bar.price > 0);
+  if (!priced.length) {
+    unavailable.push('缺少可用复权因子，无法计算可比收益序列');
+    return empty;
+  }
+  const closes = priced.map(bar => bar.price as number);
+  const last = priced.at(-1)!;
+  const lastBar = validBars.at(-1)!;
+  const retOver = (n: number): number | null => (closes.length > n ? pctChange(closes[closes.length - 1 - n], closes[closes.length - 1]) : null);
+  const ma = (n: number): number | null => (closes.length >= n ? mean(closes.slice(-n)) : null);
+  const ma20 = ma(20);
+  const ma60 = ma(60);
+  const returns = closes.slice(1).map((price, index) => price / closes[index] - 1).filter(value => Number.isFinite(value));
+  const low20 = closes.length >= 20 ? Math.min(...closes.slice(-20)) : null;
+
+  // 对照：真实的宽基指数与主题行业；只用缓存里确实存在的数据。
+  const comparison: HoldingResearch['comparison'] = [];
+  let broadRet20: number | null = null;
+  let broadName: string | null = null;
+  const indexRow = BROAD_INDEX_CODES.find(indexCode => {
+    try {
+      return !!marketDb.prepare('SELECT 1 FROM index_daily WHERE ts_code = ? AND trade_date <= ? LIMIT 1').get(indexCode, asOf);
+    } catch {
+      return false;
+    }
+  });
+  if (indexRow) {
+    const rows = marketDb.prepare('SELECT trade_date, close FROM index_daily WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 21')
+      .all(indexRow, asOf) as any[];
+    if (rows.length >= 21) {
+      const ordered = rows.reverse();
+      broadRet20 = pctChange(Number(ordered[0].close), Number(ordered[ordered.length - 1].close));
+      broadName = indexRow;
+      comparison.push({ kind: 'index', reference: indexRow, window_bars: 20, as_of: String(ordered.at(-1)?.trade_date ?? '') });
+    }
+  }
+  if (!broadRet20) unavailable.push('index_daily 缺少可用宽基指数窗口，无法计算相对宽基强弱');
+
+  const themeIndustry = holding.industry && holding.industry !== 'unclassified' ? String(holding.industry) : null;
+  const sector = themeIndustry && market?.sectors?.all
+    ? market.sectors.all.find((row: any) => row.industry === themeIndustry) ?? null
+    : null;
+  if (sector) comparison.push({ kind: 'sector', reference: String(sector.industry), window_bars: 20, as_of: market?.as_of_trade_date ?? null });
+  else if (themeIndustry) unavailable.push('市场日报缺少该持仓行业的中位收益，无法做行业对照');
+
+  const ret20 = retOver(20);
+  const excessBroad = ret20 != null && broadRet20 != null ? r2(ret20 - broadRet20) : null;
+  const excessTheme = ret20 != null && sector && typeof sector.ret20_median_pct === 'number'
+    ? r2(ret20 - sector.ret20_median_pct) : null;
+
+  const priceBasis: HoldingResearch['data']['price_basis'] = base ? 'qfq_adjusted' : 'raw_close_no_adj_factor';
+  if (!base) unavailable.push('缺少 fund_adj 因子，收益按原始收盘计算（拆分日会出现不连续）');
+  if (closes.length < 60) unavailable.push(`可比收益序列只有 ${closes.length} 根（不足 60 根，60 日指标为空或样本偏短）`);
+
+  const closeCny = typeof lastBar.close === 'number' ? lastBar.close : null;
+  const oneLot = closeCny === null ? null : valueCents(lots.etf_lot_size, Math.round(closeCny * 1000));
+  const fresh = holding.bar_quality === 'READY';
+  if (!fresh) unavailable.push(`行情质量 ${holding.bar_quality}：目标交易日收盘行情不可用`);
+
+  const themeLabel = holding.theme_label ?? holding.theme;
+  const investmentThesis = [
+    `持仓 ${holding.name ?? code}（${themeLabel}）当前权重 ${(holding.weight * 100).toFixed(2)}%`,
+    ...(excessBroad != null
+      ? [`ETF 自身 20 日收益 ${ret20?.toFixed(2)}%，相对 ${broadName} ${excessBroad >= 0 ? '高' : '低'} ${Math.abs(excessBroad).toFixed(2)} 个百分点`]
+      : []),
+    ...(excessTheme != null
+      ? [`ETF 自身 20 日收益相对其行业（${themeIndustry}）中位收益 ${excessTheme >= 0 ? '高' : '低'} ${Math.abs(excessTheme).toFixed(2)} 个百分点`]
+      : []),
+    ...(ma20 != null && last.price != null ? [`收盘 ${ma20 === null ? '' : last.price >= ma20 ? '站上' : '低于'} 20 日均价`] : []),
+  ];
+  const counterThesis = [
+    '20 日相对强弱只描述过去，不预测未来；ETF 收益不能由行业中位收益代替。',
+    ...(excessBroad != null && excessBroad < 0 ? ['ETF 自身 20 日收益弱于宽基：持有它的机会成本仍在。'] : []),
+    ...(ma60 != null && last.price != null && last.price < ma60 ? ['收盘低于 60 日均价：中期趋势尚未修复。'] : []),
+    '没有 RESEARCH_VERIFIED 级别的轮动证据，任何减仓/轮动都只是研究比较。',
+  ];
+
+  const conditions: HoldingResearch['conditions'] = [
+    {
+      stance: 'HOLD',
+      when: fresh && excessBroad != null && excessBroad >= 0
+        ? ['行情 READY 且 20 日相对宽基不落后时，继续持有；每次收盘后按同一口径复核。']
+        : ['在行情 READY 之前不改变研究结论：当前数据不足以证明继续持有或卖出更优。'],
+    },
+    {
+      stance: 'WATCH',
+      when: [
+        `收盘跌破最近 20 日最低收盘（${low20 === null ? '不可用' : low20.toFixed(4)} 元）后，重新评估。`,
+        ...(ma20 === null ? [] : [`收盘持续低于 20 日均价（${ma20.toFixed(4)} 元）且相对宽基继续走弱。`]),
+      ],
+    },
+    {
+      stance: 'REDUCE',
+      when: [
+        '集中度风险 + 自身趋势转弱 + 存在同类别中数据更优的候选，三者同时成立时研究减仓。',
+        '不设置机械的固定仓位阈值；减仓数量必须经过账户门控与可卖数量核对。',
+      ],
+    },
+    {
+      stance: 'ROTATE',
+      when: [
+        '只有当候选具备同日可校验行情、可比的自身收益/风险指标，且存在可追溯的 RESEARCH_VERIFIED 证据时，才研究轮动。',
+        '轮动需要同时核对卖出资金来源、费用、一手金额和换仓后的集中度。',
+      ],
+    },
+  ];
+
+  const invalidIf = [
+    `数据失效：${asOf} 之后出现新的交易日而本切片未更新。`,
+    '复权因子发生变化（拆分/份额折算）：复权前后收益不可直接比较，必须重算。',
+    '持仓数量或账户现金发生变化：集中度与可执行数量需要重新计算。',
+    '行情被更正（上游修订）：本切片的收益与均线全部失效。',
+  ];
+
+  return {
+    data: { bar_date: lastBar.trade_date ? String(lastBar.trade_date) : null, as_of_trade_date: asOf, fresh, bars_used: closes.length, price_basis: priceBasis },
+    quote: {
+      close_cny: closeCny,
+      pct_chg: typeof lastBar.pct_chg === 'number' ? lastBar.pct_chg : null,
+      amount_cny: typeof lastBar.amount === 'number' ? Math.round(lastBar.amount * 1000 * 100) / 100 : null,
+      vol_shares: typeof lastBar.vol === 'number' ? Math.round(lastBar.vol * 100 * 100) / 100 : null,
+      one_lot_cents: oneLot,
+    },
+    trend: {
+      ret5_pct: retOver(5),
+      ret20_pct: ret20,
+      ret60_pct: retOver(60),
+      ma20_cny: ma20 === null ? null : r2(ma20 * 1000) / 1000,
+      ma60_cny: ma60 === null ? null : r2(ma60 * 1000) / 1000,
+      above_ma20: ma20 === null || last.price === null ? null : last.price >= ma20,
+      above_ma60: ma60 === null || last.price === null ? null : last.price >= ma60,
+      excess_ret20_vs_broad_pct: excessBroad,
+      excess_ret20_vs_theme_pct: excessTheme,
+      realized_vol_60d_pct: returns.length >= 20 ? r2(stdev(returns)! * Math.sqrt(252) * 100) : null,
+      max_drawdown_60d_pct: maxDrawdown(closes),
+      distance_to_20d_low_pct: low20 && last.price ? r2((last.price / low20 - 1) * 100) : null,
+    },
+    comparison,
+    investment_thesis: investmentThesis,
+    counter_thesis: counterThesis,
+    conditions,
+    availability: { available: unavailable.length === 0, unavailable: [...new Set(unavailable)], invalid_if: invalidIf },
+  };
+}
+
+/** 与 etf.ts 的 qfq 基准同源：asOf 之前最后一个正因子；表缺失时返回 null。 */
+function safeFundBaseFactor(db: DatabaseSync, code: string, asOf: string): { trade_date: string; adj_factor: number } | null {
+  try {
+    return fundBaseFactor(db, code, asOf);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------- 数据质量分层
+
+/**
+ * 独立披露的数据质量维度（任务书 D1）。市场 READY 不代表 ETF READY；
+ * 账户 VERIFIED 不代表当天成交已确认；候选分数高不代表存在已验证的换仓优势。
+ */
+function buildQualityTiers(
+  summary: any, screening: EtfCandidateScreenResult | null, gateSatisfied: boolean,
+  accountStatus: string, gateReasons: { code: string }[], holdingsCount: number,
+): {
+  market_data: { status: string; as_of: string | null; detail: string };
+  etf_price: { status: string; ready: string[]; not_ready: string[]; detail: string };
+  etf_share_adjustment: { status: string; detail: string };
+  account_identity: { status: string; verified: boolean; detail: string };
+  account_trade_completeness: { status: string; detail: string };
+  research_evidence: { status: string; detail: string };
+  trade_plan_executability: { status: string; detail: string };
+} {
+  const marketReport = summary?.data_quality?.market_report ?? {};
+  const quotes = summary?.data_quality?.quotes ?? {};
+  const ready: string[] = quotes.ready ?? [];
+  const notReady: string[] = [...(quotes.stale ?? []), ...(quotes.not_ready ?? []), ...(quotes.missing ?? [])];
+  const shareReasons: string[] = (summary?.holdings ?? []).flatMap((holding: any) => (holding.bar_reasons ?? [])
+    .filter((reason: string) => /share_|adj_factor/.test(String(reason))));
+  return {
+    market_data: {
+      status: marketReport.available ? (marketReport.freshness === 'same_day' ? 'READY' : 'STALE') : 'MISSING',
+      as_of: marketReport.as_of_trade_date ?? null,
+      detail: marketReport.available
+        ? `A 股市场日报 ${marketReport.report_id}（${marketReport.as_of_trade_date}，${marketReport.freshness}）`
+        : '没有可用的市场日报',
+    },
+    etf_price: {
+      status: notReady.length === 0 && ready.length > 0 ? 'READY' : ready.length > 0 ? 'PARTIAL' : 'NOT_READY',
+      ready,
+      not_ready: [...new Set(notReady)],
+      detail: `逐只 ETF 收盘行情：READY ${ready.length}/${holdingsCount}，其余 ${[...new Set(notReady)].join('、') || '无'}`,
+    },
+    etf_share_adjustment: {
+      status: shareReasons.length === 0 ? 'OK' : 'DEGRADED',
+      detail: shareReasons.length === 0
+        ? '五只持仓的复权因子与份额均已找到（份额只影响净申购估计，不影响估值）'
+        : `复权/份额存在缺口：${[...new Set(shareReasons)].join('; ')}`,
+    },
+    account_identity: {
+      status: accountStatus,
+      verified: accountStatus === 'REAL_ACCOUNT_VERIFIED',
+      detail: accountStatus === 'REAL_ACCOUNT_VERIFIED'
+        ? '账户身份已由用户确认为真实账户'
+        : '账户身份未确认，账户数字只能作为研究数据',
+    },
+    account_trade_completeness: {
+      status: gateSatisfied ? 'CONFIRMED_THROUGH_TARGET_DATE' : 'UNCONFIRMED_RISK',
+      detail: gateSatisfied
+        ? '完整性声明覆盖目标交易日且账本无缺口'
+        : `交易完整性未确认：${gateReasons.map(reason => reason.code).join('、') || '未知'}`,
+    },
+    research_evidence: {
+      status: 'UNVERIFIED',
+      detail: '没有经过前瞻检验的 RESEARCH_VERIFIED 证据；候选分数是启发式排序，不是换仓优势',
+    },
+    trade_plan_executability: {
+      status: gateSatisfied && notReady.length === 0 ? 'ELIGIBLE' : 'NOT_EXECUTABLE',
+      detail: gateSatisfied && notReady.length === 0
+        ? '账户门控与行情质量满足可执行前提'
+        : '不可执行：账户门控未满足或 ETF 行情未全部 READY',
+    },
+  };
 }
 
 // ---------------------------------------------------------------- 历史预案跟踪
@@ -664,12 +1060,18 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
 
   // ---- 状态：只有账户门控满足且有动作时才可能 ACTIONABLE；否则最多 ILLUSTRATIVE。
   const insufficient = summary.status === 'DATA_INSUFFICIENT';
+  // ---- 语义修复（D2）：行情缺失是“数据不足”，不是“已证明继续持有最优”。
+  // 修复前：五只持仓全部 NOT_READY 时，没有动作 → 返回 NO_ACTION，读起来像
+  // “数据完整但没有可靠优势”。现在只有**行情完整**时才允许 NO_ACTION。
   // 顶层状态必须由**真实的腿**决定，不能只看账户门控：
   // 门控通过但没有任何可执行腿时，声称 ACTIONABLE 会让调用方以为可以下单。
   const anyExecutableLeg = actions.some(action => action.legs.some(leg => leg.executable === true));
+  const quotesReady = summary.data_quality?.quotes?.ready ?? [];
+  const quotesNotReady = [...new Set([...(summary.data_quality?.quotes?.stale ?? []), ...(summary.data_quality?.quotes?.not_ready ?? []), ...(summary.data_quality?.quotes?.missing ?? [])])];
+  const quotesComplete = quotesNotReady.length === 0 && quotesReady.length > 0;
   let status: DailyReportStatus;
   if (insufficient) status = 'DATA_INSUFFICIENT';
-  else if (actions.length === 0) status = 'NO_ACTION';
+  else if (actions.length === 0) status = quotesComplete ? 'NO_ACTION' : 'DATA_INSUFFICIENT';
   else status = gateSatisfied && anyExecutableLeg ? 'ACTIONABLE' : 'ILLUSTRATIVE';
 
   // 动作序号按最终顺序重排，保证 rank 连续（1..n）。
@@ -697,7 +1099,18 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
         '持仓行情质量从 READY 降为 STALE/NOT_READY',
         '账户快照被用户确认为当前账户且与目标交易日同日',
       ]
-    : built.blockers;
+    : status === 'DATA_INSUFFICIENT'
+      ? [
+          ...built.blockers,
+          ...(() => {
+            const notReady = [...(summary.data_quality?.quotes?.stale ?? []), ...(summary.data_quality?.quotes?.not_ready ?? []), ...(summary.data_quality?.quotes?.missing ?? [])];
+            return notReady.length
+              ? [`触发条件：${[...new Set(notReady)].join('、')} 的目标交易日 fund_daily 收盘 bar 落库且通过 OHLC 校验；此前不把“继续持有”当作已证明的最优选择。`]
+              : [];
+          })(),
+          '失效条件：出现新的、可复核的重大持仓风险事实时，本“数据不足”结论立即失效并重新评估。',
+        ]
+      : built.blockers;
 
   const market = summary.market_context ?? {};
   const evidence = summary.market_evidence ?? { support: [], contradiction: [] };
@@ -705,6 +1118,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     const stance: HoldingAssessment['stance'] = holding.bar_quality !== 'READY' ? 'WAIT' : 'HOLD';
     const themeEvidence = evidence.contradiction.find((item: any) => item.id === `theme_relative_strength:${holding.theme}`);
     const supportEvidence = evidence.support.find((item: any) => item.id === `theme_relative_strength:${holding.theme}`);
+    const research = buildHoldingResearch(marketDb, holding, asOf, market, lots);
     return {
       ts_code: holding.ts_code,
       name: holding.name,
@@ -725,11 +1139,15 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
         ...(themeEvidence ? [themeEvidence.statement] : []),
         '行业相对强弱只反映近 20 日，不预测未来。',
       ],
+      research,
       fact_meta: {
         as_of: holding.latest_bar_date, source: `research_summary:${holding.source}`, quality: holding.bar_quality === 'READY' ? 'OK' : 'DEGRADED', claim_status: 'FACT',
       },
     };
   });
+
+  // 独立数据质量维度（D1）：在持仓与门控都算完之后统一生成。
+  const qualityTiers = buildQualityTiers(summary, screening, gateSatisfied, accountStatus, gateReasons, holdings.length);
 
   const dataQualityNotes: string[] = [];
   if (!screening) dataQualityNotes.push('候选池筛选不可用（缓存缺少 fund_* 表或未提供市场缓存）');
@@ -795,7 +1213,14 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
         ? built.blockers.length > 0
           ? `没有可复核的证据支持下一交易日的交易动作：${built.blockers[0]}`
           : '没有可复核的证据支持下一交易日的交易动作：行情质量、市场证据与候选比较都没有形成可执行的优势。'
-        : status === 'DATA_INSUFFICIENT' ? '数据不足，无法给出动作。' : null,
+        : status === 'DATA_INSUFFICIENT'
+          ? (() => {
+              const notReady = [...new Set([...(summary.data_quality?.quotes?.stale ?? []), ...(summary.data_quality?.quotes?.not_ready ?? []), ...(summary.data_quality?.quotes?.missing ?? [])])];
+              return notReady.length
+                ? `DATA_INSUFFICIENT：${notReady.join('、')} 在 ${asOf} 没有可校验的收盘行情，无法估值或比较；行情缺失不等于已证明继续持有最优。`
+                : 'DATA_INSUFFICIENT：核心市场或账户数据不足，无法给出动作。';
+            })()
+          : null,
       observation_triggers: observationTriggers,
     },
     as_of_trade_date: asOf,
@@ -807,6 +1232,9 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       generated_at: input.generatedAt ?? null,
     },
     account_status: accountStatus,
+    /** 账户身份是显式提供还是按本部署唯一真实账户推导（C1）。 */
+    account_id: accountId,
+    account_id_source: input.accountIdSource ?? 'explicit',
     data_quality: {
       status: summary.data_quality?.status ?? 'INSUFFICIENT',
       summary_status: summary.status,
@@ -827,6 +1255,8 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
         status: screening?.data_coverage.status ?? 'UNAVAILABLE',
         missing_tables: screening?.data_coverage.missing_tables ?? ['fund_basic', 'fund_daily', 'fund_adj', 'fund_share'],
       },
+      /** 独立维度（D1）：任何一个 READY 都不代表其他维度也 READY。 */
+      tiers: qualityTiers,
       notes: dataQualityNotes,
     },
     market_judgement: {

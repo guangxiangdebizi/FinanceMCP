@@ -1,0 +1,4 @@
+#!/bin/sh
+# Last line of defence before publishing: scan every tracked file, not just the
+# staged diff (an old file can become risky without being touched).
+exec node scripts/check-secrets.mjs --tracked

@@ -7,6 +7,7 @@ import { computeEvidence, evaluateWatchlist, loadVerdicts } from './evidence.js'
 import { runAshareTool } from './tools.js';
 import { ashareResearchDbPath, openResearchDb } from './db.js';
 import { acceptance } from './acceptance.js';
+import { syncEtfForDaily, type EtfDailySyncSummary } from './etf.js';
 import { auditCache, fillGaps, saveAudit } from './audit.js';
 
 export interface CliHelpers {
@@ -52,6 +53,26 @@ function reportSummary(meta: { report_id: string; trade_date: string; status: st
   };
 }
 
+/**
+ * ETF 同步的隔离包装：ETF 故障只记录在返回值里，绝不让股票日报失败（任务书 B2.9）。
+ * 失败时仍会回读当前缓存状态，便于报告“今天实际缺口是什么”。
+ */
+async function syncEtfForDailySafe(db: DatabaseSync, start: string, end: string): Promise<EtfDailySyncSummary & { fatal?: string }> {
+  try {
+    return await syncEtfForDaily(db, end, { refreshFrom: end });
+  } catch (error: any) {
+    const message = String(error?.stack || error);
+    console.error(`[ashare] ETF 同步失败（已隔离，股票日报继续）: ${message}`);
+    return {
+      dates: [end], fund_daily: {}, holdings: {}, coverage: {},
+      fund_basic: { refreshed: false, rows: 0, error: message.slice(0, 300) },
+      fund_adj: {}, fund_share: {}, window: { adj_share_start: start, end },
+      errors: [`ETF 同步失败（已隔离）: ${message.slice(0, 300)}`], seconds: 0,
+      fatal: message.slice(0, 300),
+    };
+  }
+}
+
 export async function runCommand(db: DatabaseSync, command: string, h: CliHelpers): Promise<boolean> {
   switch (command) {
     case 'daily': {
@@ -69,6 +90,10 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       // as-of day itself: the 21:10 run must re-check what the 18:40 run stored.
       const start = recentTradeDays(db, date, 5)[0];
       const sync = await syncRange(db, start, date, { refreshFrom: date });
+      // ETF（持仓 + 已声明候选池）与股票同步在同一入口内完成，保证 21:40 之前
+      // ChatGPT 读到的是当日的 ETF 收盘行情。整个 ETF 段落被隔离：任何失败只写入
+      // 返回值，不中断股票日报（任务书 B2.9）。
+      const etf = await syncEtfForDailySafe(db, start, date);
       const evidence = loadVerdicts(db).meta;
       const ageDays = evidence.computed_at ? (Date.now() - Date.parse(evidence.computed_at)) / 86400_000 : Infinity;
       let evidenceRefreshed = false;
@@ -78,7 +103,12 @@ export async function runCommand(db: DatabaseSync, command: string, h: CliHelper
       }
       const { meta, report } = generateReport(db, date, 'live');
       const { datasets, ...rest } = sync;
-      h.print({ sync: { ...rest, quality: sync.quality.slice(-3), as_of_datasets: datasets[date] }, evidence_refreshed: evidenceRefreshed, report: reportSummary(meta, report) });
+      h.print({
+        sync: { ...rest, quality: sync.quality.slice(-3), as_of_datasets: datasets[date] },
+        etf: { ...etf, fund_daily: etf.fund_daily, holdings: etf.holdings, coverage: etf.coverage },
+        evidence_refreshed: evidenceRefreshed,
+        report: reportSummary(meta, report),
+      });
       return true;
     }
     case 'report': {

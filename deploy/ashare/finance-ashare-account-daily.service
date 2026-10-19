@@ -1,0 +1,9 @@
+[Unit]
+Description=FinanceMCP real-account close-of-day research report and forward record
+After=docker.service network-online.target finance-ashare-daily.service
+
+[Service]
+Type=oneshot
+# 21:10 的市场流水线完成后运行：21:40 之前 ChatGPT 读到的账户日报必须已写入。
+ExecStart=%h/workspace/FinanceMCP/deploy/ashare/run-account-daily.sh
+TimeoutStartSec=900

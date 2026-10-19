@@ -3,6 +3,7 @@ import { fetchAll } from './fetch.js';
 import { upsertRows } from './db.js';
 import { addDays, isTradeDay, latestTradeDay, previousTradeDay, shanghaiToday, syncTradeCal, tradeDaysBetween } from './ingest.js';
 import { adjustmentRatio, AdjustMode, DataQueryError, parseYmd } from './data.js';
+import { ETF_CANDIDATE_DECLARATIONS } from './etfDeclarations.js';
 
 /**
  * ETF 数据纵切（R0）：基金基础信息、日线、复权因子与份额。
@@ -61,6 +62,37 @@ const FUND_ADJ_FIELDS = 'ts_code,trade_date,adj_factor';
 const FUND_SHARE_FIELDS = 'ts_code,trade_date,fd_share,fund_type,market';
 
 export type EtfQualityStatus = 'READY' | 'DEGRADED' | 'NOT_READY';
+
+/**
+ * 独立的估值/份额数据层级（任务书 D1）。
+ *
+ * 一个综合 status 无法回答“这只 ETF 今天能不能用于估值/研究”：真实生产
+ * 2026-10-19 的持仓日报把所有持仓都报成 NOT_READY，而原因是行情缺失；反过来，
+ * fund_share 的披露滞后（份额数据天然晚于价格）也不应该把当天有效的收盘价
+ * 判成不可用。因此这里把维度拆开：
+ * - `price`：最新一根日线是否可校验、是否落在预期交易日 —— 决定能否估值；
+ * - `adjustment`：复权因子是否覆盖最新 bar —— 决定能否做 qfq/hfq 比较；
+ * - `flow`：份额是否可得、是否滞后 —— 只影响净申购估计，不影响估值。
+ */
+export interface EtfValuationTiers {
+  price: {
+    status: EtfQualityStatus;
+    /** 最新一根日线日期（真实日期，不替代）。 */
+    bar_date: string | null;
+    /** 是否等于预期最近交易日。 */
+    matches_expected: boolean | null;
+    reasons: string[];
+  };
+  adjustment: { available: boolean; factor_date: string | null; reasons: string[] };
+  flow: {
+    /** READY=当日或最近交易日有份额；LAGGED=有份额但晚于 bar；MISSING=没有份额。 */
+    status: 'READY' | 'LAGGED' | 'MISSING';
+    latest_share_date: string | null;
+    /** 份额日期相对最新 bar 滞后多少个自然日；无份额时为 null。 */
+    lag_days: number | null;
+    reasons: string[];
+  };
+}
 
 /** ETF 表是否存在：旧缓存（含未迁移的生产库）上 tools/list 与普通工具仍可用。 */
 export function etfSchemaReady(db: DatabaseSync): boolean {
@@ -249,11 +281,15 @@ export async function syncFundDaily(db: DatabaseSync, start: string, end: string
 /**
  * 复权因子。fund_adj 按代码区间取，逐只合并写入（不做整段替换，避免一次
  * 失败抹掉已有历史）。任何一只失败只记录该代码，不影响其他代码。
+ * `codes` 缺省为五只持仓；日频流水线会把已声明的候选池也纳入，否则候选的
+ * 复权口径永远是 raw_close_no_adj_factor。
  */
-export async function syncFundAdj(db: DatabaseSync, start: string, end: string): Promise<Record<string, number>> {
+export async function syncFundAdj(
+  db: DatabaseSync, start: string, end: string, opts: { codes?: readonly string[] } = {},
+): Promise<Record<string, number>> {
   assertEtfSchema(db);
   const out: Record<string, number> = {};
-  for (const code of ETF_UNIVERSE) {
+  for (const code of opts.codes ?? ETF_UNIVERSE) {
     const key = `${code}:${start}-${end}`;
     try {
       const rows = (await fetchAll('fund_adj', { ts_code: code, start_date: start, end_date: end }, FUND_ADJ_FIELDS))
@@ -270,10 +306,12 @@ export async function syncFundAdj(db: DatabaseSync, start: string, end: string):
 }
 
 /** 基金份额（时点存量，万份）。同样按代码区间合并写入。 */
-export async function syncFundShare(db: DatabaseSync, start: string, end: string): Promise<Record<string, number>> {
+export async function syncFundShare(
+  db: DatabaseSync, start: string, end: string, opts: { codes?: readonly string[] } = {},
+): Promise<Record<string, number>> {
   assertEtfSchema(db);
   const out: Record<string, number> = {};
-  for (const code of ETF_UNIVERSE) {
+  for (const code of opts.codes ?? ETF_UNIVERSE) {
     const key = `${code}:${start}-${end}`;
     try {
       const rows = (await fetchAll('fund_share', { ts_code: code, start_date: start, end_date: end }, FUND_SHARE_FIELDS))
@@ -321,6 +359,238 @@ export async function syncEtf(db: DatabaseSync, start: string, end: string, opts
     fund_basic: basic, fund_daily: daily, fund_adj: adj, fund_share: share,
     errors, seconds: Math.round((Date.now() - t0) / 1000),
   };
+}
+
+// ---------------------------------------------------------------- daily pipeline integration
+
+/** 已声明的候选池（C2）。稳定性：声明顺序即去重顺序。 */
+export const ETF_CANDIDATE_CODES: readonly string[] = ETF_CANDIDATE_DECLARATIONS.map(d => d.ts_code);
+
+/**
+ * 日频流水线需要的全部代码：五只真实持仓在前（优先保障），其后是已声明的候选池。
+ * 去重后持仓仍然排在第一位，逐代码兜底时先补持仓。
+ */
+export const ETF_PIPELINE_CODES: readonly string[] = [...new Set([...ETF_UNIVERSE, ...ETF_CANDIDATE_CODES])];
+
+/** 候选池日线回看窗口（自然日）：60 根评分窗口 + 流动性 20 根，留足节假日余量。 */
+export const ETF_CANDIDATE_HISTORY_DAYS = 120;
+/** fund_basic 的无条件刷新间隔（自然日）。基础信息变化很慢，每天全量重拉只会浪费额度。 */
+export const ETF_FUND_BASIC_REFRESH_DAYS = 7;
+
+const FUND_DAILY_BAR_COLS = FUND_DAILY_FIELDS.split(',');
+const FUND_ADJ_COLS = FUND_ADJ_FIELDS.split(',');
+const FUND_SHARE_COLS = FUND_SHARE_FIELDS.split(',');
+
+export interface FundHoldingFetch {
+  ts_code: string;
+  /** 上游返回的原始行情行数（0 表示上游确实没有这一天的基金行情，通常是停牌）。 */
+  upstream_rows: number;
+  written: number;
+  /** 兜底是否真的发出了请求；已有合法 bar 时为 false（幂等，不重复调用）。 */
+  fetched: boolean;
+  error?: string;
+}
+
+/**
+ * 逐只补齐某交易日的基金日线 —— 全市场回答缺失时的**兜底**，不是主路径。
+ *
+ * 触发场景（真实生产 2026-10-19）：`fund_daily?trade_date=` 返回了 2162 行，但
+ * 五只持仓中有两只的上市日期晚于 Tushare 分页的稳定顺序，全市场分页在某些
+ * 交易日会漏掉它们。缺失持仓基金是“不可估值”，必须在当天明确处理，而不是
+ * 等下一个交易日。
+ *
+ * 安全条件：
+ * - 已有合法 bar 且不是 `refresh` 时不发请求（幂等，不重复消耗额度）；
+ * - 单只失败只记录该代码，不抛出、不影响其他代码，也不删除任何已有行；
+ * - 上游确实没有该日行情（停牌）时返回 upstream_rows=0 并记录，不伪造。
+ */
+export async function syncFundDailyCodes(
+  db: DatabaseSync, date: string, codes: readonly string[] = ETF_UNIVERSE, opts: { refresh?: boolean } = {},
+): Promise<FundHoldingFetch[]> {
+  assertEtfSchema(db);
+  const out: FundHoldingFetch[] = [];
+  for (const code of codes) {
+    const existing = db.prepare('SELECT open, high, low, close, vol, amount FROM fund_daily WHERE ts_code = ? AND trade_date = ?')
+      .get(code, date) as any;
+    const existingValid = !!existing && validateFundBar(existing).valid;
+    // 已有合法 bar 就跳过：全市场刷新（含 --refresh）已经覆盖了当天，“逐只兜底”
+    // 只用于补齐全市场回答漏掉/坏掉的持仓，避免重复的 Tushare 调用与重复写入。
+    if (existingValid) {
+      out.push({ ts_code: code, upstream_rows: 0, written: 0, fetched: false });
+      continue;
+    }
+    try {
+      const rows = (await fetchAll('fund_daily', { ts_code: code, trade_date: date }, FUND_DAILY_FIELDS))
+        .filter(r => r.ts_code && r.trade_date === date);
+      let written = 0;
+      if (rows.length) {
+        // 只写这一只、这一天：不触碰同日其他代码，也不删除全市场已有的行。
+        written = upsertRows(db, 'fund_daily', FUND_DAILY_BAR_COLS, rows);
+      }
+      const logKey = `${code}:${date}`;
+      logFundSync(db, 'fund_daily_per_code', logKey, written, rows.length ? 'ok' : 'empty',
+        rows.length ? 'per-code fallback' : `上游无该日行情（可能停牌）${date}`);
+      out.push({ ts_code: code, upstream_rows: rows.length, written, fetched: true });
+    } catch (e: any) {
+      const message = String(e?.message ?? e);
+      logFundSync(db, 'fund_daily_per_code', `${code}:${date}`, 0, 'failed', 'request failed: ' + message);
+      out.push({ ts_code: code, upstream_rows: 0, written: 0, fetched: true, error: message.slice(0, 200) });
+    }
+  }
+  return out;
+}
+
+/** 某交易日五只持仓的覆盖情况：哪些有合法 bar，哪些上游确认无行情（停牌）。 */
+export interface FundHoldingCoverage {
+  date: string;
+  ready: string[];
+  /** 上游确认当日没有基金行情（停牌或未上市），不是同步失败。 */
+  no_upstream_bar: string[];
+  /** 既没有 bar 也没有上游确认（未请求或请求失败）。 */
+  missing: string[];
+  errors: { ts_code: string; error: string }[];
+}
+
+export function fundHoldingCoverage(
+  db: DatabaseSync, date: string, fetches: readonly FundHoldingFetch[] = [], codes: readonly string[] = ETF_UNIVERSE,
+): FundHoldingCoverage {
+  const coverage: FundHoldingCoverage = { date, ready: [], no_upstream_bar: [], missing: [], errors: [] };
+  for (const code of codes) {
+    const row = db.prepare('SELECT open, high, low, close, vol, amount FROM fund_daily WHERE ts_code = ? AND trade_date = ?').get(code, date) as any;
+    const fetch = fetches.find(f => f.ts_code === code);
+    if (fetch?.error) coverage.errors.push({ ts_code: code, error: fetch.error });
+    if (row && validateFundBar(row).valid) coverage.ready.push(code);
+    else if (fetch && fetch.upstream_rows === 0 && !fetch.error) coverage.no_upstream_bar.push(code);
+    else coverage.missing.push(code);
+  }
+  return coverage;
+}
+
+/** fund_basic 是否到了该刷新的时候（缺失、权限失败后重试、或超过刷新间隔）。 */
+export function fundBasicRefreshDue(db: DatabaseSync, now = Date.now()): boolean {
+  if (!etfSchemaReady(db)) return true;
+  const present = (db.prepare('SELECT COUNT(*) n FROM fund_basic WHERE ts_code IN (?,?,?,?,?)')
+    .get(...ETF_UNIVERSE) as any).n as number;
+  if (present < ETF_UNIVERSE.length) return true;
+  const row = db.prepare("SELECT status, synced_at FROM fund_sync_log WHERE dataset = 'fund_basic' ORDER BY synced_at DESC LIMIT 1").get() as any;
+  if (!row) return true;
+  // 权限/积分受限是暂时的：到期后必须重试，否则永远拿不到基础信息。
+  if (row.status === 'permission_denied') return true;
+  const age = (now - Date.parse(row.synced_at)) / 86400_000;
+  return !Number.isFinite(age) || age >= ETF_FUND_BASIC_REFRESH_DAYS;
+}
+
+export interface EtfDailySyncSummary {
+  dates: string[];
+  /** 全市场日线按交易日的结果（缺失持仓会在这里标 partial/missing）。 */
+  fund_daily: Record<string, FundDateSync>;
+  /** 持仓逐只兜底结果；只有全市场回答未覆盖持仓时才真正发请求。 */
+  holdings: Record<string, FundHoldingFetch[]>;
+  /** 每个交易日的持仓覆盖，明确列出 READY / 上游无行情 / 缺失。 */
+  coverage: Record<string, FundHoldingCoverage>;
+  fund_basic: { refreshed: boolean; rows: number; error?: string; permission_denied?: boolean };
+  fund_adj: Record<string, number>;
+  fund_share: Record<string, number>;
+  /** 按代码区间的复权/份额同步只覆盖最近窗口（候选池历史回看）。 */
+  window: { adj_share_start: string; end: string };
+  errors: string[];
+  seconds: number;
+}
+
+/**
+ * 日频流水线中的 ETF 部分。与股票同步**互相隔离**：
+ * - 任何一步失败只记录在返回值里，绝不抛出，因此 ETF 故障不会中断股票日报；
+ * - 失败的同步不会删除上一份已确认快照（同步函数本身按整日替换/合并写入）；
+ * - 只同步“最近若干交易日”的全市场日线，不为候选池每天全量重拉历史。
+ */
+export async function syncEtfForDaily(
+  db: DatabaseSync, end: string, opts: { refreshFrom?: string; days?: number } = {},
+): Promise<EtfDailySyncSummary> {
+  const t0 = Date.now();
+  const errors: string[] = [];
+  const days = opts.days ?? 5;
+  const dates = tradeDaysBetween(db, addDays(end, -30), end).slice(-days);
+  const summary: EtfDailySyncSummary = {
+    dates,
+    fund_daily: {},
+    holdings: {},
+    coverage: {},
+    fund_basic: { refreshed: false, rows: 0 },
+    fund_adj: {},
+    fund_share: {},
+    window: { adj_share_start: addDays(end, -ETF_CANDIDATE_HISTORY_DAYS), end },
+    errors,
+    seconds: 0,
+  };
+  if (!etfSchemaReady(db)) {
+    errors.push(ETF_NOT_INITIALIZED);
+    summary.seconds = Math.round((Date.now() - t0) / 1000);
+    return summary;
+  }
+  if (!dates.length) {
+    errors.push(`交易日历在 ${end} 之前没有交易日，跳过 ETF 同步`);
+    summary.seconds = Math.round((Date.now() - t0) / 1000);
+    return summary;
+  }
+
+  // 1) fund_basic：按需刷新，不无条件每天全量重拉。
+  try {
+    if (fundBasicRefreshDue(db)) {
+      const basic = await syncFundBasic(db);
+      summary.fund_basic = { refreshed: true, rows: basic.rows, ...(basic.error ? { error: basic.error } : {}), ...(basic.permission_denied ? { permission_denied: true } : {}) };
+      if (basic.error) errors.push(`fund_basic: ${basic.error}`);
+    }
+  } catch (e: any) {
+    summary.fund_basic = { refreshed: false, rows: 0, error: String(e?.message ?? e) };
+    errors.push(`fund_basic: ${String(e?.message ?? e)}`);
+  }
+
+  // 2) 全市场日线：只刷最近若干交易日；上游修订不会残留（整日替换）。
+  const refreshFrom = opts.refreshFrom;
+  for (const date of dates) {
+    const refresh = refreshFrom !== undefined && date >= refreshFrom;
+    try {
+      const perDate = await syncFundDaily(db, date, date, { refresh });
+      summary.fund_daily[date] = perDate[date];
+    } catch (e: any) {
+      summary.fund_daily[date] = { rows: countFundRows(db, 'fund_daily', date), fetched: false, status: 'failed', write: 'none', error: String(e?.message ?? e) };
+      summary.errors.push(`fund_daily ${date}: ${String(e?.message ?? e)}`);
+    }
+  }
+
+  // 3) 逐只兜底：持仓必须先得到可校验的 bar（候选池不阻塞持仓）。
+  for (const date of dates) {
+    try {
+      const fetches = await syncFundDailyCodes(db, date, ETF_UNIVERSE);
+      summary.holdings[date] = fetches;
+      const coverage = fundHoldingCoverage(db, date, fetches, ETF_UNIVERSE);
+      summary.coverage[date] = coverage;
+      for (const err of coverage.errors) errors.push(`fund_daily ${err.ts_code} ${date}: ${err.error}`);
+    } catch (e: any) {
+      summary.holdings[date] = [];
+      summary.coverage[date] = fundHoldingCoverage(db, date, [], ETF_UNIVERSE);
+      errors.push(`fund_daily per-code ${date}: ${String(e?.message ?? e)}`);
+    }
+  }
+
+  // 4) 复权与份额：持仓 + 已声明候选池，按最近窗口逐代码合并写入。
+  //    fund_share 允许披露滞后：缺失不会把有效日线降为不可估值（见 quoteOne）。
+  try {
+    summary.fund_adj = await syncFundAdj(db, summary.window.adj_share_start, end, { codes: ETF_PIPELINE_CODES });
+  } catch (e: any) {
+    errors.push(`fund_adj: ${String(e?.message ?? e)}`);
+  }
+  try {
+    summary.fund_share = await syncFundShare(db, summary.window.adj_share_start, end, { codes: ETF_PIPELINE_CODES });
+  } catch (e: any) {
+    errors.push(`fund_share: ${String(e?.message ?? e)}`);
+  }
+  for (const [code, n] of Object.entries(summary.fund_adj)) {
+    if (!n && (ETF_UNIVERSE as readonly string[]).includes(code)) errors.push(`fund_adj ${code}: 无数据或请求失败`);
+  }
+
+  summary.seconds = Math.round((Date.now() - t0) / 1000);
+  return summary;
 }
 
 // ---------------------------------------------------------------- flow labelling
@@ -520,6 +790,8 @@ export interface EtfQuote {
   adjustment_events: { trade_date: string; from_factor: number; to_factor: number; factor_ratio: number }[];
   liquidity: { window: number; bars_used: number; mean_amount_cny: number | null; zero_volume_days: number; max_gap_days: number | null };
   quality: { status: EtfQualityStatus; reasons: string[]; missing: string[] };
+  /** 独立的数据层级：价格可估值性 / 复权 / 份额，互不替代（D1）。 */
+  tiers: EtfValuationTiers;
   stale: boolean;
   expected_trade_date: string | null;
   bar_matches_expected: boolean | null;
@@ -674,6 +946,7 @@ function quoteOne(db: DatabaseSync, code: string, start: string, end: string, ad
   }
 
   // 复权：与 data.ts 的股票口径一致（qfq 以 end 之前最后一个因子为基准）。
+  // 因子缺失只影响复权比较，不影响“今天的收盘价能不能估值”（原始价仍可执行）。
   const factor = last ? (db.prepare('SELECT adj_factor FROM fund_adj WHERE ts_code = ? AND trade_date = ?').get(code, last.trade_date) as any)?.adj_factor : null;
   const base = adjust === 'qfq' ? fundBaseFactor(db, code, end) : null;
   if (last && adjust !== 'none' && !(factor > 0)) { reasons.push('adj_factor_missing'); missing.push('fund_adj'); }
@@ -690,7 +963,8 @@ function quoteOne(db: DatabaseSync, code: string, start: string, end: string, ad
   const ratio = last ? barRatio(last.trade_date) : NaN;
   const adjPrice = (v: number | null) => (v == null || !Number.isFinite(ratio) ? null : round4(v * ratio));
 
-  // 份额：最新与上一时点（都在 end 之前）。
+  // 份额：最新与上一时点（都在 end 之前）。份额披露天然滞后于价格：
+  // 缺失或滞后只影响净申购估计，不会把有效的日线判成不可估值（D1）。
   const shareRows = db.prepare('SELECT trade_date, fd_share FROM fund_share WHERE ts_code = ? AND trade_date <= ? AND fd_share IS NOT NULL ORDER BY trade_date DESC LIMIT 2')
     .all(code, end) as any[];
   const latestShare = shareRows[0] ?? null;
@@ -756,7 +1030,36 @@ function quoteOne(db: DatabaseSync, code: string, start: string, end: string, ad
     }
   }
 
-  // 最新日线非法 → NOT_READY（即使其他数据齐全）；其他原因只降级到 DEGRADED。
+  // 质量分层：价格（能否估值）/ 复权（能否做复权比较）/ 份额（只影响净申购估计）。
+  // 综合 status 只由价格层级与**会改变可执行价格**的原因决定：
+  // - 无 bar / bar 非法 / 落后预期交易日 → NOT_READY（不可估值）；
+  // - 复权因子或份额缺失 → 只降级 DEGRADED，价格仍可执行（原始收盘价）。
+  // 真实生产 2026-10-19 的教训：份额披露滞后与行情缺失被混为同一状态，日报因此
+  // 无法区分“今天没有价格”与“今天有价格、只是份额晚了一两天”。
+  const priceReasons: string[] = [];
+  if (!last) priceReasons.push('no_bar_in_window');
+  else if (barInvalid) priceReasons.push(...(lastCheck?.reasons ?? ['invalid_bar']));
+  if (stale) for (const reason of reasons.filter(r => r.startsWith('stale_bar'))) if (!priceReasons.includes(reason)) priceReasons.push(reason);
+  const priceStatus: EtfQualityStatus = !last || barInvalid || stale ? 'NOT_READY' : 'READY';
+  const adjustmentAvailable = !!last && factor > 0 && (adjust !== 'qfq' || !!base);
+  const adjustmentReasons: string[] = [];
+  if (last && !(factor > 0)) adjustmentReasons.push('adj_factor_missing');
+  if (last && adjust === 'qfq' && !base) adjustmentReasons.push('qfq_base_factor_missing');
+  const shareLagDays = latestShare && last ? calendarDays(latestShare.trade_date, last.trade_date) : null;
+  const flowStatus: EtfValuationTiers['flow']['status'] = !latestShare
+    ? 'MISSING'
+    : !last || latestShare.trade_date >= last.trade_date ? 'READY' : 'LAGGED';
+  const flowReasons: string[] = [];
+  if (!latestShare) flowReasons.push('share_missing');
+  else if (!prevShare) flowReasons.push('share_prev_missing');
+  if (flowStatus === 'LAGGED') flowReasons.push(`share_lagged: 份额日期 ${latestShare.trade_date} 早于最新行情 ${last?.trade_date}`);
+  const tiers: EtfValuationTiers = {
+    price: { status: priceStatus, bar_date: last?.trade_date ?? null, matches_expected: last && expected ? last.trade_date === expected : null, reasons: priceReasons },
+    adjustment: { available: adjustmentAvailable, factor_date: last && factor > 0 ? last.trade_date : null, reasons: adjustmentReasons },
+    flow: { status: flowStatus, latest_share_date: latestShare?.trade_date ?? null, lag_days: shareLagDays, reasons: flowReasons },
+  };
+
+  // 最新日线非法或缺失 → NOT_READY（即使其他数据齐全）；其余原因只降级到 DEGRADED。
   const status: EtfQualityStatus = !last || barInvalid ? 'NOT_READY' : reasons.length ? 'DEGRADED' : 'READY';
   const logRow = last ? db.prepare("SELECT synced_at FROM fund_sync_log WHERE dataset = 'fund_daily' AND key = ?").get(last.trade_date) as any : null;
 
@@ -819,6 +1122,7 @@ function quoteOne(db: DatabaseSync, code: string, start: string, end: string, ad
     },
     adjustment_events: adjustmentEvents,
     quality: { status, reasons, missing },
+    tiers,
     stale,
     expected_trade_date: expected,
     bar_matches_expected: last && expected ? last.trade_date === expected : null,
