@@ -17,7 +17,7 @@ import { buildScenario, type EtfQuoteInput, type ScenarioAction } from './scenar
 import { DEFAULT_FEE_RULES, DEFAULT_STRESS_RULES } from './rules.js';
 import { runDecisionCommand } from './decisionCli.js';
 import { defaultTradeDate, runResearchSummaryCommand } from './researchCli.js';
-import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
+import { listConfiguredAccounts, resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { buildDailyReport } from './dailyReport.js';
 import { screenEtfCandidates } from '../ashare/etfUniverse.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
@@ -86,6 +86,7 @@ export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [opti
         [--last-reconciled-at ISO] [--events-through YYYYMMDD] [--unreported-risk yes|no] [--note TEXT]
                                                        声明"用户已核对到哪个时点"；缺省按存在未上报交易风险处理
   portfolio-completeness --account ID [--db PATH]      只读查看当前完整性声明
+  portfolio-account-list [--db PATH]                   只读列出本部署配置的账户及默认解析结果（C1）
 
   研究证据（唯一写路径；不通过 MCP 暴露）：
   portfolio-evidence-record --id ID --kind ROTATION --buy CODE [--sell CODE]
@@ -435,6 +436,26 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
           note: h.arg('note') ?? '',
         }, { confirm: true, recordedBy: requireArg(h, 'recorded-by') });
         h.print({ ...result, db: portfolioDbPath(), note: '完整性声明只描述"用户已核对到哪个时点"，不代表券商实时余额。' });
+      } finally {
+        db.close();
+      }
+      return true;
+    }
+    case 'portfolio-account-list': {
+      // C1：私有端点/日报省略 account_id 时使用的默认账户必须是“实际配置的唯一真实账户”。
+      // 这里显式列出配置来源，供部署核对与验收使用；只读。
+      const db = openReadOnly(h.arg('db'));
+      try {
+        const accounts = listConfiguredAccounts(db);
+        const defaultResolution = (() => {
+          try { return resolveAccountId(db, undefined); } catch (error: any) { return { error: error?.message ?? String(error) }; }
+        })();
+        h.print({
+          accounts,
+          default_resolution: defaultResolution,
+          note: '默认账户解析规则：唯一已确认真实账户 → 用它；多个 → 要求显式 account_id；未知账户 → 拒绝。演示快照只能被显式点名。',
+          db: portfolioDbPath(),
+        });
       } finally {
         db.close();
       }
