@@ -431,3 +431,35 @@ test('D-2 数据不足日不写前瞻记录（不产生可能被误读的“当�
     db.close();
   }
 });
+
+// ---------------------------------------------------------------- C4. 账户口径
+
+test('C-6 账户口径对照：数量一致、现金一致，HHI 差异只来自价格口径', async () => {
+  const { db } = seedAccountDb('c6.sqlite');
+  const market = seedMarket('c6-market.sqlite');
+  stubFetch({});
+  try {
+    // 目标日行情用 2 元收盘（与快照参考价不同），触发重估差异。
+    const summary = await syncEtfForDaily(market, PREV, { refreshFrom: PREV });
+    assert.ok(summary.coverage[PREV].ready.length === ETF_UNIVERSE.length);
+    const report = buildDailyReport({
+      portfolioDb: db, marketDb: market, accountId: 'real-main', asOfTradeDate: PREV,
+      snapshotId: 'user-confirmed-eod-2026-10-16',
+    });
+    assert.equal(report.account_view.quantity_consistent, true, '证券数量必须与快照一致');
+    assert.equal(report.account_view.snapshot_basis.cash_cents, report.account_view.revalued_basis.cash_cents);
+    assert.equal(report.account_view.snapshot_basis.securities_mv_cents, 7436250);
+    assert.notEqual(report.account_view.snapshot_basis.securities_mv_cents, report.account_view.revalued_basis.securities_mv_cents,
+      '收盘价与参考价不同时必须如实重估');
+    assert.equal(report.account_view.revalued_basis.price_source, 'server_cache_close');
+    assert.equal(report.account_view.snapshot_basis.hhi, 0.557087);
+    assert.ok(typeof report.account_view.reconciliation.find(row => row.field === 'hhi').explanation === 'string');
+    assert.match(report.account_view.note, /数量与用户确认的快照逐只一致/);
+    // 可执行性仍必须被账户门控阻止（未上报交易风险）。
+    assert.equal(report.actionable, false);
+  } finally {
+    market.close();
+    globalThis.fetch = originalFetch;
+    db.close();
+  }
+});

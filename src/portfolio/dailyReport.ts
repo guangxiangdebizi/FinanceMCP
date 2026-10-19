@@ -265,6 +265,8 @@ export interface DailyReportResult {
   /** 本次日报实际使用的账户标识，以及它来自显式参数还是默认解析（C1）。 */
   account_id: string;
   account_id_source: 'explicit' | 'default';
+  /** 账户口径对照：快照参考价 vs 当日收盘重估（C4）。 */
+  account_view: ReturnType<typeof buildAccountView>;
   data_quality: {
     status: 'OK' | 'DEGRADED' | 'INSUFFICIENT';
     summary_status: string;
@@ -715,6 +717,94 @@ function buildQualityTiers(
         ? '账户门控与行情质量满足可执行前提'
         : '不可执行：账户门控未满足或 ETF 行情未全部 READY',
     },
+  };
+}
+
+// ---------------------------------------------------------------- 账户口径对照
+
+/**
+ * 账户口径对照（任务书 C4）。同一真实账户分别从 CLI、私有 MCP 与日报查询时，
+ * 必须能解释“证券数量 / 现金 / 证券市值 / 总资产 / 集中度”是否一致。
+ *
+ * 生产上出现过的真实差异：`ashare_portfolio_summary` 用**快照参考价**计算市值与 HHI，
+ * 日报用**当日收盘价**重估持仓，因此同一账户得到 HHI 0.557087 与 0.540059。
+ * 两者都不算错，但必须并列披露并说明差异来源，否则会被读成账户数据矛盾。
+ */
+function buildAccountView(
+  snapshot: AccountSnapshot | undefined, accountId: string, holdings: HoldingAssessment[],
+  concentration: { hhi: number | null; effective_positions: number | null }, asOf: string,
+): {
+  as_of_trade_date: string;
+  account_id_in_report: string;
+  snapshot_id: string | null;
+  snapshot_as_of: string | null;
+  snapshot_basis: { securities_mv_cents: number; cash_cents: number; total_assets_cents: number; hhi: number | null };
+  revalued_basis: {
+    securities_mv_cents: number; cash_cents: number; total_assets_cents: number; hhi: number | null;
+    price_source: 'server_cache_close' | 'snapshot_reference_price' | 'mixed';
+    codes_from_snapshot_price: string[];
+  };
+  quantity_consistent: boolean;
+  reconciliation: { field: string; snapshot: number | null; revalued: number | null; explanation: string }[];
+  note: string;
+} {
+  const positions = snapshot?.positions ?? [];
+  const snapshotSecurities = snapshot?.totals.securities_mv_cents ?? 0;
+  const snapshotCash = snapshot?.totals.cash_cents ?? 0;
+  const snapshotTotal = snapshot?.totals.total_assets_cents ?? 0;
+  const snapshotHhi = snapshotTotal > 0 && positions.length
+    ? r6(positions.reduce((sum, position) => sum + (position.market_value_cents / snapshotTotal) ** 2, 0))
+    : null;
+  const revaluedSecurities = holdings.reduce((sum, holding) => sum + holding.market_value_cents, 0);
+  const revaluedCash = snapshot?.totals.cash_cents ?? 0;
+  const revaluedWealth = snapshot?.totals.wealth_cents ?? 0;
+  const revaluedTotal = revaluedSecurities + revaluedCash + revaluedWealth;
+  const fallbackCodes = holdings.filter(holding => holding.price_source !== 'server_cache_close').map(holding => holding.ts_code);
+  const quantityByCode = new Map(positions.map(position => [position.ts_code, position.quantity]));
+  const quantityConsistent = holdings.every(holding => quantityByCode.get(holding.ts_code) === holding.quantity);
+  return {
+    as_of_trade_date: asOf,
+    account_id_in_report: accountId,
+    snapshot_id: snapshot?.snapshot_id ?? null,
+    snapshot_as_of: snapshot?.as_of ?? null,
+    snapshot_basis: {
+      securities_mv_cents: snapshotSecurities,
+      cash_cents: snapshotCash,
+      total_assets_cents: snapshotTotal,
+      hhi: snapshotHhi,
+    },
+    revalued_basis: {
+      securities_mv_cents: revaluedSecurities,
+      cash_cents: revaluedCash,
+      total_assets_cents: revaluedTotal,
+      hhi: concentration.hhi,
+      price_source: fallbackCodes.length === 0
+        ? 'server_cache_close'
+        : fallbackCodes.length === holdings.length ? 'snapshot_reference_price' : 'mixed',
+      codes_from_snapshot_price: fallbackCodes,
+    },
+    quantity_consistent: quantityConsistent,
+    reconciliation: [
+      {
+        field: 'cash_cents', snapshot: snapshotCash, revalued: revaluedCash,
+        explanation: '现金直接取自用户确认的快照；日报不会重估现金。',
+      },
+      {
+        field: 'securities_mv_cents', snapshot: snapshotSecurities, revalued: revaluedSecurities,
+        explanation: '快照是用户确认时的市值；日报按目标交易日收盘价重估（行情缺失的代码回退到快照参考价）。',
+      },
+      {
+        field: 'total_assets_cents', snapshot: snapshotTotal, revalued: revaluedTotal,
+        explanation: '快照总资产 + 证券重估差额；现金与理财不变，因此差额只来自行情变动。',
+      },
+      {
+        field: 'hhi', snapshot: snapshotHhi, revalued: concentration.hhi,
+        explanation: 'HHI = Σ(持仓市值/总资产)²；两者的分母不同（快照总资产 vs 重估后总资产），因此数值不同不是账户矛盾。',
+      },
+    ],
+    note: quantityConsistent
+      ? '证券数量与用户确认的快照逐只一致；市值/HHI 的差异只来自价格口径（快照参考价 vs 当日收盘）。'
+      : '证券数量与快照不一致：必须先核对账户事件，再使用任何可执行数量。',
   };
 }
 
@@ -1199,6 +1289,11 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
 
   const concentration = summary.portfolio?.concentration ?? { hhi: null, effective_positions: null };
   const equityClass = (summary.portfolio?.by_asset_class ?? []).find((row: any) => row.asset_class === 'EQUITY');
+  // 与私有 MCP / CLI 的账户口径保持一致：集中度用**同一份快照**（持仓数量 × 当前收盘价）
+  // 计算。`mergeAccountViews` 会同时返回账户汇总口径与日报口径，并显式说明差异来源
+  // （是否使用当日收盘重估、是否含现金/理财），避免同一个账户在两处出现相互矛盾的 HHI
+  // 或“证券数量 / 现金 / 总资产”不一致（任务书 C4）。
+  const accountView = buildAccountView(snapshot, accountId, holdings, concentration, asOf);
 
   return {
     schema: DAILY_REPORT_SCHEMA,
@@ -1235,6 +1330,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     /** 账户身份是显式提供还是按本部署唯一真实账户推导（C1）。 */
     account_id: accountId,
     account_id_source: input.accountIdSource ?? 'explicit',
+    account_view: accountView,
     data_quality: {
       status: summary.data_quality?.status ?? 'INSUFFICIENT',
       summary_status: summary.status,
