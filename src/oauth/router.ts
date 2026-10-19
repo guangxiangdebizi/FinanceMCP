@@ -52,7 +52,13 @@ function html(res: Response, status: number, body: string): void {
       'Cache-Control': 'no-store',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+      // 注意：**不要**在这里加 `form-action`。浏览器会把 `form-action` 应用到
+      // 表单提交后的重定向链上；授权成功后我们要 302 回客户端（例如
+      // https://chatgpt.com/connector_platform_oauth_redirect），
+      // 一旦限制为 'self'，浏览器会拒绝跟随，表现为"点了授权但不跳转"。
+      // 表单本身的 action 是固定的同源 /oauth/authorize，且必须输入密码，
+      // 因此省略 form-action 不增加 CSRF 风险。
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
     })
     .send(body);
 }

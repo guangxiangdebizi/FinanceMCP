@@ -504,3 +504,31 @@ test('O7 OAuth 开启时静态令牌默认不可用；显式允许后才可用',
     assert.equal(ok.body.result.tools.length, 6);
   } finally { await allowed.stop(); }
 });
+
+// ---------------------------------------------------------------- 8. 授权页 CSP
+
+test('O8 授权页不得设置 form-action（否则浏览器会拦截授权后的 302 跳转）', async () => {
+  const server = await startServer();
+  try {
+    const redirectUri = 'http://127.0.0.1:9/callback';
+    const client = await registerClient(server, redirectUri);
+    const { challenge } = pkce();
+    const resource = `${server.issuer}${RESOURCE_PATH}`;
+    const page = await server.json(`/oauth/authorize?${authorizeQuery({
+      clientId: client.client_id, redirectUri, challenge, resource,
+    })}`);
+    assert.equal(page.status, 200);
+    const csp = page.headers.get('content-security-policy') ?? '';
+    // 浏览器会把 form-action 应用到表单提交后的重定向链；授权成功后必须能 302
+    // 回客户端，因此这里绝不能出现 form-action。
+    assert.equal(/form-action/i.test(csp), false, `CSP 不得包含 form-action：${csp}`);
+    assert.match(csp, /default-src 'none'/);
+    assert.match(csp, /style-src 'unsafe-inline'/);
+    assert.match(csp, /frame-ancestors 'none'/);
+
+    // 同时确认授权页提交后确实返回 302 且指向客户端。
+    const redirect = await obtainCode(server, { clientId: client.client_id, redirectUri, challenge, resource });
+    assert.equal(redirect.status, 302);
+    assert.ok(redirect.headers.get('location')?.startsWith(redirectUri));
+  } finally { await server.stop(); }
+});
