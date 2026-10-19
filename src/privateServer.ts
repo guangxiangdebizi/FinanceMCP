@@ -190,11 +190,16 @@ async function handlePrivateRpc(req: Request, res: Response): Promise<void> {
 
   if (method === 'tools/call') {
     const { name, arguments: args } = body.params || {};
+    const tool = String(name);
     try {
-      const result = await dispatchPrivateTool(String(name), args || {});
+      const result = await dispatchPrivateTool(tool, args || {});
+      // 只为审计记录工具名与结果，**不记录参数内容**（可能含账户细节）。
+      console.log(`[private] tool=${tool} status=ok`);
       res.json({ jsonrpc: '2.0', result, id: body.id });
     } catch (error: any) {
       // 只回传工具名与原因；不记录令牌、不记录参数内容。
+      const reason = String(error?.message ?? error).slice(0, 200);
+      console.log(`[private] tool=${tool} status=error reason=${reason}`);
       res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: error?.message || String(error) }, id: body.id });
     }
     return;
