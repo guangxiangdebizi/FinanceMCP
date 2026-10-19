@@ -5,7 +5,9 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { parseSourcePriority, runWithRequestContext } from "./config.js";
 import { getAvailableToolList, dispatchTool } from "./dispatch.js";
-import { mountPrivateEndpoint, PRIVATE_ENDPOINT_PATH } from "./privateServer.js";
+import { mountPrivateEndpoint, PRIVATE_ENDPOINT_PATH, configurePrivateOAuth } from "./privateServer.js";
+import { oauthConfig } from "./oauth/config.js";
+import { createOAuthRuntime } from "./oauth/router.js";
 import { SERVER_VERSION } from "./version.js";
 
 
@@ -233,6 +235,18 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'healthy', transport: 'streamable-http', activeSessions: sessions.size });
 });
 
+// OAuth 2.1 授权服务器（ChatGPT 自定义 MCP 连接器）。未开启时完全不挂载。
+// 配置错误会在启动时抛错（fail closed），绝不静默降级为匿名或静态令牌。
+const OAUTH_CONFIG = oauthConfig();
+let oauthRuntime: ReturnType<typeof createOAuthRuntime> | null = null;
+if (OAUTH_CONFIG) {
+  oauthRuntime = createOAuthRuntime(OAUTH_CONFIG);
+  configurePrivateOAuth({ config: oauthRuntime.config, store: oauthRuntime.store });
+  // 令牌端点接受 application/x-www-form-urlencoded（OAuth 规范）与 JSON。
+  app.use(express.urlencoded({ extended: false, limit: '16kb' }));
+  app.use(oauthRuntime.router);
+}
+
 // Optional fixed-window rate limit per client IP for /mcp (MCP_RATE_LIMIT requests per minute).
 const RATE_LIMIT = Number(process.env.MCP_RATE_LIMIT || 0);
 const rateWindows = new Map<string, { start: number; count: number }>();
@@ -431,8 +445,15 @@ app.listen(PORT, HOST, () => {
   console.log(`📊 Active Sessions: ${sessions.size}`);
   console.log(`🔧 Available Tools: ${getAvailableToolList().length}`);
   console.log(privateEndpointMounted
-    ? `🔐 Private Endpoint: http://${HOST}:${PORT}${PRIVATE_ENDPOINT_PATH} (bearer token required, account tools only)`
-    : '🔐 Private Endpoint: disabled (set ASHARE_PRIVATE_PORTFOLIO_TOKEN to enable)');
+    ? `🔐 Private Endpoint: http://${HOST}:${PORT}${PRIVATE_ENDPOINT_PATH} (account tools only)`
+    : '🔐 Private Endpoint: disabled (set ASHARE_PRIVATE_PORTFOLIO_TOKEN or ASHARE_OAUTH_ENABLED=1)');
+  if (oauthRuntime) {
+    // 只打印端点与 scope，绝不打印密码或令牌。
+    console.log(`🔑 OAuth: ${oauthRuntime.config.issuer}/.well-known/oauth-authorization-server (scope ${oauthRuntime.config.scope})`);
+    console.log(`🎯 OAuth resource: ${oauthRuntime.config.resource}`);
+  } else {
+    console.log('🔑 OAuth: disabled (set ASHARE_OAUTH_ENABLED=1)');
+  }
   console.log('='.repeat(60));
   console.log('📝 Server is ready to accept connections');
   console.log('='.repeat(60) + '\n');

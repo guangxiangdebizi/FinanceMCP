@@ -34,6 +34,15 @@ services:
       # Empty means the private endpoint is not mounted at all (the path 404s and
       # never advertises itself). Set a strong random value in .env to enable it.
       ASHARE_PRIVATE_PORTFOLIO_TOKEN: ${ASHARE_PRIVATE_PORTFOLIO_TOKEN:-}
+      # OAuth 2.1 for ChatGPT custom connectors. When enabled, the private
+      # endpoint accepts only tokens issued by this authorization server unless
+      # ASHARE_PRIVATE_ALLOW_STATIC_TOKEN=1 is set explicitly.
+      ASHARE_OAUTH_ENABLED: ${ASHARE_OAUTH_ENABLED:-0}
+      ASHARE_OAUTH_ISSUER: ${ASHARE_OAUTH_ISSUER:-https://share.shijingchang.cn}
+      ASHARE_OAUTH_RESOURCE: ${ASHARE_OAUTH_RESOURCE:-https://share.shijingchang.cn/private/mcp}
+      ASHARE_OAUTH_LOGIN_PASSWORD: ${ASHARE_OAUTH_LOGIN_PASSWORD:-}
+      ASHARE_OAUTH_DB_PATH: /private/oauth.sqlite
+      ASHARE_PRIVATE_ALLOW_STATIC_TOKEN: ${ASHARE_PRIVATE_ALLOW_STATIC_TOKEN:-0}
       # Expose only the five A-share tools to ChatGPT.
       FINANCE_TOOL_PROFILE: ashare_daily
       # Never take data-source credentials from requests; Tushare comes from TUSHARE_TOKEN in .env.

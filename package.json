@@ -40,6 +40,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@node-oauth/oauth2-server": "5.3.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.22.2"

@@ -36,7 +36,9 @@ export function portfolioDbPath(): string {
  */
 export function portfolioEnabled(): boolean {
   return process.env.ASHARE_PORTFOLIO_ENABLED === '1'
-    || (process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN ?? '').trim().length > 0;
+    || (process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN ?? '').trim().length > 0
+    // OAuth 端点已启用时，账户工具同样需要可读（鉴权在 HTTP 层完成）。
+    || (process.env.ASHARE_OAUTH_ENABLED ?? '').trim() === '1';
 }
 
 const PORTFOLIO_SCHEMA = `

@@ -2,6 +2,9 @@ import type { Express, Request, Response } from 'express';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { dispatchPrivateTool, getPrivateToolList } from './dispatch.js';
 import { SERVER_VERSION } from './version.js';
+import type { OAuthConfig } from './oauth/config.js';
+import type { OAuthStore } from './oauth/store.js';
+import { verifyOAuthAccessToken, wwwAuthenticate, type OAuthFailure } from './oauth/verify.js';
 
 /**
  * 私有账户端点 `/private/mcp`（工作包 A5）。
@@ -24,13 +27,29 @@ const DEFAULT_PRIVATE_RATE_LIMIT = 10;
 const privateSessions = new Map<string, { id: string; createdAt: Date; lastActivity: Date }>();
 const privateRateWindows = new Map<string, { start: number; count: number }>();
 
-/** 令牌只在这里读取；返回空串表示端点未启用。 */
+/** OAuth 运行时由 httpServer 在启动时注入；null 表示未启用 OAuth。 */
+let oauthRuntime: { config: OAuthConfig; store: OAuthStore } | null = null;
+
+export function configurePrivateOAuth(runtime: { config: OAuthConfig; store: OAuthStore } | null): void {
+  oauthRuntime = runtime;
+}
+
+/** 令牌只在这里读取；返回空串表示静态令牌未配置。 */
 export function privateEndpointToken(): string {
   return (process.env.ASHARE_PRIVATE_PORTFOLIO_TOKEN ?? '').trim();
 }
 
+/**
+ * OAuth 开启时，静态令牌默认关闭（避免"静态密钥绕过 OAuth"）。
+ * 本地脚本需要时显式设置 `ASHARE_PRIVATE_ALLOW_STATIC_TOKEN=1`。
+ */
+function staticTokenAllowed(): boolean {
+  if (!oauthRuntime) return true;
+  return (process.env.ASHARE_PRIVATE_ALLOW_STATIC_TOKEN ?? '').trim() === '1';
+}
+
 export function privateEndpointEnabled(): boolean {
-  return privateEndpointToken().length > 0;
+  return privateEndpointToken().length > 0 || oauthRuntime !== null;
 }
 
 function bearerToken(req: Request): string | undefined {
@@ -40,11 +59,36 @@ function bearerToken(req: Request): string | undefined {
 }
 
 /** 定长比较：长度不同直接拒绝，长度相同才做 timingSafeEqual。 */
-function isPrivateAuthorized(req: Request): boolean {
+function staticTokenMatches(presented: string): boolean {
   const expected = Buffer.from(privateEndpointToken(), 'utf8');
   if (expected.length === 0) return false;
-  const presented = Buffer.from(bearerToken(req) ?? '', 'utf8');
-  return presented.length === expected.length && timingSafeEqual(presented, expected);
+  const given = Buffer.from(presented, 'utf8');
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
+interface AuthOutcome {
+  ok: boolean;
+  status?: 401 | 403;
+  failure?: OAuthFailure;
+}
+
+/**
+ * 认证在**工具执行之前**完成，位于 HTTP 中间件层。
+ * - OAuth 开启：只接受本服务签发的访问令牌（校验 issuer/resource/scope/exp/revoked）。
+ * - 静态令牌：仅当未启用 OAuth，或显式 `ASHARE_PRIVATE_ALLOW_STATIC_TOKEN=1` 时接受。
+ */
+function authenticatePrivate(req: Request): AuthOutcome {
+  const presented = bearerToken(req);
+  if (!presented) return { ok: false, status: 401, failure: 'missing_token' };
+
+  if (oauthRuntime) {
+    const verified = verifyOAuthAccessToken(oauthRuntime.store, oauthRuntime.config, presented);
+    if (verified.ok) return { ok: true };
+    if (staticTokenAllowed() && staticTokenMatches(presented)) return { ok: true };
+    return { ok: false, status: verified.status ?? 401, failure: verified.failure };
+  }
+
+  return staticTokenMatches(presented) ? { ok: true } : { ok: false, status: 401 };
 }
 
 function privateRateLimit(): number {
@@ -75,9 +119,22 @@ function trimPrivateSessions(): void {
   for (const old of oldest.slice(0, privateSessions.size - MAX_PRIVATE_SESSIONS + 1)) privateSessions.delete(old.id);
 }
 
-function unauthorized(res: Response): void {
-  res.setHeader('WWW-Authenticate', 'Bearer');
-  res.status(401).end();
+function unauthorized(res: Response, outcome: AuthOutcome): void {
+  const config = oauthRuntime?.config ?? null;
+  const challenge = wwwAuthenticate(config, outcome.failure, outcome.status === 403);
+  res.setHeader('WWW-Authenticate', challenge);
+  res.setHeader('Cache-Control', 'no-store');
+  if (config) {
+    // 同时给出 RFC 9728 发现信息，便于 ChatGPT 触发 OAuth 连接流程。
+    res.status(outcome.status ?? 401).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32001, message: outcome.status === 403 ? 'insufficient_scope' : 'unauthorized' },
+      _meta: { 'mcp/www_authenticate': challenge },
+    });
+    return;
+  }
+  res.status(outcome.status ?? 401).end();
 }
 
 async function handlePrivateRpc(req: Request, res: Response): Promise<void> {
@@ -154,9 +211,13 @@ export function mountPrivateEndpoint(app: Express): boolean {
   const enabled = privateEndpointEnabled();
 
   app.use(PRIVATE_ENDPOINT_PATH, (req: Request, res: Response, next) => {
-    if (!privateEndpointEnabled()) return res.status(404).end();
+    // 未配置任何凭据时 404，不通过 401 广告自身；配置后按 401/403 返回发现信息。
+    const outcome = authenticatePrivate(req);
+    if (privateEndpointToken().length === 0 && oauthRuntime === null && !outcome.ok) {
+      return res.status(404).end();
+    }
     if (req.method === 'OPTIONS') return next();
-    if (!isPrivateAuthorized(req)) return unauthorized(res);
+    if (!outcome.ok) return unauthorized(res, outcome);
     if (privateRateLimited(req)) {
       return res.status(429).json({ jsonrpc: '2.0', error: { code: -32002, message: 'Too many requests' }, id: null });
     }
