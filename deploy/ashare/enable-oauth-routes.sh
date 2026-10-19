@@ -4,15 +4,16 @@
 # Run from a REAL terminal (sudo needs a password prompt):
 #     sudo /tmp/enable-oauth-routes.sh
 #
-# The private MCP endpoint already works over /private/mcp. ChatGPT only starts
-# the OAuth flow after it can read the protected-resource metadata, so these
-# origin-level paths must reach the same container:
-#     /.well-known/oauth-protected-resource*      (RFC 9728)
-#     /.well-known/oauth-authorization-server*    (RFC 8414)
-#     /oauth/*                                    (authorize/token/register/revoke)
+# Why these routes: ChatGPT reads the discovery documents from the origin root,
+# so /.well-known/oauth-* and /oauth/* must reach the same container as
+# /private/mcp.
 #
-# Safety: timestamped backup, idempotent, validate before reload, restore on
-# failure.
+# Safety: timestamped backup, idempotent, validate BEFORE installing, restore
+# and reload on failure.
+#
+# Note: the working file is created next to the Caddyfile, not in /tmp. On this
+# host fs.protected_regular=2 rejects writing a /tmp file whose ownership was
+# changed by `cp -a`, which made the previous version fail.
 set -euo pipefail
 
 CADDYFILE=/etc/caddy/Caddyfile
@@ -34,15 +35,17 @@ sha256sum "$CADDYFILE"
 systemctl is-active caddy
 
 echo "== 1. backup -> $BACKUP =="
-cp -a "$CADDYFILE" "$BACKUP"
+cat "$CADDYFILE" > "$BACKUP"
+chmod 0644 "$BACKUP"
 
-WORK="$(mktemp)"
-cp -a "$CADDYFILE" "$WORK"
+NEW="/etc/caddy/Caddyfile.new.$$"
+trap 'rm -f "$NEW"' EXIT
 
-python3 - "$WORK" <<'PY'
+echo "== 2. build candidate =="
+python3 - "$CADDYFILE" "$NEW" <<'PY'
 import sys
-path = sys.argv[1]
-s = open(path).read()
+src, dst = sys.argv[1], sys.argv[2]
+s = open(src).read()
 block = (
     "\t# OAuth 2.1 discovery and authorization endpoints for the private account\n"
     "\t# MCP. Same container as /ashare/mcp; only metadata and token exchange.\n"
@@ -59,31 +62,29 @@ block = (
 marker = "\t# X Full Reader MCP (streamable HTTP) - local loopback upstream."
 if marker not in s:
     sys.exit("cannot find insertion marker in Caddyfile")
-open(path, "w").write(s.replace(marker, block + marker, 1))
+open(dst, "w").write(s.replace(marker, block + marker, 1))
 PY
 
-echo "== 2. validate candidate =="
-if ! caddy validate --adapter caddyfile --config "$WORK" >/tmp/caddy-validate-oauth.log 2>&1; then
-  echo "VALIDATION FAILED - nothing changed:" >&2
+echo "== 3. validate candidate =="
+if ! caddy validate --adapter caddyfile --config "$NEW" >/tmp/caddy-validate-oauth.log 2>&1; then
+  echo "VALIDATION FAILED - nothing installed:" >&2
   tail -20 /tmp/caddy-validate-oauth.log >&2
-  rm -f "$WORK"
   exit 2
 fi
 tail -1 /tmp/caddy-validate-oauth.log
 
-echo "== 3. install =="
-cp -a "$WORK" "$CADDYFILE"
-rm -f "$WORK"
+echo "== 4. install =="
+mv -f "$NEW" "$CADDYFILE"
 
-echo "== 4. reload =="
+echo "== 5. reload =="
 if ! systemctl reload caddy; then
   echo "RELOAD FAILED - restoring $BACKUP" >&2
-  cp -a "$BACKUP" "$CADDYFILE"
+  cat "$BACKUP" > "$CADDYFILE"
   systemctl reload caddy || true
   exit 3
 fi
 
-echo "== 5. result =="
+echo "== 6. result =="
 systemctl is-active caddy
 sha256sum "$CADDYFILE"
 diff -u "$BACKUP" "$CADDYFILE" || true
