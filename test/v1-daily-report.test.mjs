@@ -332,7 +332,7 @@ test('D1-4 持仓行情过期 → NO_ACTION（等待不是交易动作），阻�
 
 // ---------------------------------------------------------------- 5. 门控满足
 
-test('D1-5 门控全满足 → ACTIONABLE，且腿可执行；但数量仍来自程序计算', () => {
+test('D1-5 门控满足但动作由未验证研究判断触发 → ILLUSTRATIVE，腿不可执行', () => {
   // 单独建一个已确认的账户，避免影响其它用例的 PENDING 语义。
   const confirmedPortfolio = openPortfolioDb(join(dir, 'portfolio-confirmed.sqlite'), { marketPath: MARKET_MAIN });
   const snapshotId = 'synthetic-confirmed-2026-10-16';
@@ -352,24 +352,26 @@ test('D1-5 门控全满足 → ACTIONABLE，且腿可执行；但数量仍来自
     asOfTradeDate: LAST,
     generatedAt: '2026-10-16T21:55:00+08:00',
   });
+  // 账户门控本身通过……
   assert.equal(report.gate.satisfied, true);
-  assert.equal(report.status, 'ACTIONABLE');
-  assert.equal(report.actionable, true);
+  // ……但唯一可生成的动作由"集中度阈值 + 未经验证的市场证据计数"触发，
+  // 这两者都是研究判断，不能单独授权一笔可执行卖出（PRD §6/§7）。
+  assert.equal(report.actionable, false);
+  assert.notEqual(report.status, 'ACTIONABLE');
   assert.ok(report.first_section.actions.length > 0);
-  const legs = report.first_section.actions.flatMap(action => action.legs);
-  assert.ok(legs.length > 0);
-  for (const leg of legs) {
-    assert.equal(leg.executable, true);
-    assert.equal(leg.reason, null);
-    assert.ok(leg.quantity > 0);
-    assert.equal(leg.quantity % leg.lot_size, 0);
-    // 毛额与费用都由程序计算，且内部一致。
-    assert.equal(leg.gross_cents, Math.round((leg.quantity * leg.price_milli) / 10));
-    assert.ok(leg.fees_cents > 0);
-  }
   for (const action of report.first_section.actions) {
-    assert.equal(action.illustrative, null, 'ACTIONABLE 时不再有 illustrative 块');
+    for (const leg of action.legs) {
+      assert.equal(leg.executable, false, `${action.code} 的腿不得可执行`);
+      assert.ok(typeof leg.reason === 'string' && leg.reason.length > 0, '不可执行必须给出原因码');
+    }
+    assert.ok(action.illustrative, '非可执行动作必须保留 illustrative 块');
+    assert.ok(action.illustrative.legs.every(leg => leg.executable === false));
   }
+  // 数量仍然由程序计算（示意值），不是手填的。
+  const leg = report.first_section.actions[0].legs[0];
+  assert.ok(Number.isInteger(leg.quantity) && leg.quantity > 0);
+  assert.equal(leg.quantity % leg.lot_size, 0);
+  assert.equal(leg.gross_cents, Math.round((leg.quantity * leg.price_milli) / 10));
 });
 
 // ---------------------------------------------------------------- 6. plan_tracking

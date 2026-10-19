@@ -34,7 +34,8 @@ const {
   FROZEN_FIVE_QUANTITIES, buildBenchmarkComparison,
 } = await import('../build/portfolio/benchmarks.js');
 
-const DAYS = weekdays('20260601', 40);
+// 窗口必须覆盖 2026-10-16：五只静态基准锚定在该基线日，起点在其之前会不可用。
+const DAYS = weekdays('20260818', 44);
 const LAST = DAYS.at(-1);
 const HELD = ['159241.SZ', '159278.SZ', '159558.SZ', '516080.SH', '560390.SH'];
 
@@ -290,11 +291,18 @@ test('C6-1 冻结基准：三个基准可用，权重状态为 provisional_pendi
     assert.ok(leg, `${code} 必须出现在静态基线里`);
     assert.equal(leg.start_quantity, FROZEN_FIVE_QUANTITIES[code]);
   }
-  // 三个基准共用同一窗口与同一费用口径。
-  for (const benchmark of comparison.benchmarks) {
+  // 两个"建仓型"基准共用同一窗口与同一费用口径。
+  for (const benchmark of [comparison.benchmarks[0], comparison.benchmarks[1]]) {
     assert.deepEqual(benchmark.window, comparison.window);
     assert.equal(benchmark.price_basis, 'qfq_adjusted');
   }
+  // 五只静态基准锚定在实际基线日 2026-10-16：数量与现金是当时的事实，
+  // 不是用窗口起点重新建仓，因此不再计建仓费用。
+  assert.equal(five.window.start, '20261016');
+  assert.equal(five.window.end, comparison.window.end);
+  assert.equal(five.entry_fee_cents, 0, '已持有的静态基准不得虚构建仓费用');
+  assert.ok(five.cash_cents > 0, '账户现金必须计入起点');
+  assert.equal(five.price_basis, 'qfq_adjusted');
   assert.equal(comparison.conventions.fees.assumed, true);
 });
 

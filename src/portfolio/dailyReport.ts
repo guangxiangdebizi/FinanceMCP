@@ -440,8 +440,12 @@ function buildActions(ctx: ActionContext): { actions: ActionPlan[]; blockers: st
       Math.ceil(sharesForExcess / ctx.lots.etf_sell_multiple) * ctx.lots.etf_sell_multiple,
     );
     const quantity = illustrativeShares > 0 ? illustrativeShares : null;
+    // 这个动作由"集中度阈值 + 未经验证的市场证据计数"触发，两者都是研究判断，
+    // 不是可追溯的 RESEARCH_VERIFIED 证据。因此它永远只能是示意：即使账户门控
+    // 全部满足，也不得据此生成可执行的卖出腿（PRD §6/§7）。
     const leg = legOf('SELL', topHolding.ts_code, topHolding.name, quantity, topHolding.price_milli,
-      topHolding.latest_bar_date, ctx, quantity === null ? 'quantity_unavailable' : null);
+      topHolding.latest_bar_date, ctx,
+      quantity === null ? 'quantity_unavailable' : 'concentration_threshold_unverified');
     actions.push({
       code: 'REDUCE_CONCENTRATION',
       kind: 'REDUCE',
@@ -451,6 +455,8 @@ function buildActions(ctx: ActionContext): { actions: ActionPlan[]; blockers: st
         `${topHolding.ts_code} 权重 ${(topHolding.weight * 100).toFixed(2)}%，占总资产一半以上`,
         `市场反证 ${contradictionCount} 项多于支持 ${supportCount} 项（见市场证据）`,
         `组合 HHI ${concentration.hhi}，有效持仓数 ${concentration.effective_positions}`,
+        '集中度阈值与市场证据计数都是研究判断（UNVERIFIED），本身不构成可执行的卖出依据；'
+          + '只有可追溯的 RESEARCH_VERIFIED 证据才能把该动作升级为可执行。',
       ],
       counter_evidence: [
         '集中度本身不是卖出理由；降低集中度也不意味着必须清空该资产（PRD §6）。',
@@ -474,8 +480,11 @@ function buildActions(ctx: ActionContext): { actions: ActionPlan[]; blockers: st
         '卖出回款进入现金，现金比例上升；不自动买入替代资产',
       ],
       fact_meta: {
-        as_of: topHolding.latest_bar_date, source: 'research_summary + fund_daily', quality: 'OK', claim_status: 'FACT',
-        detail: '权重、HHI 与证据计数都是程序计算；结论方向是研究判断，标记 UNVERIFIED。',
+        // 权重、HHI 与证据计数是程序计算的**事实**，但这个动作本身（"因此应减仓"）
+        // 是研究推断，没有可追溯的 VERIFIED 证据支持，因此整条动作标为 UNVERIFIED。
+        as_of: topHolding.latest_bar_date, source: 'research_summary + fund_daily', quality: 'OK', claim_status: 'UNVERIFIED',
+        detail: '权重、HHI 与证据计数都是程序计算的事实；"因此应减仓"这一步是研究判断，'
+          + '未经前瞻验证，也不构成可执行交易依据。',
       },
     });
   }
@@ -655,10 +664,13 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
 
   // ---- 状态：只有账户门控满足且有动作时才可能 ACTIONABLE；否则最多 ILLUSTRATIVE。
   const insufficient = summary.status === 'DATA_INSUFFICIENT';
+  // 顶层状态必须由**真实的腿**决定，不能只看账户门控：
+  // 门控通过但没有任何可执行腿时，声称 ACTIONABLE 会让调用方以为可以下单。
+  const anyExecutableLeg = actions.some(action => action.legs.some(leg => leg.executable === true));
   let status: DailyReportStatus;
   if (insufficient) status = 'DATA_INSUFFICIENT';
   else if (actions.length === 0) status = 'NO_ACTION';
-  else status = gateSatisfied ? 'ACTIONABLE' : 'ILLUSTRATIVE';
+  else status = gateSatisfied && anyExecutableLeg ? 'ACTIONABLE' : 'ILLUSTRATIVE';
 
   // 动作序号按最终顺序重排，保证 rank 连续（1..n）。
   actions.forEach((action, index) => { action.rank = index + 1; });

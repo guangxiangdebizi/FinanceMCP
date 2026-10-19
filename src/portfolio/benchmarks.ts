@@ -67,6 +67,15 @@ export const FROZEN_FIVE_QUANTITY_NOTE =
   '初始数量以 PRD §3 截图基线为准（159241 1000 份、159278 1000 份、159558 58900 份、'
   + '516080 10000 份、560390 15000 份）；数量是常量，不是当前持仓。';
 
+/**
+ * 五只静态基准的**实际起点**：用户确认的 2026-10-16 收盘基线。
+ *
+ * 这五只 ETF 在基线时已经持有，所以不能再收一次建仓费用；账户当时的现金也属于
+ * 组合的一部分，必须计入起点，否则会高估收益率。
+ */
+export const FROZEN_FIVE_START_DATE = '20261016';
+export const FROZEN_FIVE_CASH_CENTS = 141370; // 1,413.70 元（PRD §3）
+
 export const BENCHMARK_DISCLAIMER =
   '对照基准是**提前冻结**的定义，用于评价，不是推荐组合，也不是可执行交易计划。'
   + '历史区间收益不构成前瞻有效性的证据；基准不会在事后按表现挑选或调参。'
@@ -117,6 +126,15 @@ export interface BenchmarkResult {
   window: { start: string; end: string; trading_days: number } | null;
   legs: BenchmarkLeg[];
   price_basis: 'qfq_adjusted' | 'raw_close_no_adj_factor' | 'mixed';
+  /**
+   * 估值质量：`carried_forward` 表示窗口内有交易日缺该腿的 bar，已按上一已知价
+   * 沿用估值（绝不按 0 市值计入）；`exact` 表示每个共同交易日都有真实收盘。
+   */
+  valuation_quality: 'exact' | 'carried_forward';
+  /** 沿用上一已知价的日期（升序）；空表示全部为真实收盘。 */
+  carried_forward_dates: string[];
+  /** 五只静态基准的账户现金（分）；其它基准为 0。 */
+  cash_cents: number;
   weights: Record<string, number> | null;
   weights_status: typeof FROZEN_BASKET_WEIGHTS_STATUS | null;
   /** 明确的缺失代码，便于复核为什么 unavailable。 */
@@ -267,20 +285,60 @@ const unavailableBenchmark = (
   total_return_pct: null, max_drawdown_pct: null, annualized_vol_pct: null,
   end_value_cents: null, start_value_cents: null, entry_fee_cents: null,
   window: null, legs: [], price_basis: 'raw_close_no_adj_factor',
+  valuation_quality: 'exact', carried_forward_dates: [], cash_cents: 0,
   weights, weights_status: weights ? FROZEN_BASKET_WEIGHTS_STATUS : null,
   missing_codes: missingCodes,
 });
 
 /**
- * 组合价值序列（单位：分）：在每个共同交易日按各腿份数 × 当日复权收盘加总。
- * 某腿缺某天时该天不参与（调用方已要求两端覆盖），并记录 bars_used。
+ * 用上一已知价前向填充一个价格序列。
+ *
+ * 中间交易日缺 bar（停牌、上游缺失）**不能**当成 0 市值：那会凭空造出一次
+ * -weight% 的假回撤和极高的假波动。这里沿用最近一次真实收盘，并记录被沿用的日期，
+ * 由调用方以 `valuation_quality: carried_forward` 披露。
+ *
+ * 起始日必须已有价格（调用方已强制检查），因此填充后的序列不会出现"从未有价"的点。
  */
-function portfolioSeries(legs: { series: PriceSeries; quantity: number }[], dates: string[]): number[] {
-  return dates.map(date => legs.reduce((sum, leg) => {
-    const price = leg.series.byDate.get(date);
+function fillPrices(series: PriceSeries, dates: string[]): { values: number[]; carried: string[] } {
+  const values: number[] = [];
+  const carried: string[] = [];
+  let last: number | undefined;
+  for (const date of dates) {
+    const price = series.byDate.get(date);
+    if (price !== undefined) {
+      last = price;
+      values.push(price);
+    } else if (last !== undefined) {
+      values.push(last);
+      carried.push(date);
+    } else {
+      // 起始日之前没有任何价格：无法估值，保持 null，由调用方判为不可用。
+      values.push(Number.NaN);
+    }
+  }
+  return { values, carried };
+}
+
+/**
+ * 组合价值序列（单位：分）：在每个共同交易日按各腿份数 × 当日收盘加总。
+ * 缺价的腿按上一已知价计算（见 `fillPrices`），绝不按 0 市值计入。
+ */
+function portfolioSeries(
+  legs: { series: PriceSeries; quantity: number }[], dates: string[],
+): { values: number[]; carried: string[] } {
+  const carried = new Set<string>();
+  const filled = legs.map(leg => {
+    const { values, carried: legCarried } = fillPrices(leg.series, dates);
+    for (const date of legCarried) carried.add(date);
+    return { values, quantity: leg.quantity };
+  });
+  const values = dates.map((_, index) => filled.reduce((sum, leg) => {
+    const price = leg.values[index];
+    if (!Number.isFinite(price)) return Number.NaN;
     // 份 × 元/份 × 100 分/元 = 分。
-    return sum + (price === undefined ? 0 : leg.quantity * price * 100);
+    return sum + leg.quantity * price * 100;
   }, 0));
+  return { values, carried: [...carried].sort() };
 }
 
 // ---------------------------------------------------------------- 主入口
@@ -348,7 +406,7 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
   benchmarks.push(benchmarkWeightBasket(db, tables, dates, window, fees));
 
   // ---------------------------------------------------------------- 3. 初始五只静态基线
-  benchmarks.push(benchmarkFiveStatic(db, tables, dates, window, fees));
+  benchmarks.push(benchmarkFiveStatic(db, tables, dates, window));
 
   const status: 'OK' | 'DEGRADED' | 'UNAVAILABLE' = !db || !tables.fund_daily || !window
     ? 'UNAVAILABLE'
@@ -364,7 +422,9 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
     data_quality: { status, tables, missing_tables: missingTables, reasons },
     conventions: {
       fees: { version_note: 'DEFAULT_FEE_RULES（r0-fees-1.0.0，假设值，未与券商核对）', assumed: true, values: { ...fees } },
-      cash: '期初按收盘价一次性买入并扣除费用，此后现金为 0，期间不再投入、不取现、不分红再投资（分红体现在复权因子中）。',
+      cash: '前两个基准期初按收盘价一次性买入并扣除费用，此后现金为 0；'
+        + `第三个基准从 ${FROZEN_FIVE_START_DATE} 的实际持仓与账户现金 ${(FROZEN_FIVE_CASH_CENTS / 100).toFixed(2)} 元出发，`
+        + '已持有不再计建仓费用。三者期间都不再投入、不取现、不分红再投资（分红体现在复权因子中）。',
       rebalancing: '区间内不调仓；多资产篮子的权重只在期初生效。',
       price_basis: '有 fund_adj 时用 qfq（基准为区间内最后因子）；缺因子时整条序列退化为原始收盘并标注 raw_close_no_adj_factor。',
       return_formula: '总收益 =（期末价值 − 期初含费投入）/ 期初含费投入；最大回撤与年化波动基于逐日组合价值序列（252 个交易日）。',
@@ -409,10 +469,8 @@ function benchmarkSingle(
   }
   const grossCents = Math.round(quantity * startPrice! * 100); // 份 × 元/份 × 100 = 分
   const fee = entryFeeCents(grossCents, fees);
-  const values = dates.map(date => {
-    const price = series.byDate.get(date);
-    return price === undefined ? 0 : quantity * price * 100;
-  });
+  const { values: prices, carried } = fillPrices(series, dates);
+  const values = prices.map(price => (Number.isFinite(price) ? quantity * price * 100 : Number.NaN));
   const invested = grossCents + fee;
   const endValue = quantity * endPrice! * 100;  return {
     id: spec.id,
@@ -439,6 +497,9 @@ function benchmarkSingle(
       price_basis: series.basis,
     }],
     price_basis: series.basis,
+    valuation_quality: carried.length > 0 ? 'carried_forward' : 'exact',
+    carried_forward_dates: carried,
+    cash_cents: 0,
     weights: null,
     weights_status: null,
     missing_codes: [],
@@ -497,7 +558,7 @@ function benchmarkWeightBasket(
     return unavailableBenchmark(id, label, 'leg_not_cached',
       `篮子成分在窗口两端缺行情：${missing.join(', ')}；不缩短窗口、不用替代标的`, missing, weights);
   }
-  const values = portfolioSeries(legs, dates);
+  const { values, carried } = portfolioSeries(legs, dates);
   const invested = grossTotal + feeTotal;
   const endValue = values.at(-1)!;
   const bases = new Set(legViews.map(leg => leg.price_basis));
@@ -506,7 +567,8 @@ function benchmarkWeightBasket(
     label,
     status: 'OK',
     reason: null,
-    detail: `按常量权重建仓；实际投入 ${(grossTotal / 100).toFixed(2)} 元（权重取整后不足部分留作现金 0），费用 ${(feeTotal / 100).toFixed(2)} 元`,
+    detail: `按常量权重建仓；实际投入 ${(grossTotal / 100).toFixed(2)} 元（权重取整后不足部分留作现金 0），费用 ${(feeTotal / 100).toFixed(2)} 元`
+      + (carried.length > 0 ? `；${carried.length} 个交易日沿用上一已知价估值` : ''),
     total_return_pct: r2(((endValue - invested) / invested) * 100),
     max_drawdown_pct: drawdownPct(values.map(value => value / invested)),
     annualized_vol_pct: annualizedVolPct(values.map(value => value / invested)),
@@ -516,6 +578,9 @@ function benchmarkWeightBasket(
     window: { ...window },
     legs: legViews,
     price_basis: bases.size === 1 ? [...bases][0] : 'mixed',
+    valuation_quality: carried.length > 0 ? 'carried_forward' : 'exact',
+    carried_forward_dates: carried,
+    cash_cents: 0,
     weights,
     weights_status: FROZEN_BASKET_WEIGHTS_STATUS,
     missing_codes: [],
@@ -529,34 +594,40 @@ function benchmarkFiveStatic(
   tables: { fund_basic: boolean; fund_daily: boolean; fund_adj: boolean },
   dates: string[],
   window: { start: string; end: string; trading_days: number } | null,
-  fees: FeeRules,
 ): BenchmarkResult {
   const id: BenchmarkResult['id'] = 'initial_five_etf_basket';
   const label = '初始五只 ETF 按固定起始数量持有（不交易）';
   if (!db || !window) {
     return unavailableBenchmark(id, label, 'window_unavailable', '没有可用的市场缓存或交易日窗口', [...ETF_UNIVERSE]);
   }
+  // 该基准锚定在用户确认的 2026-10-16 基线：数量与现金都是当时的事实，
+  // 而不是用某个合成窗口的起点重新建仓。
+  const anchoredDates = dates.filter(date => date >= FROZEN_FIVE_START_DATE);
+  const start = anchoredDates[0];
+  if (!start || window.end < FROZEN_FIVE_START_DATE) {
+    return unavailableBenchmark(id, label, 'start_before_baseline',
+      `窗口 ${window.start}-${window.end} 不包含基线日 ${FROZEN_FIVE_START_DATE}，无法从实际持仓出发`,
+      [...ETF_UNIVERSE]);
+  }
+  const anchoredWindow = { start, end: window.end, trading_days: anchoredDates.length };
   const legs: { series: PriceSeries; quantity: number }[] = [];
   const legViews: BenchmarkLeg[] = [];
   const missing: string[] = [];
-  let feeTotal = 0;
-  let grossTotal = 0;
+  let securitiesStart = 0;
   for (const code of ETF_UNIVERSE) {
     const quantity = FROZEN_FIVE_QUANTITIES[code];
     if (!Number.isInteger(quantity) || quantity <= 0) {
       missing.push(`${code}:quantity_not_declared`);
       continue;
     }
-    const series = loadSeries(db, code, window.start, window.end, tables);
-    const startPrice = series.byDate.get(window.start);
+    const series = loadSeries(db, code, start, window.end, tables);
+    const startPrice = series.byDate.get(start);
     const endPrice = series.byDate.get(window.end);
     if (startPrice === undefined || endPrice === undefined) {
-      missing.push(startPrice === undefined ? `${code}@${window.start}` : `${code}@${window.end}`);
+      missing.push(startPrice === undefined ? `${code}@${start}` : `${code}@${window.end}`);
       continue;
     }
-    const gross = Math.round(quantity * startPrice * 100);
-    grossTotal += gross;
-    feeTotal += entryFeeCents(gross, fees);
+    securitiesStart += Math.round(quantity * startPrice * 100);
     legs.push({ series, quantity });
     legViews.push({
       ts_code: code,
@@ -574,29 +645,37 @@ function benchmarkFiveStatic(
     return unavailableBenchmark(id, label, 'leg_not_cached',
       `五只持仓在窗口两端缺行情：${missing.join(', ')}；不缩短窗口、不用替代标的`, missing, null);
   }
-  // 归一权重（按起始市值），仅用于展示。
+  // 归一权重（按起始证券市值），仅用于展示；现金单独披露。
   for (const leg of legViews) {
-    leg.weight = grossTotal > 0 ? r6((leg.start_quantity! * leg.start_price_milli! / 10) / grossTotal) : null;
+    leg.weight = securitiesStart > 0 ? r6((leg.start_quantity! * leg.start_price_milli! / 10) / securitiesStart) : null;
   }
-  const values = portfolioSeries(legs, dates);
-  const invested = grossTotal + feeTotal;
-  const endValue = values.at(-1)!;
+  const { values, carried } = portfolioSeries(legs, anchoredDates);
+  const cash = FROZEN_FIVE_CASH_CENTS;
+  // 已持有：没有建仓费用。起始价值 = 实际证券市值 + 账户现金。
+  const invested = securitiesStart + cash;
+  const endSecurities = values.at(-1)!;
+  const endValue = endSecurities + cash;
   const bases = new Set(legViews.map(leg => leg.price_basis));
   return {
     id,
     label,
     status: 'OK',
     reason: null,
-    detail: `固定起始数量、区间内不交易；期初市值 ${(grossTotal / 100).toFixed(2)} 元，费用 ${(feeTotal / 100).toFixed(2)} 元`,
+    detail: `从 ${start} 的实际持仓出发（证券 ${(securitiesStart / 100).toFixed(2)} 元 + 现金 ${(cash / 100).toFixed(2)} 元）；`
+      + `已持有，不再计建仓费用；区间内不交易`
+      + (carried.length > 0 ? `；${carried.length} 个交易日沿用上一已知价估值` : ''),
     total_return_pct: r2(((endValue - invested) / invested) * 100),
-    max_drawdown_pct: drawdownPct(values.map(value => value / invested)),
-    annualized_vol_pct: annualizedVolPct(values.map(value => value / invested)),
+    max_drawdown_pct: drawdownPct(values.map(value => (value + cash) / invested)),
+    annualized_vol_pct: annualizedVolPct(values.map(value => (value + cash) / invested)),
     end_value_cents: Math.round(endValue),
     start_value_cents: invested,
-    entry_fee_cents: feeTotal,
-    window: { ...window },
+    entry_fee_cents: 0,
+    window: { ...anchoredWindow },
     legs: legViews,
     price_basis: bases.size === 1 ? [...bases][0] : 'mixed',
+    valuation_quality: carried.length > 0 ? 'carried_forward' : 'exact',
+    carried_forward_dates: carried,
+    cash_cents: cash,
     weights: null,
     weights_status: null,
     missing_codes: [],
