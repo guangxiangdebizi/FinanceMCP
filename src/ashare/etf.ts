@@ -1185,6 +1185,10 @@ export function etfStatus(db: DatabaseSync, q: { date?: unknown } = {}): EtfStat
   const share = db.prepare(`SELECT COUNT(DISTINCT ts_code) n, MAX(trade_date) d FROM fund_share WHERE ts_code IN (${ETF_UNIVERSE.map(() => '?').join(',')})`)
     .get(...ETF_UNIVERSE) as any;
   base.fund_share.codes_with_share = share?.n ?? 0;
+  // coverage 里的份额覆盖是 FUND 口径（缓存里有多少只持仓出现过份额记录），
+  // 与 fund_share.codes_with_share 同源。此前为空对象默认值导致字段一直是 0，
+  // 让验收误读成“份额完全缺失”。
+  base.coverage.codes_with_share = share?.n ?? 0;
   base.fund_share.latest_date = share?.d ?? null;
   base.fund_share.available = (share?.n ?? 0) > 0;
 

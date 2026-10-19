@@ -463,3 +463,22 @@ test('C-6 账户口径对照：数量一致、现金一致，HHI 差异只来自
     db.close();
   }
 });
+
+test('B-9 etfStatus 的 coverage.codes_with_share 与 fund_share.codes_with_share 一致', () => {
+  const db = openAshareDb(join(dir, 'b9.sqlite'));
+  try {
+    upsertRows(db, 'trade_cal', ['cal_date', 'is_open'], DAYS.map(date => ({ cal_date: date, is_open: 1 })));
+    upsertRows(db, 'fund_basic', ['ts_code', 'name', 'market', 'status'], BASIC);
+    for (const code of ETF_UNIVERSE) {
+      upsertRows(db, 'fund_daily', ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'pre_close', 'vol', 'amount'], [bar(code, TARGET)]);
+      upsertRows(db, 'fund_share', ['ts_code', 'trade_date', 'fd_share', 'fund_type', 'market'],
+        [{ ts_code: code, trade_date: TARGET, fd_share: 1000, fund_type: 'ETF', market: 'SZ' }]);
+    }
+    const status = etf.etfStatus(db, { date: TARGET });
+    assert.equal(status.fund_share.codes_with_share, ETF_UNIVERSE.length);
+    assert.equal(status.coverage.codes_with_share, ETF_UNIVERSE.length,
+      'coverage 的份额覆盖不能恒为 0（验收会误读成份额缺失）');
+  } finally {
+    db.close();
+  }
+});
