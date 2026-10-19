@@ -50,7 +50,9 @@ function html(res: Response, status: number, body: string): void {
     .set({
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
-      'X-Frame-Options': 'DENY',
+      // 防嵌入由 CSP 的 frame-ancestors 负责（现代浏览器优先）。这里不再发
+      // X-Frame-Options：Caddy 已在站点层设置 SAMEORIGIN，再发一个 DENY 会产生
+      // 两个取值不同的同名头，浏览器行为不一致。
       'Referrer-Policy': 'no-referrer',
       // 注意：**不要**在这里加 `form-action`。浏览器会把 `form-action` 应用到
       // 表单提交后的重定向链上；授权成功后我们要 302 回客户端（例如
