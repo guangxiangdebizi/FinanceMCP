@@ -49,25 +49,33 @@ echo "old repo digest: $OLD_REPO_DIGEST"
 
 mkdir -p "$BACKUP_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-if [ ! -f "$BACKUP_DIR/ashare.pre-v1.0.sqlite" ]; then
-  echo "== 1. consistent DB backup (VACUUM INTO) =="
-  sqlite3 "$DATA_DIR/ashare.sqlite" "VACUUM INTO '$BACKUP_DIR/ashare.pre-v1.0.sqlite';"
-else
-  echo "== 1. pre-upgrade backup already present =="
+# Keep the previous image under its own tag so a rebuild cannot garbage-collect it.
+if [ "$OLD_IMAGE_ID" != "unknown" ]; then
+  docker tag "$OLD_IMAGE_ID" "finance-mcp-ashare:rollback-$STAMP" 2>/dev/null || true
+  echo "rollback image tag: finance-mcp-ashare:rollback-$STAMP"
 fi
-sqlite3 "$BACKUP_DIR/ashare.pre-v1.0.sqlite" "PRAGMA integrity_check;" | grep -qx ok || {
+# A fresh timestamped backup every run; a stale single file would not match the
+# database a rollback would actually start from.
+BACKUP_SQLITE="$BACKUP_DIR/ashare.$STAMP.sqlite"
+echo "== 1. consistent DB backup (VACUUM INTO) =="
+sqlite3 "$DATA_DIR/ashare.sqlite" "VACUUM INTO '$BACKUP_SQLITE';"
+sqlite3 "$BACKUP_SQLITE" "PRAGMA integrity_check;" | grep -qx ok || {
   echo "backup integrity_check failed" >&2; exit 4;
 }
+# Keep the historical pre-V1.0 copy as well; symlink the newest for convenience.
+ln -sfn "$BACKUP_SQLITE" "$BACKUP_DIR/ashare.latest.sqlite"
 
 {
   echo "timestamp=$STAMP"
   echo "revision=$REVISION"
   echo "branch=${BRANCH:-}"
   echo "old_container_image=$OLD_IMAGE_ID"
+  echo "rollback_image_tag=finance-mcp-ashare:rollback-$STAMP"
   echo "old_repo_digest=$OLD_REPO_DIGEST"
   echo "old_container_id=$(docker inspect "$CONTAINER" --format '{{.Id}}' 2>/dev/null || echo none)"
   echo "compose_config_hash=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' 2>/dev/null || echo none)"
-  echo "db_sha256=$(sha256sum "$BACKUP_DIR/ashare.pre-v1.0.sqlite" | cut -d' ' -f1)"
+  echo "db_backup=$BACKUP_SQLITE"
+  echo "db_sha256=$(sha256sum "$BACKUP_SQLITE" | cut -d' ' -f1)"
 } | tee "$BACKUP_DIR/rollback-$STAMP.env"
 
 if [ "$DRY" -eq 1 ]; then
