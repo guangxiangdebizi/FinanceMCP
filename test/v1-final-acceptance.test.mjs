@@ -244,3 +244,26 @@ test('V1F-4 五只静态基准从 2026-10-16 实际数量与现金出发，且�
   const csi300 = comparison.benchmarks.find(item => item.id === 'csi300_etf_buy_hold');
   assert.ok(csi300.entry_fee_cents > 0, '买入持有基准仍应计一次建仓费用');
 });
+
+// ---------------------------------------------------------------- 附加：默认窗口
+
+test('V1F-5 未显式给 end 时，窗口必须落在行情实际覆盖的最后一天，而不是日历的未来日期', () => {
+  const dates = weekdays('20260818', 44);
+  const lastBar = dates.at(-1); // 20261016
+  const closes = {
+    '510300.SH': 4.0, '511010.SH': 1.0, '518880.SH': 5.0, '513100.SH': 2.0,
+    '159241.SZ': 1.005, '159278.SZ': 0.796, '159558.SZ': 0.935, '516080.SH': 0.636, '560390.SH': 0.742,
+  };
+  const { db } = marketWith({ dates, closes });
+  // 交易日历排到未来：20261019 与 20261020 开市，但没有行情。
+  upsertRows(db, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'], [
+    { cal_date: '20261019', is_open: 1, pretrade_date: lastBar },
+    { cal_date: '20261020', is_open: 1, pretrade_date: '20261019' },
+  ]);
+
+  const comparison = buildBenchmarkComparison({ marketDb: db }); // 不传 start/end
+  assert.equal(comparison.window.end, lastBar, '默认窗口不得延伸到没有行情的未来交易日');
+  for (const benchmark of comparison.benchmarks) {
+    assert.equal(benchmark.status, 'OK', `${benchmark.id} 在默认窗口下应可用，实际 ${benchmark.reason}`);
+  }
+});

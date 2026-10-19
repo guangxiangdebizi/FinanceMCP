@@ -370,9 +370,18 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
   const requested = { start: startRaw ?? null, end: endRaw ?? null, defaulted: startRaw === undefined || endRaw === undefined };
 
   // 交易日：优先 trade_cal；没有日历时退化为 fund_daily 的日期集合。
+  //
+  // 关键：未显式给出 end 时，上界必须取**行情实际覆盖到的最后一天**，不能用
+  // trade_cal 的最大日期。交易日历通常已经排到未来（例如 20261016 之后的交易日），
+  // 用日历上界会把窗口末端定在没有 bar 的未来日期，使三个基准全部 unavailable。
   let dates: string[] = [];
+  let latestBarDate: string | null = null;
+  if (db && tables.fund_daily) {
+    const row = db.prepare('SELECT MAX(trade_date) AS d FROM fund_daily').get() as any;
+    latestBarDate = row?.d ? String(row.d) : null;
+  }
   if (db && tables.trade_cal) {
-    const endBound = endRaw ?? '99991231';
+    const endBound = endRaw ?? latestBarDate ?? '99991231';
     const rows = db.prepare(`
       SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date <= ? ORDER BY cal_date`).all(endBound) as any[];
     dates = rows.map(row => String(row.cal_date));
