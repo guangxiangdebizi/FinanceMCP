@@ -5,9 +5,10 @@ import {
   type EtfCandidateCategory, type EtfCandidateDeclaration,
 } from './etfDeclarations.js';
 import { adjustmentRatio } from './data.js';
+import { buildEtfOpportunity, discoverEtfUniverse, etfIdentity, listedAsOf, type EtfDiscovery } from './etfResearch.js';
 
 // 声明式候选池在 etfDeclarations.ts 中定义（无依赖），这里原样再导出，保持既有调用方不变。
-export const ETF_UNIVERSE_VERSION = 'r2-etf-candidates-1.0.0';
+export const ETF_UNIVERSE_VERSION = 'etf-candidates-20261021-v2';
 
 export {
   ETF_CANDIDATE_CATEGORIES, ETF_CANDIDATE_CATEGORY_LABELS, ETF_CANDIDATE_DECLARATIONS,
@@ -169,12 +170,14 @@ export interface EtfCandidateRow {
   score: number | null;
   score_components: Record<string, number | null>;
   source: 'server_cache';
+  research: ReturnType<typeof buildEtfOpportunity>;
 }
 
 export interface EtfCandidateScreenResult {
   schema: 'ashare-etf-candidate-screen/1.0';
   as_of_trade_date: string;
   universe_version: string;
+  universe_discovery: EtfDiscovery['meta'];
   categories_requested: EtfCandidateCategory[];
   limit: number;
   data_coverage: {
@@ -205,6 +208,8 @@ export interface ScreenEtfCandidatesInput {
   categories?: readonly string[];
   /** 返回条数上限；五只持仓始终保留，因此实际条数可能大于该值。 */
   limit?: number;
+  /** 实际持仓；缺省兼容初始五只，账户bundle应显式传入。 */
+  heldCodes?: readonly string[];
 }
 
 // ---------------------------------------------------------------- 小工具
@@ -305,7 +310,7 @@ export function screenEtfCandidates(
   const latestOf = (table: string): string | null => {
     if (!db || !tableExists(db, table)) return null;
     try {
-      return (db.prepare(`SELECT MAX(trade_date) AS d FROM ${table}`).get() as any)?.d ?? null;
+      return (db.prepare(`SELECT MAX(trade_date) AS d FROM ${table} WHERE trade_date <= ?`).get(asOf) as any)?.d ?? null;
     } catch {
       return null;
     }
@@ -321,16 +326,23 @@ export function screenEtfCandidates(
     ? 'NOT_READY'
     : missingTables.length > 0 ? 'DEGRADED' : 'READY';
 
-  const declarations = ETF_CANDIDATE_DECLARATIONS.filter(declaration => requestedCategories.includes(declaration.category));
-  // 五只持仓必须始终入选：即使类别被过滤掉，也要在列表里出现。
-  for (const declaration of ETF_CANDIDATE_DECLARATIONS) {
-    if (HELD_SET.has(declaration.ts_code) && !declarations.includes(declaration)) declarations.push(declaration);
+  const discovery = discoverEtfUniverse(db, asOf);
+  const heldCodes = input.heldCodes ?? [...HELD_SET];
+  const heldSet = new Set(heldCodes);
+  const declarations = discovery.declarations.filter(declaration => requestedCategories.includes(declaration.category));
+  // 实际持仓始终保留，即使不在声明种子或动态评估上限内。
+  for (const code of heldSet) {
+    if (declarations.some(row => row.ts_code === code)) continue;
+    const declaration = discovery.declarations.find(row => row.ts_code === code)
+      ?? { ts_code: code, category: 'industry_theme' as const, name_hint: code, benchmark_hint: null, benchmark_index_code: null };
+    declarations.push(declaration);
   }
   const ordered = declarations.slice().sort((a, b) => (a.ts_code < b.ts_code ? -1 : a.ts_code > b.ts_code ? 1 : 0));
 
   // limit 只作用于**排名**：先给全部行排名，再截断展示；入选与否与 limit 无关，
   // 因此 `included` / `excluded` 的统计不会被展示上限改变。
-  const allRows: EtfCandidateRow[] = ordered.map(declaration => evaluateCandidate(db, declaration, asOf, tables));
+  const allRows: EtfCandidateRow[] = ordered.map(declaration => evaluateCandidate(db, declaration, asOf, tables, heldSet));
+  if (allRows.some(row => row.status_reasons.includes('fund_daily_stale'))) coverageReasons.push('candidate_price_stale: 部分候选缺少目标交易日行情');
   const rankedAll = allRows.slice().sort((a, b) => {
     if (a.score === null && b.score === null) return a.ts_code < b.ts_code ? -1 : 1;
     if (a.score === null) return 1;
@@ -357,6 +369,7 @@ export function screenEtfCandidates(
     schema: 'ashare-etf-candidate-screen/1.0',
     as_of_trade_date: asOf,
     universe_version: ETF_UNIVERSE_VERSION,
+    universe_discovery: discovery.meta,
     categories_requested: requestedCategories,
     limit,
     data_coverage: {
@@ -364,7 +377,7 @@ export function screenEtfCandidates(
       missing_tables: missingTables,
       latest: { fund_daily: latestOf('fund_daily'), fund_adj: latestOf('fund_adj'), fund_share: latestOf('fund_share') },
       expected_trade_date: expectedTradeDate,
-      status: coverageStatus,
+      status: coverageStatus === 'READY' && allRows.some(row => row.status_reasons.includes('fund_daily_stale')) ? 'DEGRADED' : coverageStatus,
       reasons: coverageReasons,
     },
     declared: allRows.length,
@@ -401,9 +414,10 @@ function evaluateCandidate(
   declaration: EtfCandidateDeclaration,
   asOf: string,
   tables: { fund_basic: boolean; fund_daily: boolean; fund_adj: boolean; fund_share: boolean; index_daily: boolean; trade_cal: boolean },
+  heldSet: ReadonlySet<string>,
 ): EtfCandidateRow {
   const code = declaration.ts_code;
-  const held = HELD_SET.has(code);
+  const held = heldSet.has(code);
   const statusReasons: string[] = [];
   const exclusions: EtfCandidateRow['exclusions'] = [];
 
@@ -415,6 +429,14 @@ function evaluateCandidate(
   const nameSource: EtfCandidateRow['name_source'] = basic?.name ? 'fund_basic' : 'declared_hint';
   if (!tables.fund_basic) statusReasons.push('fund_basic_table_missing');
   else if (!basic) statusReasons.push('fund_basic_row_missing');
+  if (basic && !etfIdentity(basic)) {
+    statusReasons.push('etf_identity_unverified');
+    exclusions.push({ filter: 'identity', reason: 'etf_identity_unverified', detail: '缓存基础资料无法确认该产品为ETF，声明种子不构成身份事实' });
+  }
+  if (basic && !listedAsOf(basic, asOf)) {
+    statusReasons.push('not_listed_as_of');
+    exclusions.push({ filter: 'listing', reason: 'not_listed_as_of', detail: '目标交易日尚未上市、已退市或上市状态无法确认' });
+  }
 
   // ---- fund_daily（最多 risk 窗口根）
   const bars: any[] = db && tables.fund_daily
@@ -462,6 +484,7 @@ function evaluateCandidate(
   if (adjMissingBars > 0) statusReasons.push(`fund_adj_missing_bars:${adjMissingBars}`);
 
   const latest = series.at(-1) ?? null;
+  if (latest && latest.trade_date !== asOf) statusReasons.push('fund_daily_stale');
 
   // ---- fund_share（时点存量，万份）
   const shareRow = db && tables.fund_share
@@ -634,6 +657,7 @@ function evaluateCandidate(
     score,
     score_components: components,
     source: 'server_cache',
+    research: buildEtfOpportunity(db, code, asOf, [...heldSet]),
   };
 }
 

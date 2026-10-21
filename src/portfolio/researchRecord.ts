@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { PLAN_TRACKING_SCHEMA, type DailyReportResult } from './dailyReport.js';
 import { openPortfolioDb, portfolioDbPath } from './db.js';
+import { canonicalJson, JOURNAL_VERSION, recordResearchJournal, type JournalObservation } from './researchJournal.js';
 
 /**
  * 前瞻研究记录的写入路径（任务书 D5）。
@@ -123,6 +124,35 @@ export function recordPlanTracking(input: ResearchRecordInput): ResearchRecordRe
     action_count: actions.length, db: portfolioDbPath(),
     note: '已写入 plan_tracking（仅研究记录；不写账户事件，也不写真实成交）。',
   };
+}
+
+/** 保存实际量化bundle完整快照，包括数据不足日；legacy预案记录保留不动。 */
+export function recordVpsResearchSnapshot(input: {
+  portfolioDb: DatabaseSync;
+  accountId: string;
+  bundle: { report_id: string; as_of_trade_date: string; generated_at?: string; [key: string]: unknown };
+  observations?: JournalObservation[];
+  versions?: Record<string, string>;
+  generatedAt?: string;
+}) {
+  const { bundle } = input;
+  const generatedAt = input.generatedAt ?? bundle.generated_at;
+  if (!generatedAt) throw new Error('实际VPS快照需要generated_at，不能以导入时间补造生成时间');
+  const revision = createHash('sha256').update(canonicalJson({ bundle, observations: input.observations ?? [], versions: input.versions ?? {}, generated_at: generatedAt })).digest('hex').slice(0, 16);
+  return recordResearchJournal(input.portfolioDb, {
+    record_id: `VPS-${bundle.report_id}-${revision}`,
+    account_id: input.accountId,
+    source: 'vps',
+    as_of_trade_date: bundle.as_of_trade_date,
+    bundle_id: bundle.report_id,
+    generated_at: generatedAt,
+    versions: { journal: JOURNAL_VERSION, ...(input.versions ?? {}) },
+    judgement: bundle.status ?? 'UNAVAILABLE',
+    candidates: [],
+    observations: input.observations ?? [],
+    evidence: [],
+    payload: bundle,
+  });
 }
 
 /** 打开可写账户库（仅 CLI/定时任务使用；MCP 工具始终只读）。 */

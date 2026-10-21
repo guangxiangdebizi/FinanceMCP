@@ -4,6 +4,7 @@ import { upsertRows } from './db.js';
 import { addDays, isTradeDay, latestTradeDay, previousTradeDay, shanghaiToday, syncTradeCal, tradeDaysBetween } from './ingest.js';
 import { adjustmentRatio, AdjustMode, DataQueryError, parseYmd } from './data.js';
 import { ETF_CANDIDATE_DECLARATIONS } from './etfDeclarations.js';
+import { discoverEtfUniverse, ETF_DYNAMIC_SYNC_LIMIT } from './etfResearch.js';
 
 /**
  * ETF 数据纵切（R0）：基金基础信息、日线、复权因子与份额。
@@ -495,6 +496,7 @@ export interface EtfDailySyncSummary {
   window: { adj_share_start: string; end: string };
   errors: string[];
   seconds: number;
+  research_universe?: { discovered: number; selected_dynamic: string[]; history_requested: string[]; maximum_dynamic: number };
 }
 
 /**
@@ -573,15 +575,36 @@ export async function syncEtfForDaily(
     }
   }
 
-  // 4) 复权与份额：持仓 + 已声明候选池，按最近窗口逐代码合并写入。
-  //    fund_share 允许披露滞后：缺失不会把有效日线降为不可估值（见 quoteOne）。
+  // 4) 仅为流动性最高的有限动态样本按需补历史，不逐只无界请求全市场。
+  const discovery = discoverEtfUniverse(db, end, ETF_DYNAMIC_SYNC_LIMIT);
+  const dynamicCodes = discovery.declarations.map(row => row.ts_code).filter(code => !ETF_PIPELINE_CODES.includes(code));
+  const historyRequested: string[] = [];
+  for (const code of dynamicCodes) {
+    const key = `${code}:${summary.window.adj_share_start}-${end}`;
+    const count = Number((db.prepare('SELECT COUNT(*) n FROM fund_daily WHERE ts_code=? AND trade_date BETWEEN ? AND ?').get(code, summary.window.adj_share_start, end) as any).n);
+    const prior = db.prepare("SELECT synced_at FROM fund_sync_log WHERE dataset='fund_daily_history' AND key LIKE ? ORDER BY synced_at DESC LIMIT 1").get(`${code}:%`) as any;
+    if (count >= 60 || (prior?.synced_at && Date.now() - Date.parse(prior.synced_at) < 7 * 86400000)) continue;
+    historyRequested.push(code);
+    try {
+      const rows = (await fetchAll('fund_daily', { ts_code: code, start_date: summary.window.adj_share_start, end_date: end }, FUND_DAILY_FIELDS))
+        .filter(row => row.ts_code === code && row.trade_date >= summary.window.adj_share_start && row.trade_date <= end && validateFundBar(row).valid);
+      const written = upsertRows(db, 'fund_daily', FUND_DAILY_BAR_COLS, rows);
+      logFundSync(db, 'fund_daily_history', key, written, written ? 'ok' : 'empty');
+    } catch (error: any) {
+      logFundSync(db, 'fund_daily_history', key, 0, 'failed', String(error?.message ?? error));
+      errors.push(`fund_daily_history ${code}: ${String(error?.message ?? error)}`);
+    }
+  }
+  summary.research_universe = { discovered: discovery.meta.discovered_total, selected_dynamic: dynamicCodes, history_requested: historyRequested, maximum_dynamic: ETF_DYNAMIC_SYNC_LIMIT };
+  const pipelineCodes = [...new Set([...ETF_PIPELINE_CODES, ...dynamicCodes])];
+  // 份额披露滞后仅影响份额研究，不影响可估值价格。
   try {
-    summary.fund_adj = await syncFundAdj(db, summary.window.adj_share_start, end, { codes: ETF_PIPELINE_CODES });
+    summary.fund_adj = await syncFundAdj(db, summary.window.adj_share_start, end, { codes: pipelineCodes });
   } catch (e: any) {
     errors.push(`fund_adj: ${String(e?.message ?? e)}`);
   }
   try {
-    summary.fund_share = await syncFundShare(db, summary.window.adj_share_start, end, { codes: ETF_PIPELINE_CODES });
+    summary.fund_share = await syncFundShare(db, summary.window.adj_share_start, end, { codes: pipelineCodes });
   } catch (e: any) {
     errors.push(`fund_share: ${String(e?.message ?? e)}`);
   }
