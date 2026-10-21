@@ -8,7 +8,8 @@ import { adjustmentRatio } from './data.js';
 import { buildEtfOpportunity, discoverEtfUniverse, etfIdentity, listedAsOf, type EtfDiscovery } from './etfResearch.js';
 
 // 声明式候选池在 etfDeclarations.ts 中定义（无依赖），这里原样再导出，保持既有调用方不变。
-export const ETF_UNIVERSE_VERSION = 'etf-candidates-20261021-v2';
+export const ETF_UNIVERSE_VERSION = 'r2-etf-candidates-1.0.0';
+export const ETF_RESEARCH_VERSION = 'etf-research-20261021-v2';
 
 export {
   ETF_CANDIDATE_CATEGORIES, ETF_CANDIDATE_CATEGORY_LABELS, ETF_CANDIDATE_DECLARATIONS,
@@ -177,6 +178,7 @@ export interface EtfCandidateScreenResult {
   schema: 'ashare-etf-candidate-screen/1.0';
   as_of_trade_date: string;
   universe_version: string;
+  research_version: string;
   universe_discovery: EtfDiscovery['meta'];
   categories_requested: EtfCandidateCategory[];
   limit: number;
@@ -369,6 +371,7 @@ export function screenEtfCandidates(
     schema: 'ashare-etf-candidate-screen/1.0',
     as_of_trade_date: asOf,
     universe_version: ETF_UNIVERSE_VERSION,
+    research_version: ETF_RESEARCH_VERSION,
     universe_discovery: discovery.meta,
     categories_requested: requestedCategories,
     limit,

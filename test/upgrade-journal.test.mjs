@@ -64,6 +64,10 @@ test('evaluation matures on trading sessions, deducts costs and uses exact bench
     assert.equal(early.maturity_date, '20261008');
     const result = evaluate()[0];
     assert.equal(result.status, 'EVALUATED');
+    assert.equal(result.observations[0].direction, 'observe');
+    assert.equal(result.observations[0].evaluation_basis, 'price_observation_hypothetical_cost_comparison');
+    assert.equal(result.observations[0].actual_trade, false);
+    assert.equal(result.observations[0].realized_pnl_cents, null);
     assert.equal(result.observations[0].gross_return_pct, 10);
     assert.equal(result.observations[0].net_return_pct, 7.9208);
     assert.equal(result.observations[0].fees_cents, 200);
@@ -73,6 +77,26 @@ test('evaluation matures on trading sessions, deducts costs and uses exact bench
     assert.deepEqual(journal.recordJournalEvaluations(db, [result]), { created: 1, existing: 0 });
     assert.deepEqual(journal.recordJournalEvaluations(db, [result]), { created: 0, existing: 1 });
     assert.throws(() => db.exec('DELETE FROM research_journal_evaluation'), /immutable/);
+  } finally { db.close(); }
+});
+test('observe and hypothetical long stay separate from actual trades, including missing risk bars', () => {
+  const { db, evaluate } = fixture();
+  try {
+    const observation = record().observations[0];
+    journal.recordResearchJournal(db, record('observe', { observations: [{ ...observation, direction: 'observe' }] }));
+    journal.recordResearchJournal(db, record('long', { observations: [{ ...observation, direction: 'long' }] }));
+    db.prepare('UPDATE fund_daily SET low=NULL WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
+    const results = evaluate();
+    const watched = results.find(row => row.record_id === 'observe').observations[0];
+    const hypothetical = results.find(row => row.record_id === 'long').observations[0];
+    assert.equal(watched.evaluation_basis, 'price_observation_hypothetical_cost_comparison');
+    assert.equal(hypothetical.evaluation_basis, 'hypothetical_long_fixed_window');
+    for (const observation of [watched, hypothetical]) {
+      assert.equal(observation.actual_trade, false);
+      assert.equal(observation.realized_pnl_cents, null);
+      assert.equal(observation.invalidation, 'UNKNOWN');
+      assert.equal(observation.unexpected_loss, 'UNKNOWN', 'missing lows cannot prove no risk breach');
+    }
   } finally { db.close(); }
 });
 test('missing fees, intermediate prices, benchmark or factors never silently shorten an evaluation', () => {

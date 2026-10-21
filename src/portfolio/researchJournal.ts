@@ -195,7 +195,15 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
     const generatedDate = new Date(Date.parse(record.generated_at) + 8 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
     if (generatedDate > record.as_of_trade_date) { base.reason = 'retrospective_record_not_prospective'; return finish(); }
     base.observations = record.observations.map(observation => {
-      const result: Record<string, any> = { ts_code: observation.ts_code, quantity: observation.quantity, status: 'UNAVAILABLE', reason: null, trigger: 'UNKNOWN', invalidation: 'UNKNOWN', gross_return_pct: null, net_return_pct: null, benchmark_net_return_pct: null, excess_return_pct: null, fees_cents: null, max_drawdown_pct: null, unexpected_loss: 'UNKNOWN' };
+      const result: Record<string, any> = {
+        ts_code: observation.ts_code, quantity: observation.quantity,
+        direction: observation.direction ?? 'observe',
+        evaluation_basis: observation.direction === 'long' ? 'hypothetical_long_fixed_window' : 'price_observation_hypothetical_cost_comparison',
+        actual_trade: false, realized_pnl_cents: null,
+        status: 'UNAVAILABLE', reason: null, trigger: 'UNKNOWN', invalidation: 'UNKNOWN',
+        gross_return_pct: null, net_return_pct: null, benchmark_net_return_pct: null, excess_return_pct: null,
+        fees_cents: null, max_drawdown_pct: null, unexpected_loss: 'UNKNOWN',
+      };
       const fail = (reason: string) => ({ ...result, reason });
       const allDates = [record.as_of_trade_date, ...dates];
       const series = allDates.map(date => price(db, observation.ts_code, date));
@@ -212,7 +220,7 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
       let peak = start.raw, dd = 0;
       for (const row of rows) { peak = Math.max(peak, row.raw); dd = Math.min(dd, row.raw / peak - 1); }
       result.max_drawdown_pct = round(dd * 100);
-      result.unexpected_loss = observation.invalidation_price_milli === undefined ? 'NOT_DEFINED' : result.invalidation === 'INVALIDATED' ? 'LOSS_THRESHOLD_BREACHED' : 'NOT_BREACHED';
+      result.unexpected_loss = observation.invalidation_price_milli === undefined ? 'NOT_DEFINED' : result.invalidation === 'UNKNOWN' ? 'UNKNOWN' : result.invalidation === 'INVALIDATED' ? 'LOSS_THRESHOLD_BREACHED' : 'NOT_BREACHED';
       const fees = (code: string, first: Price, last: Price, quantity = observation.quantity) => {
         if (!input.feeEstimator) return null;
         const buy = input.feeEstimator({ ts_code: code, side: 'BUY', quantity, price_milli: Math.round(first.raw * 1000), trade_date: record.as_of_trade_date });
