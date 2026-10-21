@@ -24,6 +24,8 @@ const USAGE = `用法: finance-ashare <command> [options]
   research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
                                                                  用已保存的快照评价持有期收益；未到期保持 PENDING
   research-seed --date YYYYMMDD [--db PATH]                      以该日正式 V1 股票池写入一次性 V1/V2 共同起点（只读正式库）
+  investment-research-bundle [--account ID] [--date YYYYMMDD] [--db PATH] [--market-db PATH]
+                                                                 私有统一研究事实包；默认最近已收盘日，读取路径不写库
   migrate                                                        将旧版缓存主键布局迁移为按股票连续存储
 
   账户子命令（独立 portfolio.sqlite，只读演示账户，默认不在 MCP 暴露）：
@@ -52,6 +54,26 @@ async function main() {
   const { checkQuality, shanghaiToday } = await import('./ingest.js');
   const { syncRange } = await import('./sync.js');
   const command = process.argv[2];
+  if (command === 'investment-research-record') {
+    const { runBundleRecordCommand } = await import('../portfolio/bundleRecordCli.js');
+    runBundleRecordCommand({ arg, flag, ymd, print });
+    return;
+  }
+  if (command === 'investment-research-bundle') {
+    const { runBundleCommand } = await import('../portfolio/bundleCli.js');
+    runBundleCommand({ arg, flag, ymd, print });
+    return;
+  }
+  if (command?.startsWith('portfolio-journal-')) {
+    const { runJournalCommand } = await import('../portfolio/journalCli.js');
+    if (!runJournalCommand(command, { arg, flag, ymd, print })) process.exitCode = 2;
+    return;
+  }
+  if (command === 'research-validation') {
+    const { runValidationCommand } = await import('./validationCli.js');
+    print(await runValidationCommand(process.argv.slice(3)));
+    return;
+  }
   // Research commands open the live cache read-only themselves and must not
   // create or migrate a writable live connection.
   if (command === 'research-snapshot' || command === 'research-evaluate' || command === 'research-seed') {

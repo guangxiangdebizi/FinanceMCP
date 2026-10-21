@@ -25,6 +25,7 @@ const RESOURCE_PATH = '/private/mcp';
 const ACCOUNT_TOOLS = [
   'ashare_portfolio_summary', 'ashare_portfolio_scenario', 'ashare_portfolio_decision',
   'ashare_portfolio_daily_report', 'ashare_etf_candidates', 'ashare_portfolio_benchmarks',
+  'ashare_investment_research_bundle',
 ];
 
 // 合成账户库（演示快照，不是用户真实账户）。
@@ -34,6 +35,14 @@ const imported = spawnSync(process.execPath, [join(ROOT, 'build', 'ashare', 'cli
   encoding: 'utf8',
 });
 assert.equal(imported.status, 0, imported.stderr);
+// An explicitly configured synthetic ledger avoids any implicit demo-account fallback.
+{
+  const { openPortfolioDb } = await import('../build/portfolio/db.js');
+  const { initBaseline } = await import('../build/portfolio/ledger.js');
+  const db = openPortfolioDb(PORTFOLIO_DB, { marketPath: MARKET_DB });
+  initBaseline(db, 'synthetic-oauth-account', { asOf: '20261018', snapshotId: 'demo-2026-10-18' });
+  db.close();
+}
 
 // 最小市场缓存：公网工具可调用，但不含任何账户数据。
 {
@@ -255,7 +264,7 @@ test('O2 正确用户通过 Authorization Code + PKCE 获得令牌并读取账�
     });
     const listBody = await list.json();
     const names = listBody.result.tools.map(t => t.name).sort();
-    assert.deepEqual(names, ACCOUNT_TOOLS.slice().sort(), 'OAuth 成功后应恰好看到六个账户工具');
+    assert.deepEqual(names, ACCOUNT_TOOLS.slice().sort(), 'OAuth exposes exactly the registered private read-only tools');
 
     const call = await fetch(`${server.issuer}${RESOURCE_PATH}`, {
       method: 'POST',
@@ -266,6 +275,15 @@ test('O2 正确用户通过 Authorization Code + PKCE 获得令牌并读取账�
     assert.equal(callBody.result.content[0].type, 'text');
     const summary = JSON.parse(callBody.result.content[0].text);
     assert.equal(summary.summary.totals.total_assets_cents, 7577653);
+    const bundleCall = await server.rpc(RESOURCE_PATH, 'tools/call', {
+      name: 'ashare_investment_research_bundle', arguments: { account_id: 'synthetic-oauth-account', as_of_trade_date: '20261016' },
+    }, access);
+    assert.equal(bundleCall.status, 200, bundleCall.text);
+    const bundle = JSON.parse(bundleCall.body.result.content[0].text);
+    assert.equal(bundle.schema, 'ashare-investment-research-bundle/1.0');
+    assert.equal(bundle.status, 'DATA_INSUFFICIENT');
+    assert.equal(bundle.market.available, false);
+    assert.equal(bundle.boundaries.read_only, true);
   } finally { await server.stop(); }
 });
 
@@ -382,7 +400,7 @@ test('O4 刷新令牌轮换、撤销后行为正确', async () => {
     // 新 access 可用。
     const before = await server.rpc(RESOURCE_PATH, 'tools/list', {}, refreshed.body.access_token);
     assert.equal(before.status, 200);
-    assert.equal(before.body.result.tools.length, 6);
+    assert.equal(before.body.result.tools.length, ACCOUNT_TOOLS.length);
 
     // 撤销后立即失效。
     const revoked = await server.form('/oauth/revoke', { token: refreshed.body.access_token });
@@ -454,7 +472,7 @@ test('O6 公网市场端点不受影响，且不泄露账户工具；私有调�
       'ashare_sector_rank', 'ashare_stock_history', 'ashare_financial_data', 'ashare_market_data',
       'ashare_stock_basic',
     ]) assert.ok(names.includes(original), `公网缺少 ${original}`);
-    assert.deepEqual(names.filter(n => /portfolio|etf_candidates/.test(n)), [], '公网不得出现账户工具');
+    assert.deepEqual(names.filter(n => /portfolio|etf_candidates|investment_research_bundle/.test(n)), [], '公网不得出现账户工具');
 
     // 私有端点拒绝市场工具。
     const redirectUri = 'http://127.0.0.1:9/callback';
@@ -501,7 +519,7 @@ test('O7 OAuth 开启时静态令牌默认不可用；显式允许后才可用',
   try {
     const ok = await allowed.rpc(RESOURCE_PATH, 'tools/list', {}, staticToken);
     assert.equal(ok.status, 200, ok.text);
-    assert.equal(ok.body.result.tools.length, 6);
+    assert.equal(ok.body.result.tools.length, ACCOUNT_TOOLS.length);
   } finally { await allowed.stop(); }
 });
 

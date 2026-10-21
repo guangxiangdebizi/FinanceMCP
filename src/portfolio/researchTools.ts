@@ -6,6 +6,9 @@ import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
 import { buildDailyReport } from './dailyReport.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
 import { screenEtfCandidates } from '../ashare/etfUniverse.js';
+import { resolveResearchDate } from '../ashare/researchDate.js';
+import { buildInvestmentResearchBundle } from './researchBundle.js';
+import { loadFeeContext } from './fees.js';
 
 /**
  * 私有账户端点的"研究/日报"工具实现（V1.0 C2/C6/D1）。
@@ -54,18 +57,20 @@ function ymd(raw: unknown, label: string): string | undefined {
 }
 
 function latestTradeDayOf(market: DatabaseSync | null): string | undefined {
-  if (!market) return undefined;
-  try {
-    const row = market.prepare("SELECT MAX(cal_date) AS d FROM trade_cal WHERE is_open = 1 AND cal_date <= ?")
-      .get(new Date().toISOString().slice(0, 10).replace(/-/g, '')) as any;
-    return row?.d ?? undefined;
-  } catch {
-    return undefined;
-  }
+  return resolveResearchDate(market).as_of_trade_date ?? undefined;
 }
 
 export function runPortfolioResearchTool(name: string, args: Record<string, any>): ToolResult {
   switch (name) {
+    case 'ashare_investment_research_bundle': {
+      const db = readDb();
+      try {
+        return json(buildInvestmentResearchBundle({
+          portfolioDb: db, marketDb: readOnlyMarket(), accountId: args.account_id,
+          asOfTradeDate: ymd(args.as_of_trade_date, 'as_of_trade_date'), maxCandidates: args.max_candidates,
+        }));
+      } finally { db.close(); }
+    }
     case 'ashare_portfolio_daily_report': {
       const db = readDb();
       const market = readOnlyMarket();
@@ -75,9 +80,10 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
         const account = resolveAccountId(db, args.account_id);
         const resolved = resolveAccountSnapshot(db, account.account_id, args.snapshot_id);
         const snapshot = resolved.snapshot;
-        const asOf = ymd(args.as_of_trade_date, 'as_of_trade_date')
-          ?? latestTradeDayOf(market)
-          ?? snapshot.as_of.replace(/-/g, '');
+        const session = resolveResearchDate(market, ymd(args.as_of_trade_date, 'as_of_trade_date'));
+        if (session.status !== 'READY') return json({ schema: 'ashare-daily-action-report/1.0', status: 'DATA_INSUFFICIENT', actionable: false,
+          as_of_trade_date: session.as_of_trade_date, session, reason: session.reason });
+        const asOf = session.as_of_trade_date!;
         const rawMax = args.max_actions;
         const maxActions = rawMax === undefined || rawMax === null ? undefined : Number(rawMax);
         if (maxActions !== undefined && (!Number.isInteger(maxActions) || maxActions < 0 || maxActions > 3)) {
@@ -106,12 +112,14 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
     case 'ashare_etf_candidates': {
       const market = readOnlyMarket();
       try {
-        const asOf = ymd(args.as_of_trade_date, 'as_of_trade_date') ?? latestTradeDayOf(market);
-        if (!asOf) {
+        const session = resolveResearchDate(market, ymd(args.as_of_trade_date, 'as_of_trade_date'));
+        const asOf = session.as_of_trade_date;
+        if (!asOf || session.status !== 'READY') {
           return json({
             schema: 'ashare-etf-candidate-screen/1.0',
             status: 'DATA_INSUFFICIENT',
-            reason: 'market_cache_or_calendar_unavailable',
+            reason: session.reason ?? 'market_cache_or_calendar_unavailable',
+            session,
             detail: '本地只读市场缓存或交易日历不可用，无法确定候选筛选的交易日；不伪造 as_of。',
           });
         }
@@ -130,15 +138,17 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
 
     case 'ashare_portfolio_benchmarks': {
       const market = readOnlyMarket();
+      const db = readDb();
       try {
+        const account = resolveAccountId(db, args.account_id);
+        const session = resolveResearchDate(market, ymd(args.end_date, 'end_date'));
+        if (session.status !== 'READY') return json({ status: 'UNAVAILABLE', session, reason: session.reason, benchmarks: [] });
+        const end = session.as_of_trade_date!;
         return json(buildBenchmarkComparison({
-          marketDb: market,
-          start: ymd(args.start_date, 'start_date'),
-          end: ymd(args.end_date, 'end_date'),
+          marketDb: market, start: ymd(args.start_date, 'start_date'), end,
+          fee_context: end ? loadFeeContext(db, account.account_id, end) : undefined,
         }));
-      } finally {
-        // 共享连接不关闭（见 readOnlyMarket 注释）。
-      }
+      } finally { db.close(); }
     }
 
     default:
@@ -148,6 +158,7 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
 
 /** 供 dispatch.ts 判断一个私有工具是否由本模块实现。 */
 export const RESEARCH_PRIVATE_TOOLS = new Set([
+  'ashare_investment_research_bundle',
   'ashare_portfolio_daily_report',
   'ashare_etf_candidates',
   'ashare_portfolio_benchmarks',

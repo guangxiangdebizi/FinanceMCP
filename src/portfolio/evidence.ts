@@ -35,6 +35,13 @@ export interface ResearchEvidenceRecord {
   recorded_by: string;
   recorded_at: string;
   note: string;
+  provenance?: {
+    source: string;
+    rule_version: string;
+    claim: string;
+    validation_run_id: string;
+    observation_type: 'RETROSPECTIVE_HOLDOUT' | 'WALK_FORWARD_VALIDATION' | 'TRUE_FORWARD_OBSERVATION';
+  };
 }
 
 export type EvidenceRecordInput = Omit<ResearchEvidenceRecord, 'recorded_at' | 'note'> & {
@@ -48,7 +55,8 @@ export type EvidenceReason =
   | 'evidence_code_mismatch'
   | 'evidence_expired'
   | 'evidence_not_yet_valid'
-  | 'evidence_status_not_verified';
+  | 'evidence_status_not_verified'
+  | 'evidence_provenance_mismatch';
 
 export const EVIDENCE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS research_evidence (
@@ -94,6 +102,9 @@ function tableExists(db: DatabaseSync, name: string): boolean {
 export function ensureEvidenceSchema(db: DatabaseSync): void {
   db.exec(EVIDENCE_SCHEMA);
   db.exec(EVIDENCE_STATUS_EVENT_SCHEMA);
+  if (!(db.prepare('PRAGMA table_info(research_evidence)').all() as any[]).some(row => row.name === 'provenance_json')) {
+    db.exec('ALTER TABLE research_evidence ADD COLUMN provenance_json TEXT');
+  }
 }
 
 function requireText(value: unknown, label: string): string {
@@ -137,6 +148,17 @@ function normalizeRecord(input: EvidenceRecordInput): ResearchEvidenceRecord {
     recorded_by: recordedBy,
     recorded_at: input.recorded_at ?? new Date().toISOString(),
     note: String(input.note ?? ''),
+    ...(input.provenance ? { provenance: normalizeProvenance(input.provenance) } : {}),
+  };
+}
+
+function normalizeProvenance(value: NonNullable<ResearchEvidenceRecord['provenance']>): NonNullable<ResearchEvidenceRecord['provenance']> {
+  const types = ['RETROSPECTIVE_HOLDOUT', 'WALK_FORWARD_VALIDATION', 'TRUE_FORWARD_OBSERVATION'];
+  if (!types.includes(value.observation_type)) throw new Error('unknown evidence observation_type');
+  return {
+    source: requireText(value.source, 'provenance.source'), rule_version: requireText(value.rule_version, 'provenance.rule_version'),
+    claim: requireText(value.claim, 'provenance.claim'), validation_run_id: requireText(value.validation_run_id, 'provenance.validation_run_id'),
+    observation_type: value.observation_type,
   };
 }
 
@@ -153,6 +175,7 @@ function rowToRecord(row: any): ResearchEvidenceRecord {
     recorded_by: row.recorded_by,
     recorded_at: row.recorded_at,
     note: row.note ?? '',
+    ...(row.provenance_json ? { provenance: normalizeProvenance(JSON.parse(row.provenance_json)) } : {}),
   };
 }
 
@@ -181,16 +204,18 @@ export function recordResearchEvidence(
       && existing.sell_code === record.sell_code && existing.strategy_id === record.strategy_id
       && existing.as_of === record.as_of && existing.valid_until === record.valid_until
       && existing.status === record.status && existing.recorded_by === record.recorded_by
-      && existing.note === record.note;
+      && existing.note === record.note
+      && JSON.stringify(existing.provenance ?? null) === JSON.stringify(record.provenance ?? null);
     if (!same) throw new Error(`研究证据 ${record.evidence_id} 已存在且内容不同，拒绝覆盖`);
     return { evidence_id: record.evidence_id, created: false, record: existing };
   }
   inPortfolioTransaction(db, () => {
     db.prepare(`INSERT INTO research_evidence
-      (evidence_id, kind, buy_code, sell_code, strategy_id, as_of, valid_until, status, recorded_by, recorded_at, note)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+      (evidence_id, kind, buy_code, sell_code, strategy_id, as_of, valid_until, status, recorded_by, recorded_at, note, provenance_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       record.evidence_id, record.kind, record.buy_code, record.sell_code, record.strategy_id,
       record.as_of, record.valid_until, record.status, record.recorded_by, record.recorded_at, record.note,
+      record.provenance ? JSON.stringify(record.provenance) : null,
     );
   });
   return { evidence_id: record.evidence_id, created: true, record };
@@ -314,6 +339,13 @@ export interface VerifyEvidenceOptions {
   sellCode?: string | null;
   /** 决策适用的交易日 YYYYMMDD。 */
   asOf: string;
+  /** Strict callers bind the registered record to the actual strategy, source and claim. */
+  expectedKind?: string;
+  expectedStrategyId?: string;
+  expectedSource?: string;
+  expectedRuleVersion?: string;
+  expectedClaim?: string;
+  requireProvenance?: boolean;
 }
 
 export interface VerifyEvidenceResult {
@@ -355,6 +387,15 @@ export function verifyResearchEvidence(
   if (record.status !== 'VERIFIED') {
     return { verified: false, reason: 'evidence_status_not_verified', record, detail: `研究证据 ${evidenceId} 状态为 ${record.status}` };
   }
+  const provenance = record.provenance;
+  const mismatch = (options.expectedKind !== undefined && record.kind !== options.expectedKind)
+    || (options.expectedStrategyId !== undefined && record.strategy_id !== options.expectedStrategyId)
+    || (options.requireProvenance === true && !provenance)
+    || (options.expectedSource !== undefined && provenance?.source !== options.expectedSource)
+    || (options.expectedRuleVersion !== undefined && provenance?.rule_version !== options.expectedRuleVersion)
+    || (options.expectedClaim !== undefined && provenance?.claim !== options.expectedClaim);
+  if (mismatch) return { verified: false, reason: 'evidence_provenance_mismatch', record,
+    detail: '证据类型、策略、来源、规则版本或具体优势主张与服务端注册记录不匹配；旧无来源证据不能冒称严格验证。' };
   const buyCode = normalizeSecurityCode(options.buyCode);
   if (record.buy_code !== buyCode) {
     return { verified: false, reason: 'evidence_code_mismatch', record, detail: `证据买入 ${record.buy_code} 与本次 ${buyCode} 不一致` };

@@ -11,6 +11,7 @@ import { loadVerdicts } from './evidence.js';
 import { financialHistory, marketData, resolveCode, stockBasic, stockHistory } from './data.js';
 import { factorSnapshot } from './engine.js';
 import { etfQuotes, etfStatus } from './etf.js';
+import { resolveResearchDate } from './researchDate.js';
 
 export { ashareToolDefinitions, ASHARE_TOOL_NAMES } from './definitions.js';
 
@@ -26,11 +27,16 @@ function resolveDate(db: DatabaseSync, raw: unknown): { date: string; note?: str
     if (!/^\d{8}$/.test(value)) throw new Error('date 需要 YYYYMMDD 格式');
     return { date: value };
   }
-  const today = shanghaiToday();
-  if (isTradeDay(db, today)) return { date: today };
-  const last = latestTradeDay(db, today);
-  if (!last) throw new Error('交易日历为空，请先运行 finance-ashare sync');
-  return { date: last, note: `今天 ${today} 非交易日，使用最近交易日 ${last}` };
+  const session = resolveResearchDate(db);
+  if (!session.as_of_trade_date) {
+    const last = latestTradeDay(db, shanghaiToday());
+    if (!last) throw new Error('交易日历为空，请先运行 finance-ashare sync');
+    return { date: last, note: `当前日期交易日历缺失，仅返回历史交易日 ${last}，不构成今日数据就绪声明` };
+  }
+  return { date: session.as_of_trade_date,
+    ...(session.phase === 'PRE_CLOSE' ? { note: `当前交易日尚未收盘，使用最近已收盘交易日 ${session.as_of_trade_date}` }
+      : session.phase === 'NON_TRADING_DAY' ? { note: `今天 ${session.shanghai_date} 非交易日，使用最近交易日 ${session.as_of_trade_date}` } : {}),
+  };
 }
 
 function db(): DatabaseSync {
@@ -319,12 +325,14 @@ function etfDb(): DatabaseSync {
 function etfQuotesTool(args: Record<string, any>): ToolResult {
   const codes = args.ts_codes == null || args.ts_codes === '' ? undefined
     : Array.isArray(args.ts_codes) ? args.ts_codes : String(args.ts_codes).split(/[,，\s]+/).filter(Boolean);
-  // 未指定 end_date 时，按上海时区今天判断“预期最近交易日”，避免默认窗口终点让滞后行情看起来正常。
-  return json(etfQuotes(etfDb(), codes, { start: args.start_date, end: args.end_date, adjust: args.adjust, asOfDate: shanghaiToday() }));
+  const market = etfDb();
+  const target = resolveDate(market, undefined).date;
+  return json(etfQuotes(market, codes, { start: args.start_date, end: args.end_date, adjust: args.adjust, asOfDate: target }));
 }
 
 function etfStatusTool(args: Record<string, any>): ToolResult {
-  return json(etfStatus(etfDb(), { date: args.date }));
+  const market = etfDb();
+  return json(etfStatus(market, { date: args.date ?? resolveDate(market, undefined).date }));
 }
 
 export async function runAshareTool(name: string, args: Record<string, any>): Promise<ToolResult> {

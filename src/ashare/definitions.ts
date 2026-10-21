@@ -188,16 +188,31 @@ export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name))
  * 但单独成集，互不影响。定义本身不含运行时依赖，便于在没有 node:sqlite 的
  * Node 版本上也能安全地做 tools/list。
  */
-const PORTFOLIO_NOTE = '演示/只读账户：数据来自 PRD §3 截图基线，写入独立的 portfolio.sqlite，与公开市场端点隔离；费用、交易单位与压力参数均为假设值，不是券商事实；不下单、不访问券商。';
+const PORTFOLIO_NOTE = '只读账户研究：真实账户由用户确认基线与增量事件重建，演示快照单独标记；私有portfolio.sqlite与公开市场端点隔离。费用逐字段披露CONFIRMED/PUBLIC_REFERENCE/ASSUMED/UNKNOWN，滑点独立估算；交易单位与压力参数按规则披露；不下单、不访问券商。';
 
 export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY }[] = [
+  {
+    name: 'ashare_investment_research_bundle',
+    description: '统一投资研究事实包：复用市场日报、股票池增减与历史表现、信号证据、ETF候选、真实账本账户、费用、组合情景及基准。全部子模块对齐同一已收盘交易日；盘前默认最近已收盘日；关键市场缺失时不生成当日判断。结构化JSON含Markdown摘要、版本、证据缺口；仅受认证的/private/mcp提供，不写库、不联网、不下单。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        account_id: { type: 'string', description: '账户ID；省略使用本部署唯一真实账户，多账户必须显式选择' },
+        as_of_trade_date: { type: 'string', description: 'YYYYMMDD；省略取最近已收盘交易日；明确请求未收盘日期返回NOT_READY' },
+        max_candidates: { type: 'integer', minimum: 1, maximum: 20, description: '非持仓候选摘要上限，默认8；实际持仓始终保留' },
+      },
+    },
+    annotations: READ_ONLY,
+  },
   {
     name: 'ashare_portfolio_summary',
     description: `只读账户快照汇总：五只 ETF 的数量、参考价/成本、市值、权重、现金、理财、总资产、赫芬达尔集中度、主题暴露与对账结果。${PORTFOLIO_NOTE} 历史净值与历史最大回撤未知，显式返回 available=false。需要 ASHARE_PORTFOLIO_ENABLED=1。`,
     inputSchema: {
       type: 'object',
       properties: {
-        snapshot_id: { type: 'string', description: '账户快照 ID；缺省为最新快照（R0 只有 demo-2026-10-18）' },
+        account_id: { type: 'string', description: '账户标识；省略取唯一真实账户，显式查询演示账户必须指定' },
+        as_of_trade_date: { type: 'string', description: 'YYYYMMDD；按基线与已记录事件重建至此日' },
+        snapshot_id: { type: 'string', description: '该账户所属基线快照 ID；禁止读取其他账户快照' },
         include_checks: { type: 'boolean', description: '是否附带逐项对账明细，默认 true' },
       },
     },
@@ -209,6 +224,8 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
     inputSchema: {
       type: 'object',
       properties: {
+        account_id: { type: 'string', description: '账户标识；省略取唯一真实账户' },
+        snapshot_id: { type: 'string', description: '本账户所属快照ID，禁止跨账户读取' },
         action: { type: 'string', enum: ['hold', 'sell-buy'], description: 'hold（不操作）或 sell-buy（卖出并买入）' },
         sell_code: { type: 'string', description: '卖出代码，如 159558.SZ' },
         sell_shares: { type: 'number', description: '卖出份数，必须为 100 的正整数倍' },
@@ -240,7 +257,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
     inputSchema: {
       type: 'object',
       properties: {
-        account_id: { type: 'string', description: '账户标识，缺省 default' },
+        account_id: { type: 'string', description: '账户标识；省略使用本部署唯一真实账户，多账户时必须显式选择' },
         snapshot_id: { type: 'string', description: '账户快照 ID；缺省为最新快照' },
         action: { type: 'string', enum: ['hold', 'reduce', 'sell-buy', 'no-action'], description: '本次请求的决策表达' },
         sell_code: { type: 'string', description: '卖出代码，如 159558.SZ（reduce / sell-buy 必填）' },
@@ -267,7 +284,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
     inputSchema: {
       type: 'object',
       properties: {
-        account_id: { type: 'string', description: '账户标识，缺省 default' },
+        account_id: { type: 'string', description: '账户标识；省略使用本部署唯一真实账户，多账户时必须显式选择' },
         as_of_trade_date: { type: 'string', description: '日报目标交易日 YYYYMMDD；缺省为最近交易日' },
         snapshot_id: { type: 'string', description: '账户快照 ID；缺省为最新快照' },
         max_actions: { type: 'number', description: '动作上限 0–3，默认 3' },
@@ -297,6 +314,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
     inputSchema: {
       type: 'object',
       properties: {
+        account_id: { type: 'string', description: '账户标识；按该账户私有费率计算，省略取唯一真实账户' },
         start_date: { type: 'string', description: '窗口起点 YYYYMMDD；缺省按固定窗口长度回溯' },
         end_date: { type: 'string', description: '窗口终点 YYYYMMDD；缺省为最近交易日' },
       },
