@@ -11,13 +11,15 @@ import { regimeSeries } from './market.js';
 import { SIGNAL_DEFINITIONS } from './signals.js';
 import { shanghaiToday } from './ingest.js';
 import { assertSeparateFromLive } from './snapshot.js';
-import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, VALIDATION_VERSION, type ResearchFee } from './validation.js';
+import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, loadActiveValidationFreeze, VALIDATION_VERSION, type ResearchFee } from './validation.js';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const registryStore = (db: DatabaseSync, value: unknown) => {
   const id = `VAL-${hash(value).slice(0,24)}`;
-  db.prepare('INSERT OR IGNORE INTO validation_result VALUES(?,?,?)').run(id, new Date().toISOString(), JSON.stringify(value));
+  const prior=db.prepare('SELECT content FROM validation_result WHERE id=?').get(id) as {content:string}|undefined;
+  if(prior && prior.content!==JSON.stringify(value)) throw new Error('Research result identity mismatch');
+  if(!prior) db.prepare('INSERT INTO validation_result VALUES(?,?,?)').run(id, new Date().toISOString(), JSON.stringify(value));
   return id;
 };
 
@@ -66,7 +68,9 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
         const scan = scanMarket(db, asOf);
         const models = Object.fromEntries(CONTROL_MODELS.map(model => [model, controlScan(scan, model).rows.filter(r => r.eligible).sort((a,b) => a.rank! - b.rank!).slice(0,40).map(r => ({ ts_code:r.ts_code,score:r.score,rank:r.rank }))]));
         const now = new Date().toISOString();
-        return appendObservation(research, { freeze_id: required('freeze-id'), date: asOf, created_at: now, next_open: `${next.slice(0,4)}-${next.slice(4,6)}-${next.slice(6,8)}T09:30:00+08:00`,
+        const freezeId=arg('freeze-id') ?? loadActiveValidationFreeze({dbPath:researchPath,asOf,implementationHash:identity.implementation_hash,ruleHash:hash({rules:SCORE_RULES,pool:WATCHLIST_RULES,models:CONTROL_MODELS}),costHash:hash(costs)})?.id;
+        if(!freezeId) return {status:'UNAVAILABLE',reason:'matching_active_freeze_unavailable',evidence_level:'UNVERIFIED',as_of:asOf};
+        return appendObservation(research, { freeze_id: freezeId, date: asOf, created_at: now, next_open: `${next.slice(0,4)}-${next.slice(4,6)}-${next.slice(6,8)}T09:30:00+08:00`,
           rule_hash: hash({ rules:SCORE_RULES,pool:WATCHLIST_RULES,models:CONTROL_MODELS }), cost_hash: hash(costs), implementation_hash: identity.implementation_hash, original: true,
           content: { source_report: latestReport, models, note: 'Frozen top40 rankings; daily stateful watchlist observations remain in the existing forward snapshot chain. This record makes no performance claim.' } });
       } finally { research.close(); }
@@ -79,8 +83,8 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
         if(!frozen) throw new Error('Unknown freeze');
         const freeze=JSON.parse(frozen.protocol);
         if(freeze.implementation_hash!==identity.implementation_hash || freeze.cost_hash!==hash(costs)) throw new Error('Frozen evaluation implementation or costs differ; create a new protocol rather than silently changing observations');
-        const rows=research.prepare('SELECT id,date,type,content FROM validation_observation WHERE freeze_id=? AND date<=? ORDER BY date,created_at,id').all(freezeId,asOf) as {id:string;date:string;type:string;content:string}[];
-        const cohorts=rows.filter(r=>r.type==='TRUE_FORWARD_OBSERVATION');
+        const rows=research.prepare('SELECT id,date,type,content,recorded_at FROM validation_observation WHERE freeze_id=? AND date<=? ORDER BY date,created_at,id').all(freezeId,asOf) as {id:string;date:string;type:string;content:string;recorded_at:string|null}[];
+        const cohorts=rows.filter(r=>r.type==='TRUE_FORWARD_OBSERVATION' && r.recorded_at!==null);
         const evaluation=freeze.horizons.flatMap((horizon:number)=>CONTROL_MODELS.map(model=>{
           const selected=cohorts.flatMap(row=>{
             const observation=JSON.parse(row.content);

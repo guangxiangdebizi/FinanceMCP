@@ -158,6 +158,14 @@ export function openValidationDb(path: string, source: string) {
     CREATE TRIGGER IF NOT EXISTS observation_no_delete BEFORE DELETE ON validation_observation BEGIN SELECT RAISE(ABORT,'immutable observation'); END;
     CREATE TRIGGER IF NOT EXISTS result_no_update BEFORE UPDATE ON validation_result BEGIN SELECT RAISE(ABORT,'immutable result'); END;
     CREATE TRIGGER IF NOT EXISTS result_no_delete BEFORE DELETE ON validation_result BEGIN SELECT RAISE(ABORT,'immutable result'); END;`);
+  for(const table of ['validation_freeze','validation_observation']) {
+    const columns=db.prepare(`PRAGMA table_info(${table})`).all() as {name:string}[];
+    if(!columns.some(c=>c.name==='recorded_at')) db.exec(`ALTER TABLE ${table} ADD COLUMN recorded_at TEXT`);
+  }
+  for(const [table,label] of [['validation_freeze','freeze'],['validation_observation','observation'],['validation_result','result']]) {
+    db.exec(`CREATE TRIGGER IF NOT EXISTS ${label}_no_replace BEFORE INSERT ON ${table}
+      WHEN EXISTS(SELECT 1 FROM ${table} WHERE id=NEW.id) BEGIN SELECT RAISE(ABORT,'immutable ${label} duplicate'); END;`);
+  }
   return db;
 }
 const validDate = (d: string) => /^\d{8}$/.test(d) && new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T00:00:00Z`).toISOString().slice(0,10).replace(/-/g,'') === d;
@@ -165,26 +173,63 @@ export function registerFreeze(db: DatabaseSync, protocol: FreezeProtocol) {
   if (!validDate(protocol.start) || !Number.isFinite(Date.parse(protocol.frozen_at)) || !protocol.horizons.length || protocol.horizons.some(h => !Number.isInteger(h) || h < 2) || ![protocol.rule_hash, protocol.cost_hash, protocol.implementation_hash].every(h => /^[a-f0-9]{64}$/.test(h))) throw new Error('Invalid freeze protocol');
   if (Date.parse(protocol.frozen_at) >= Date.parse(`${protocol.start.slice(0,4)}-${protocol.start.slice(4,6)}-${protocol.start.slice(6,8)}T09:30:00+08:00`)) throw new Error('Freeze must precede observation-day open');
   const id = `FRZ-${digest(protocol).slice(0,24)}`;
-  db.prepare('INSERT OR IGNORE INTO validation_freeze VALUES(?,?,?)').run(id, protocol.frozen_at, JSON.stringify(protocol));
-  return { id, ...protocol, status: 'FROZEN_RESEARCH_ONLY', evidence_level: 'UNVERIFIED' };
+  const exact=db.prepare('SELECT protocol,recorded_at FROM validation_freeze WHERE id=?').get(id) as {protocol:string;recorded_at:string|null}|undefined;
+  if(exact) {
+    if(exact.protocol!==JSON.stringify(protocol)) throw new Error('Freeze identity mismatch');
+    return {id,...protocol,recorded_at:exact.recorded_at,status:'FROZEN_RESEARCH_ONLY',evidence_level:'UNVERIFIED'};
+  }
+  const recordedAt=new Date().toISOString();
+  const actualDay=new Date(Date.parse(recordedAt)+8*3600_000).toISOString().slice(0,10).replace(/-/g,'');
+  if(protocol.start<=actualDay || Math.abs(Date.parse(protocol.frozen_at)-Date.parse(recordedAt))>60_000) throw new Error('Freeze requires actual recording time and a future start day; cannot backdate');
+  db.prepare('INSERT INTO validation_freeze(id,created_at,protocol,recorded_at) VALUES(?,?,?,?)').run(id, protocol.frozen_at, JSON.stringify(protocol),recordedAt);
+  return { id, ...protocol,recorded_at:recordedAt, status: 'FROZEN_RESEARCH_ONLY', evidence_level: 'UNVERIFIED' };
 }
 export function appendObservation(db: DatabaseSync, input: { freeze_id: string; date: string; created_at: string; next_open: string; rule_hash: string; cost_hash: string; implementation_hash: string; original: boolean; content: unknown }) {
-  const row = db.prepare('SELECT protocol FROM validation_freeze WHERE id=?').get(input.freeze_id) as { protocol: string } | undefined;
+  const row = db.prepare('SELECT protocol,recorded_at FROM validation_freeze WHERE id=?').get(input.freeze_id) as { protocol: string; recorded_at: string | null } | undefined;
   if (!row) throw new Error('Unknown freeze');
   const p = JSON.parse(row.protocol) as FreezeProtocol;
+  if(`FRZ-${digest(p).slice(0,24)}`!==input.freeze_id) throw new Error('Freeze identity mismatch');
+  const recordedAt=new Date().toISOString();
   if (!validDate(input.date) || ![input.created_at, input.next_open].every(t => Number.isFinite(Date.parse(t)))) throw new Error('Invalid observation times');
   const nextDay = new Date(Date.parse(input.next_open) + 8 * 3600_000).toISOString().slice(0,10).replace(/-/g,'');
-  const timely = nextDay > input.date && Date.parse(input.created_at) >= Date.parse(`${input.date.slice(0,4)}-${input.date.slice(4,6)}-${input.date.slice(6,8)}T15:00:00+08:00`) && Date.parse(input.created_at) < Date.parse(input.next_open);
+  const closeTime=Date.parse(`${input.date.slice(0,4)}-${input.date.slice(4,6)}-${input.date.slice(6,8)}T15:00:00+08:00`);
+  const actualDay=new Date(Date.parse(recordedAt)+8*3600_000).toISOString().slice(0,10).replace(/-/g,'');
+  // Conservative server-clock boundary: only the same civil evening counts.
+  // Overnight imports remain historical even when a caller supplies a later next_open.
+  const timely = actualDay===input.date && nextDay > input.date && Date.parse(recordedAt)>=closeTime && Date.parse(recordedAt)<Date.parse(input.next_open)
+    && Math.abs(Date.parse(input.created_at)-Date.parse(recordedAt))<=60_000;
+  const trustedFreeze=!!row.recorded_at && Date.parse(row.recorded_at)<=Date.parse(recordedAt)
+    && Date.parse(row.recorded_at)<Date.parse(`${p.start.slice(0,4)}-${p.start.slice(4,6)}-${p.start.slice(6,8)}T00:00:00+08:00`);
   const matching = input.rule_hash === p.rule_hash && input.cost_hash === p.cost_hash && input.implementation_hash === p.implementation_hash;
   const id = `OBS-${digest(input).slice(0,24)}`;
   const existing = db.prepare('SELECT id,type FROM validation_observation WHERE freeze_id=? AND date=? ORDER BY created_at,id').all(input.freeze_id,input.date) as {id:string;type:string}[];
   const exact = existing.find(r=>r.id===id);
   if (exact) return { id, type: exact.type, matching, timely, evidence_level: 'UNVERIFIED' };
   const original = input.original && !existing.some(r=>r.id!==id);
-  const type = original && input.date >= p.start && Date.parse(input.created_at) >= Date.parse(p.frozen_at) && timely && matching ? 'TRUE_FORWARD_OBSERVATION' : 'RETROSPECTIVE_HOLDOUT';
-  db.prepare('INSERT OR IGNORE INTO validation_observation VALUES(?,?,?,?,?,?)').run(id, input.freeze_id, input.date, input.created_at, type, JSON.stringify(input));
+  const type = original && trustedFreeze && input.date >= p.start && Date.parse(input.created_at) >= Date.parse(p.frozen_at) && timely && matching ? 'TRUE_FORWARD_OBSERVATION' : 'RETROSPECTIVE_HOLDOUT';
+  db.prepare('INSERT INTO validation_observation(id,freeze_id,date,created_at,type,content,recorded_at) VALUES(?,?,?,?,?,?,?)').run(id, input.freeze_id, input.date, input.created_at, type, JSON.stringify(input),recordedAt);
   return { id, type, matching, timely, evidence_level: 'UNVERIFIED' };
 }
+/** Latest matching trusted freeze, without writable migrations or private data reads. */
+export function loadActiveValidationFreeze(options:{dbPath:string;asOf:string;implementationHash?:string;ruleHash?:string;costHash?:string}) {
+  if(!existsSync(options.dbPath)) return null;
+  const db=new DatabaseSync(options.dbPath,{readOnly:true});
+  db.exec('PRAGMA query_only=ON');
+  try {
+    const columns=db.prepare('PRAGMA table_info(validation_freeze)').all() as {name:string}[];
+    if(!columns.some(c=>c.name==='recorded_at')) return null;
+    const rows=db.prepare('SELECT id,protocol,recorded_at FROM validation_freeze WHERE recorded_at IS NOT NULL ORDER BY recorded_at DESC,id DESC').all() as {id:string;protocol:string;recorded_at:string}[];
+    for(const row of rows) {
+      const p=JSON.parse(row.protocol) as FreezeProtocol;
+      if(`FRZ-${digest(p).slice(0,24)}`!==row.id || p.start>options.asOf) continue;
+      if(Date.parse(row.recorded_at)>=Date.parse(`${p.start.slice(0,4)}-${p.start.slice(4,6)}-${p.start.slice(6,8)}T00:00:00+08:00`)) continue;
+      if(options.implementationHash && p.implementation_hash!==options.implementationHash || options.ruleHash && p.rule_hash!==options.ruleHash || options.costHash && p.cost_hash!==options.costHash) continue;
+      return {id:row.id,...p,recorded_at:row.recorded_at};
+    }
+    return null;
+  } finally {db.close();}
+}
+
 export function researchIdentity() {
   const feeImplementation = createHash('sha256').update(readFileSync(fileURLToPath(new URL('../portfolio/fees.js',import.meta.url))))
     .update(readFileSync(fileURLToPath(new URL('../portfolio/rules.js',import.meta.url)))).digest('hex');

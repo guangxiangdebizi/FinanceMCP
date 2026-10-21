@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadValidationSummary } from '../build/ashare/validation.js';
+import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadActiveValidationFreeze } from '../build/ashare/validation.js';
 import { openAshareDb, upsertRows } from '../build/ashare/db.js';
 import { seedMarket, weekdays } from './ashare-fixture.mjs';
 import { scanMarket } from '../build/ashare/analysis.js';
@@ -53,7 +53,8 @@ test('control models never mutate source scan or original scores',()=>{
   } finally {db.close();}
 });
 
-test('freeze registry is immutable and after-open or changed-rule observations cannot become true forward',()=>{
+test('freeze registry is immutable and after-open or changed-rule observations cannot become true forward',t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-21T12:00:00Z')});
   const dir=mkdtempSync(join(tmpdir(),'validation-freeze-')),source=join(dir,'source.sqlite'),path=join(dir,'research.sqlite');
   new DatabaseSync(source).close();
   assert.throws(()=>openValidationDb(source,source),/同一文件/);
@@ -61,14 +62,33 @@ test('freeze registry is immutable and after-open or changed-rule observations c
   try {
     const p={start:'20261022',frozen_at:'2026-10-21T12:00:00Z',rule_hash:h,cost_hash:h,implementation_hash:h,horizons:[5]};
     const f=registerFreeze(db,p);assert.equal(registerFreeze(db,p).id,f.id);
+    assert.equal(loadActiveValidationFreeze({dbPath:path,asOf:'20261022',implementationHash:h})?.id,f.id);
+    assert.equal(loadActiveValidationFreeze({dbPath:path,asOf:'20261021'}),null);
+    assert.equal(loadActiveValidationFreeze({dbPath:path,asOf:'20261022',implementationHash:'b'.repeat(64)}),null);
     assert.throws(()=>db.prepare('UPDATE validation_freeze SET protocol=?').run('{}'),/immutable/);
     assert.throws(()=>registerFreeze(db,{...p,start:'20261020'}),/precede/);
     const input={freeze_id:f.id,date:'20261022',created_at:'2026-10-22T16:00:00+08:00',next_open:'2026-10-23T09:30:00+08:00',rule_hash:h,cost_hash:h,implementation_hash:h,original:true,content:{pool:[]}};
-    assert.equal(appendObservation(db,input).type,'TRUE_FORWARD_OBSERVATION');
+    t.mock.timers.setTime(Date.parse(input.created_at));
+    const observed=appendObservation(db,input);
+    assert.equal(observed.type,'TRUE_FORWARD_OBSERVATION');
+    assert.throws(()=>db.prepare('INSERT OR REPLACE INTO validation_freeze(id,created_at,protocol) SELECT id,created_at,? FROM validation_freeze WHERE id=?').run('{}',f.id),/immutable/);
+    assert.throws(()=>db.prepare('INSERT OR REPLACE INTO validation_observation(id,freeze_id,date,created_at,type,content) SELECT id,freeze_id,date,created_at,type,? FROM validation_observation WHERE id=?').run('{}',observed.id),/immutable/);
+    t.mock.timers.setTime(Date.parse('2026-10-23T09:30:00+08:00'));
     assert.equal(appendObservation(db,{...input,created_at:'2026-10-23T09:30:00+08:00'}).type,'RETROSPECTIVE_HOLDOUT');
     assert.equal(appendObservation(db,{...input,rule_hash:'b'.repeat(64)}).type,'RETROSPECTIVE_HOLDOUT');
     assert.throws(()=>db.prepare('DELETE FROM validation_observation').run(),/immutable/);
   } finally {db.close();}
+});
+
+test('historical timestamps supplied today cannot manufacture true forward evidence',t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-21T12:00:00Z')});
+  const dir=mkdtempSync(join(tmpdir(),'validation-backdate-')),db=openValidationDb(join(dir,'research.sqlite'),join(dir,'market.sqlite')),h='a'.repeat(64);
+  try {
+    assert.throws(()=>registerFreeze(db,{start:'20260105',frozen_at:'2026-01-01T00:00:00Z',rule_hash:h,cost_hash:h,implementation_hash:h,horizons:[5]}),/backdate/);
+    const f=registerFreeze(db,{start:'20261022',frozen_at:new Date().toISOString(),rule_hash:h,cost_hash:h,implementation_hash:h,horizons:[5]});
+    const r=appendObservation(db,{freeze_id:f.id,date:'20260105',created_at:'2026-01-05T16:00:00+08:00',next_open:'2026-01-06T09:30:00+08:00',rule_hash:h,cost_hash:h,implementation_hash:h,original:true,content:{}});
+    assert.equal(r.type,'RETROSPECTIVE_HOLDOUT');assert.equal(r.timely,false);
+  }finally{db.close();}
 });
 
 function fundedFixture(){
