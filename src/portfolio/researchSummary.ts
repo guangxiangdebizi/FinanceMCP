@@ -602,8 +602,9 @@ export function buildResearchSummary(input: ResearchSummaryInput): any {
   const fatal: ReasonCode[] = [];
   const warnings: string[] = [];
 
-  const snapshot: AccountSnapshot | undefined = resolveAccountState(portfolioDb, accountId, asOf, input.snapshotId,
-    { calendar: marketDb ? settlementCalendarFromDb(marketDb) : undefined }).snapshot;
+  const accountState = resolveAccountState(portfolioDb, accountId, asOf, input.snapshotId,
+    { calendar: marketDb ? settlementCalendarFromDb(marketDb) : undefined });
+  const snapshot: AccountSnapshot | undefined = accountState.snapshot;
   if (!snapshot) {
     fatal.push({ code: 'snapshot_missing', detail: input.snapshotId ? `账户快照 ${input.snapshotId} 不存在` : '账户库中没有任何快照' });
   } else if (!snapshot.is_current) {
@@ -789,7 +790,7 @@ export function buildResearchSummary(input: ResearchSummaryInput): any {
       : { type: 'HOLD' };
     const decision = buildDecision({
       account_id: accountId,
-      snapshot: snapshotSummary,
+      snapshot: accountSummary(readSnapshot(portfolioDb, snapshot.snapshot_id) ?? snapshot),
       as_of_trade_date: asOf,
       market_db: marketDb ?? null,
       // 新版决策从账户库复核研究证据与真实账户门控；只读句柄不写库。
@@ -997,6 +998,8 @@ export function buildResearchSummary(input: ResearchSummaryInput): any {
     snapshot_as_of: snapshot?.as_of ?? null,
     snapshot_is_current: snapshot?.is_current ?? false,
     account_status: accountStatus,
+    account_reconstruction: accountState.reconstruction,
+    state_as_of: asOf,
     reasons: fatal,
     warnings: [...new Set(warnings)],
     data_quality: dataQuality,

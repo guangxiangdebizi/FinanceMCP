@@ -488,6 +488,9 @@ ledger.recordEvent(portfolio, {
   ts_code: '159558.SZ', quantity: 10000, price_milli: 935, fee_cents: 0, source: 'broker_statement',
 });
 // 账本：现金 5,000,000 − 467,500 − 935,000 = 3,597,500 分；证券 1,402,500 分。
+ledger.setAccountCompleteness(portfolio, 'r2-a4', {
+  as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false, note: 'reconciled after importing both trades',
+}, { confirm: true, recordedBy: 'test-fixture' });
 const A4_SNAPSHOT = {
   ...CURRENT_SNAPSHOT,
   snapshot_id: 'r2-a4-snapshot',

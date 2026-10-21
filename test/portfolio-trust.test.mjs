@@ -24,6 +24,7 @@ const { openPortfolioDb } = await import('../build/portfolio/db.js');
 const account = await import('../build/portfolio/account.js');
 const { runPortfolioTool } = await import('../build/portfolio/tools.js');
 const instrument = await import('../build/portfolio/instrument.js');
+const ledger = await import('../build/portfolio/ledger.js');
 
 const { DEMO_SNAPSHOT, DEMO_SNAPSHOT_ID, accountSummary, importDemoSnapshot, importSnapshot, markSnapshotCurrent } = account;
 
@@ -121,6 +122,11 @@ const STOCK_CURRENT = {
 };
 importSnapshot(pdb, ETF_CURRENT, { confirmCurrent: true });
 importSnapshot(pdb, STOCK_CURRENT, { confirmCurrent: true });
+for (const snapshot of [ETF_CURRENT, STOCK_CURRENT]) {
+  ledger.initBaseline(pdb, snapshot.snapshot_id, { asOf: LAST, snapshotId: snapshot.snapshot_id });
+  ledger.confirmRealAccount(pdb, snapshot.snapshot_id, { confirm: true });
+  ledger.setAccountCompleteness(pdb, snapshot.snapshot_id, { as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false }, { confirm: true, recordedBy: 'fixture' });
+}
 pdb.close();
 
 /** 只有一个快照可以是当前账户；每个用例显式指定它需要的那个。 */
@@ -137,7 +143,7 @@ setCurrent(ETF_CURRENT.snapshot_id);
 const ETF_SUMMARY = accountSummary(ETF_CURRENT);
 const STOCK_SUMMARY = accountSummary(STOCK_CURRENT);
 
-const call = async (args) => JSON.parse((await runPortfolioTool('ashare_portfolio_scenario', args)).content[0].text);
+const call = async (args) => JSON.parse((await runPortfolioTool('ashare_portfolio_scenario', { account_id: args.snapshot_id === DEMO_SNAPSHOT_ID ? DEMO_SNAPSHOT_ID : args.snapshot_id ?? ETF_CURRENT.snapshot_id, ...args })).content[0].text);
 const VERIFIED = { evidence_source: 'RESEARCH_VERIFIED', evidence_id: 'TEST-EVID-1', advantage: true, advantage_basis: '合成测试证据' };
 /** 指定快照为当前账户后再调用工具：is_current 是行上的字段，读快照时才可见。 */
 const callAs = async (snapshotId, args) => {

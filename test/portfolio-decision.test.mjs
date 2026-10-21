@@ -102,6 +102,7 @@ const MIXED = {
 };
 // 对照用快照不是"当前账户"，因此不得清除 SYNTH 的当前标记（账户层只允许一个当前快照）。
 importSnapshot(portfolio, { ...MIXED, is_current: false });
+ledger.initBaseline(portfolio, 'synthetic-mixed', { asOf: LAST, snapshotId: MIXED.snapshot_id });
 
 // R2 受控正例的显式测试注入：账本基线 + 用户确认 + 可复核的研究证据。
 ledger.initBaseline(portfolio, 'synthetic-test', { asOf: LAST, snapshotId: SYNTH.snapshot_id, note: 'r2 test fixture' });
@@ -189,7 +190,7 @@ test('2. 候选未缓存 → DATA_INSUFFICIENT / 身份未知，且不伪造价�
 
 test('3. 债券 ETF 施加债券压力而不是权益压力；未分类标的被标记', () => {
   const d = buildDecision(base({
-    snapshot: mixed,
+    account_id: 'synthetic-mixed', snapshot: mixed,
     action: { type: 'HOLD' },
   }));
   const hold = d.options.find(o => o.action === 'HOLD');

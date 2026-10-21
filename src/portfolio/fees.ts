@@ -58,6 +58,7 @@ export function validateFeeProfile(profile: FeeProfile): FeeProfile {
   if (profile.code && !/^\d{6}\.(SH|SZ|BJ)$/.test(profile.code)) throw new Error('Fee code requires exchange suffix');
   if (profile.classification === 'SUPER_ETF' && profile.code && !/^[15]/.test(profile.code)) throw new Error('SUPER_ETF code must identify an ETF');
   if (!profile.code && !profile.classification) throw new Error('Fee profile requires code or classification');
+  if (profile.code && profile.classification && (profile.classification === 'STOCK') === /^[15]/.test(profile.code)) throw new Error('Fee classification disagrees with security kind');
   if (!profile.values || !profile.evidence) throw new Error('Fee values and field evidence are required');
   for (const field of Object.keys(profile.values)) {
     if (!FIELDS.includes(field as FeeField)) throw new Error(`Unknown fee field ${field}`);
@@ -113,7 +114,8 @@ export function feeRulesFor(context: FeeContext, code: string, kind: 'ETF' | 'ST
     && (!p.broker_id || p.broker_id === context.brokerId) && p.effective_from <= context.asOf
     && (!p.effective_until || context.asOf <= p.effective_until));
   const specific = active.filter(p => p.code === code).sort((a, b) => a.effective_from.localeCompare(b.effective_from) || a.id.localeCompare(b.id));
-  const classification: FeeClass = kind === 'STOCK' ? 'STOCK' : specific.at(-1)?.classification ?? 'NORMAL_ETF';
+  const classified = specific.filter(p => p.classification).at(-1)?.classification;
+  const classification: FeeClass = kind === 'STOCK' ? 'STOCK' : classified && classified !== 'STOCK' ? classified : 'NORMAL_ETF';
   const category = active.filter(p => !p.code && p.classification === classification)
     .sort((a, b) => Number(!!a.broker_id) - Number(!!b.broker_id) || a.effective_from.localeCompare(b.effective_from) || a.id.localeCompare(b.id));
   const values: FeeRules = { ...(kind === 'STOCK' ? DEFAULT_STOCK_RULES.fees : DEFAULT_FEE_RULES) };
@@ -127,15 +129,15 @@ export function feeRulesFor(context: FeeContext, code: string, kind: 'ETF' | 'ST
     else values[field] = (kind === 'STOCK' ? DEFAULT_STOCK_RULES.fees : DEFAULT_FEE_RULES)[field];
     evidence[field] = p.evidence[field]!;
   }
-  const billing = applied.at(-1);
+  const billingValue = <K extends 'aggregation' | 'rounding' | 'minimum_billing_unit' | 'regulatory_fees_included'>(key: K) => applied.filter(p => p[key] !== undefined).at(-1)?.[key] ?? 'UNKNOWN';
   values.fee_model = {
     version: `${FEE_RULE_VERSION}:${createHash('sha256').update(JSON.stringify(applied)).digest('hex').slice(0, 12)}`,
     classification, profile_ids: applied.map(p => p.id), evidence,
     estimated: FIELDS.some(f => evidence[f].level === 'ASSUMED' || evidence[f].level === 'UNKNOWN')
-      || (billing?.aggregation ?? 'UNKNOWN') === 'UNKNOWN' || (billing?.rounding ?? 'UNKNOWN') === 'UNKNOWN'
-      || (billing?.minimum_billing_unit ?? 'UNKNOWN') === 'UNKNOWN',
-    aggregation: billing?.aggregation ?? 'UNKNOWN', rounding: billing?.rounding ?? 'UNKNOWN',
-    minimum_billing_unit: billing?.minimum_billing_unit ?? 'UNKNOWN', regulatory_fees_included: billing?.regulatory_fees_included ?? 'UNKNOWN',
+      || billingValue('aggregation') === 'UNKNOWN' || billingValue('rounding') === 'UNKNOWN'
+      || billingValue('minimum_billing_unit') === 'UNKNOWN',
+    aggregation: billingValue('aggregation'), rounding: billingValue('rounding'),
+    minimum_billing_unit: billingValue('minimum_billing_unit'), regulatory_fees_included: billingValue('regulatory_fees_included'),
   };
   return values;
 }

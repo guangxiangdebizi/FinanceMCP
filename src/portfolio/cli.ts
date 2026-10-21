@@ -9,7 +9,7 @@ import {
 import { openPortfolioDb, portfolioDbPath } from './db.js';
 import {
   buildNavSeries, confirmRealAccount, importEvents, initBaseline, readAccountCompleteness, recordEvent,
-  replayAccount, setAccountCompleteness, settlementCalendarFromDb, validateLedger,
+  replayAccount, setAccountCompleteness, settlementCalendarFromDb, reconcileAccountVsLedger, validateLedger,
   type LedgerEventInput, type PriceTable,
 } from './ledger.js';
 import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quotes.js';
@@ -84,6 +84,8 @@ ${FEE_USAGE}
   portfolio-ledger-nav --account ID --from YYYYMMDD --to YYYYMMDD [--prices FILE] [--db PATH]
                                                        单位净值序列与基线之后的最大回撤
   portfolio-ledger-validate --account ID [--db PATH]   账本不变量检查（现金/数量/撤销/拆分）
+  portfolio-ledger-reconcile --account ID [--snapshot ID] [--db PATH]
+                                                       逐项核对现金、证券市值和总资产（未提供字段为UNKNOWN）
   portfolio-ledger-confirm-real --account ID --confirm 用户显式确认为真实账户（无 --confirm 直接拒绝）
 
   账本完整性声明（跨日重建的产品前提；不改变账本数据）：
@@ -591,10 +593,19 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
       const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
       if (!market) throw new Error(`市场缓存不存在（${h.arg('market-db') ?? ashareDbPath()}）`);
       try {
+        let feeContext;
+        if (h.arg('account')) {
+          const portfolio = openReadOnly(h.arg('db'));
+          try {
+            const accountId = resolveAccountId(portfolio, h.arg('account')).account_id;
+            feeContext = loadFeeContext(portfolio, accountId, h.arg('end') ? h.ymd(h.arg('end'), '--end') : '99991231', h.arg('broker'));
+          } finally { portfolio.close(); }
+        }
         h.print(buildBenchmarkComparison({
           marketDb: market,
           start: h.arg('start') ? h.ymd(h.arg('start'), '--start') : undefined,
           end: h.arg('end') ? h.ymd(h.arg('end'), '--end') : undefined,
+          fee_context: feeContext,
         }));
       } finally {
         market.close();
@@ -676,6 +687,15 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
       } finally {
         db.close();
       }
+      return true;
+    }
+    case 'portfolio-ledger-reconcile': {
+      const db = openReadOnly(h.arg('db'));
+      try {
+        const accountId = resolveAccountId(db, h.arg('account')).account_id;
+        const snapshot = resolveAccountSnapshot(db, accountId, h.arg('snapshot')).snapshot;
+        h.print(reconcileAccountVsLedger(db, accountId, snapshot));
+      } finally { db.close(); }
       return true;
     }
     case 'portfolio-ledger-replay': {

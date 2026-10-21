@@ -55,4 +55,6 @@ test('stock/ETF taxes, slippage isolation and zero notional', () => {
   assert.equal(stock.total_cents, stock.actual_fee_estimate_cents + stock.slippage_estimate_cents);
   assert.equal(calculateFees(0, 'buy', feeRulesFor(ctx, '159999.SZ', 'ETF')).total_cents, 0);
   assert.throws(() => calculateFees(-1, 'buy', feeRulesFor(ctx, '159999.SZ', 'ETF')), /nonnegative/);
+  const exactHalf = { ...feeRulesFor(ctx, '159999.SZ', 'ETF'), commission_rate: 0.00005, commission_min_cents: 0 };
+  assert.equal(calculateFees(1010000, 'buy', exactHalf).commission_cents, 51);
 });

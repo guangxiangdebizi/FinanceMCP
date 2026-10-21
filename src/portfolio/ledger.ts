@@ -1936,7 +1936,7 @@ export function setAccountCompleteness(
 // ---------------------------------------------------------------- 双账对账（R2 A2）
 
 export interface LedgerMismatch {
-  field: 'quantity' | 'cash_cents' | 'securities_mv_cents';
+  field: 'quantity' | 'cash_cents' | 'securities_mv_cents' | 'total_assets_cents';
   code: string | null;
   snapshot_value: number;
   ledger_value: number;
@@ -1951,6 +1951,7 @@ export interface ReconciliationResult {
   as_of: string;
   mismatches: LedgerMismatch[];
   checked_at: string;
+  checks: { field: string; snapshot_value: number | null; ledger_value: number | null; delta: number | null; status: 'MATCH' | 'MISMATCH' | 'UNKNOWN' }[];
   note: string;
 }
 
@@ -2013,12 +2014,25 @@ export function reconcileAccountVsLedger(
     });
   }
 
+  const wealth = snapshot.totals.wealth_cents;
+  const ledgerTotal = wealth === undefined ? null : ledgerSecurities + replay.cash.balance_cents + wealth;
+  const snapshotTotal = snapshot.totals.total_assets_cents ?? null;
+  if (ledgerTotal !== null && snapshotTotal !== null && ledgerTotal !== snapshotTotal) mismatches.push({
+    field: 'total_assets_cents', code: null, snapshot_value: snapshotTotal, ledger_value: ledgerTotal, delta: snapshotTotal - ledgerTotal,
+  });
+  const checks = [
+    { field: 'cash_cents', snapshot_value: snapshot.totals.cash_cents, ledger_value: replay.cash.balance_cents },
+    { field: 'securities_mv_cents', snapshot_value: snapshot.totals.securities_mv_cents, ledger_value: ledgerSecurities },
+    { field: 'total_assets_cents', snapshot_value: snapshotTotal, ledger_value: ledgerTotal },
+  ].map(row => ({ ...row, delta: row.snapshot_value === null || row.ledger_value === null ? null : row.snapshot_value - row.ledger_value,
+    status: row.snapshot_value === null || row.ledger_value === null ? 'UNKNOWN' as const : row.snapshot_value === row.ledger_value ? 'MATCH' as const : 'MISMATCH' as const }));
   return {
     ok: mismatches.length === 0,
     account_id: id,
     snapshot_id: snapshot.snapshot_id,
     as_of: asOf,
     mismatches,
+    checks,
     checked_at: new Date().toISOString(),
     note: mismatches.length === 0
       ? '快照与账本重放在数量、现金、证券市值上一致（市值按快照参考价折算）'
@@ -2031,7 +2045,7 @@ export interface AccountSnapshotLike {
   snapshot_id: string;
   as_of: string;
   positions: { ts_code: string; quantity: number; ref_price_milli: number }[];
-  totals: { cash_cents: number; securities_mv_cents: number };
+  totals: { cash_cents: number; securities_mv_cents: number; total_assets_cents?: number; wealth_cents?: number };
 }
 
 // ---------------------------------------------------------------- 真实账户门控

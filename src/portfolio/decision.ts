@@ -594,6 +594,7 @@ export interface DecisionResult {
     record_status: string | null;
     strategy_id: string | null;
     valid_until: string | null;
+    provenance_status?: 'VERIFIED' | 'LEGACY_UNVERIFIED' | 'UNAVAILABLE';
     note: string;
   };
   /** 账户可执行门控的判定明细（只读、可审计）。 */
@@ -1095,11 +1096,21 @@ export function evaluateStockPlan(
 const DISCLAIMER = '本决策对照为只读、确定性的静态计算：不访问券商、不下单、不预测收益。行情只来自服务端只读缓存，压力参数、费用与交易单位均为假设值；用户需自行在券商手动执行。';
 
 export function buildDecision(input: DecisionInput): DecisionResult {
-  const originalSnapshot = input.portfolio_db && readSnapshot(input.portfolio_db, input.snapshot.snapshot_id)
-    ? accountSummary(readSnapshot(input.portfolio_db, input.snapshot.snapshot_id)!) : input.snapshot;
-  if (input.portfolio_db && readBaseline(input.portfolio_db, input.account_id)) {
-    const state = resolveAccountState(input.portfolio_db, input.account_id, input.as_of_trade_date, input.snapshot.snapshot_id, { calendar: settlementCalendarOf(input.market_db) });
+  const originalSnapshot = input.snapshot;
+  const baseline = input.portfolio_db ? readBaseline(input.portfolio_db, input.account_id) : undefined;
+  if (input.portfolio_db && baseline?.snapshot_id && input.as_of_trade_date >= baseline.as_of) {
+    const state = resolveAccountState(input.portfolio_db, input.account_id, input.as_of_trade_date, undefined, { calendar: settlementCalendarOf(input.market_db) });
     input = { ...input, snapshot: accountSummary(state.snapshot) };
+  } else if (input.portfolio_db && baseline && input.as_of_trade_date >= baseline.as_of) {
+    const replay = replayAccount(input.portfolio_db, input.account_id, { asOf: input.as_of_trade_date, calendar: settlementCalendarOf(input.market_db) });
+    const prior = new Map(input.snapshot.positions.map(p => [p.ts_code, p]));
+    const positions = replay.positions.filter(p => p.quantity > 0).map(p => {
+      const price = prior.get(p.ts_code)?.ref_price_milli ?? Math.round(p.cost_milli_avg);
+      return { ...prior.get(p.ts_code), ts_code: p.ts_code, name: prior.get(p.ts_code)?.name ?? p.ts_code,
+        quantity: p.quantity, ref_price_milli: price, ref_price: price / 1000, market_value_cents: valueCents(p.quantity, price),
+        weight: 0, weight_of_securities: 0, theme: THEME_BY_CODE[p.ts_code] ?? 'unknown' };
+    });
+    input = { ...input, snapshot: { ...input.snapshot, positions, totals: { ...input.snapshot.totals, cash_cents: replay.cash.balance_cents } } };
   }
   const feeContext = loadFeeContext(input.portfolio_db, input.account_id, input.as_of_trade_date);
   const feeFor = (code: string, kind: 'ETF' | 'STOCK') => input.rules?.fees || (kind === 'STOCK' && input.rules?.stock)
@@ -1829,10 +1840,15 @@ function normalizeEvidence(
     };
   }
   const evidenceId = claim.evidence_id?.trim() || null;
+  const strict = !!ctx.portfolioDb?.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_meta'").get()
+    && (ctx.portfolioDb.prepare('SELECT value FROM account_meta WHERE key=?').get('research_evidence_require_provenance') as any)?.value === '1';
   const result = verifyResearchEvidence(ctx.portfolioDb, { evidence_id: evidenceId }, {
     buyCode: ctx.buyCode ?? '',
     sellCode: ctx.sellCode,
     asOf: ctx.asOf,
+    expectedKind: 'ROTATION',
+    requireProvenance: strict,
+    ...(strict ? { expectedClaim: claim.claim } : {}),
   });
   const sourceMatches = claim.source === 'RESEARCH_VERIFIED';
   const verified = sourceMatches && result.verified;
@@ -1850,6 +1866,7 @@ function normalizeEvidence(
     record_status: result.record?.status ?? null,
     strategy_id: result.record?.strategy_id ?? null,
     valid_until: result.record?.valid_until ?? null,
+    provenance_status: result.record?.provenance ? (verified ? 'VERIFIED' : 'UNAVAILABLE') : result.record ? 'LEGACY_UNVERIFIED' : 'UNAVAILABLE',
     note: verified
       ? '轮动优势来自账户库中的 VERIFIED 研究记录，代码与日期已复核；仍不构成收益保证。'
       : `轮动优势未通过复核（${reason ?? 'unknown'}）：布尔值、调用方自述或查不到的 evidence_id 都不会转换成交易信号。`,

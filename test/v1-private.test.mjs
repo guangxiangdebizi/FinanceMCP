@@ -27,6 +27,16 @@ const imported = spawnSync(process.execPath, [join(ROOT, 'build', 'ashare', 'cli
   encoding: 'utf8',
 });
 assert.equal(imported.status, 0, imported.stderr);
+{
+  const { openPortfolioDb } = await import('../build/portfolio/db.js');
+  const { initBaseline } = await import('../build/portfolio/ledger.js');
+  const { readSnapshot, importSnapshot } = await import('../build/portfolio/account.js');
+  const db = openPortfolioDb(PORTFOLIO_DB, { marketPath: MARKET_DB });
+  try {
+    importSnapshot(db, { ...readSnapshot(db, 'demo-2026-10-18'), snapshot_id: 'synthetic-private', as_of: '2026-10-16', source: 'synthetic-fixture' });
+    initBaseline(db, 'synthetic-private', { asOf: '20261016', snapshotId: 'synthetic-private' });
+  } finally { db.close(); }
+}
 
 // 创建一个市场缓存文件：schema 完整但没有 fund_* 表，模拟"生产缓存尚未同步 ETF 数据"
 // 的真实状态。这样公网市场工具能正常返回（V1-P7 需要），而 ETF 相关能力必须显式降级
@@ -128,7 +138,7 @@ test('V1-P3 daily report degrades explicitly when the market cache has no fund_*
   try {
     const res = await server.rpc('/private/mcp', 'tools/call', {
       name: 'ashare_portfolio_daily_report',
-      arguments: { account_id: 'demo', as_of_trade_date: '20261016' },
+      arguments: { account_id: 'synthetic-private', as_of_trade_date: '20261016' },
     }, AUTH);
     assert.equal(res.status, 200, res.text);
     const report = JSON.parse(res.body.result.content[0].text);

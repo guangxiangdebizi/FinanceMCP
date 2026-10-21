@@ -170,6 +170,11 @@ export function resolveAccountSnapshot(
     }
     return { snapshot, snapshot_id: id, source: id === DEMO_SNAPSHOT_ID ? 'demo' : 'explicit' };
   }
+  if (accountId === DEMO_SNAPSHOT_ID) {
+    const snapshot = readSnapshot(db, DEMO_SNAPSHOT_ID);
+    if (!snapshot) throw new Error('Demo snapshot is unavailable');
+    return { snapshot, snapshot_id: DEMO_SNAPSHOT_ID, source: 'demo' };
+  }
   const baseline = baselineSnapshotId(db, accountId);
   if (baseline) {
     const snapshot = readSnapshot(db, baseline);

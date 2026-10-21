@@ -141,6 +141,7 @@ const SYNTH_ID = 'synthetic-research-2026-10-18';
 const SYNTH = {
   ...account.DEMO_SNAPSHOT,
   snapshot_id: SYNTH_ID,
+  as_of: '2026-10-16',
   source: 'synthetic-test-fixture',
   note: '合成测试账户（不是真实账户）',
   warnings: ['synthetic_fixture'],
@@ -148,7 +149,7 @@ const SYNTH = {
 };
 account.importSnapshot(portfolio, SYNTH);
 // 账本基线存在但用户尚未确认 → REAL_ACCOUNT_PENDING。
-initBaseline(portfolio, 'demo-account', { asOf: '20261018', snapshotId: SYNTH_ID });
+initBaseline(portfolio, 'demo-account', { asOf: LAST, snapshotId: SYNTH_ID });
 
 const summaryOf = (overrides = {}) => buildResearchSummary({
   portfolioDb: portfolio,

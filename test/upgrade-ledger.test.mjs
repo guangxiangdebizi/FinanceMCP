@@ -13,7 +13,7 @@ function fixture() {
   d.exec(PORTFOLIO_LEDGER_SCHEMA); d.exec(PORTFOLIO_COMPLETENESS_SCHEMA);
   d.exec(`CREATE TABLE account_snapshot(snapshot_id TEXT PRIMARY KEY, as_of TEXT,source TEXT,note TEXT,warnings TEXT,is_current INTEGER,total_assets_cents INTEGER,securities_mv_cents INTEGER,cash_cents INTEGER,wealth_cents INTEGER,unrealized_pnl_cents INTEGER,created_at TEXT);
     CREATE TABLE position(snapshot_id TEXT,ts_code TEXT,name TEXT,quantity INTEGER,ref_price_milli INTEGER,ref_cost_milli INTEGER,market_value_cents INTEGER);`);
-  d.prepare('INSERT INTO account_snapshot VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run('baseline', '2026-10-16', 'synthetic', '', '[]', 0, 100000, 0, 100000, 0, 0, '2026-10-16');
+  d.prepare('INSERT INTO account_snapshot VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run('baseline', '2026-10-16', 'synthetic', '', '[]', 0, 100000, 0, 100000, 0, 0, '2026-10-16');
   initBaseline(d, 'synthetic', { asOf: '20261016', snapshotId: 'baseline' });
   return d;
 }

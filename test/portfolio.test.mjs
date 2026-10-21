@@ -437,7 +437,7 @@ test('13b. CLI 导入不会写市场库，且输出对账结果', () => {
 
 test('13c. CLI portfolio-scenario 输出 JSON，exit 0', () => {
   const run = spawnSync(process.execPath, [
-    join(ROOT, 'build', 'ashare', 'cli.js'), 'portfolio-scenario', '--action', 'sell-buy',
+    join(ROOT, 'build', 'ashare', 'cli.js'), 'portfolio-scenario', '--account', 'demo', '--action', 'sell-buy',
     '--sell', '159558.SZ', '--buy', '510300.SH', '--shares', '10000', '--mode', 'research',
     '--sell-price', '0.935', '--buy-price', '4.0', '--advantage', 'yes', '--basis', '测试',
     '--db', join(dir, 'cli.sqlite'),
@@ -507,13 +507,14 @@ test('14c. 开启门控后账户工具只在私有清单出现，且描述声明
   }
   // 读取的是真实导入的账户库
   process.env.ASHARE_PORTFOLIO_DB_PATH = join(dir, 'cli.sqlite');
-  const res = await dispatchPrivateTool('ashare_portfolio_summary', {});
+  const res = await dispatchPrivateTool('ashare_portfolio_summary', { account_id: 'demo' });
   const body = JSON.parse(res.content[0].text);
   assert.equal(body.summary.totals.total_assets_cents, 7577653);
   assert.equal(body.summary.max_drawdown.available, false);
   assert.equal(body.reconciliation.ok, true);
 
   const scenario = await dispatchPrivateTool('ashare_portfolio_scenario', {
+    account_id: 'demo',
     action: 'sell-buy', sell_code: '159558.SZ', sell_shares: 10000,
     buy_code: '510300.SH', sell_price: 0.935, buy_price: 4.0, as_of_trade_date: DATE,
     mode: 'research', advantage: true,

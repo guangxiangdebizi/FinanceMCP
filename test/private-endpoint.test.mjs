@@ -23,6 +23,7 @@ const ACCOUNT_TOOLS = [
   'ashare_portfolio_daily_report',
   'ashare_etf_candidates',
   'ashare_portfolio_benchmarks',
+  'ashare_investment_research_bundle',
 ];
 
 // 先准备好合成账户库（CLI 导入，幂等）。
@@ -32,6 +33,14 @@ const imported = spawnSync(process.execPath, [join(ROOT, 'build', 'ashare', 'cli
   encoding: 'utf8',
 });
 assert.equal(imported.status, 0, imported.stderr);
+// Register a synthetic account explicitly; an unconfigured demo is never the default.
+{
+  const { openPortfolioDb } = await import('../build/portfolio/db.js');
+  const { initBaseline } = await import('../build/portfolio/ledger.js');
+  const db = openPortfolioDb(PORTFOLIO_DB, { marketPath: MARKET_DB });
+  try { initBaseline(db, 'synthetic-private', { asOf: '20261018', snapshotId: 'demo-2026-10-18' }); }
+  finally { db.close(); }
+}
 
 async function reservePort() {
   const server = http.createServer();
