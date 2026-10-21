@@ -16,6 +16,8 @@
 
 独立研究 `auditWatchlist` 保留旧报告不变，同时正价格/正复权因子过滤并明确缺失成员分母。实际运行证据：`VAL-598daf35a888955c774abd85`，独立输出 `/tmp/financemcp-validation-evidence/VAL-598daf35a888955c774abd85.json`。该证据来自当时独立临时构建，实施与 build 身份包含在 JSON 中；最终发布构建重跑会形成新的内容 ID。
 
+后续最新门控实现已实际重跑相同audit并写入持久独立目录：`VAL-030cd339800e1fa2b926e765`，`/home/jcshi/.local/share/finance-mcp-research/audit-20261021/validation.sqlite` 和同目录 `run.json`。该次摘要可由 `loadValidationSummary` 只读加载，具体结果与首轮相同；内容身份按实际实现变化，没有覆盖旧证据。
+
 - 修正均值：**-1.6803035507%**，跑赢率 **21.6666667%**，与原报告舍入数值一致。
 - 60个日期累计 **5 个池成员端点收益缺失**；全市场端点行中 NULL/无效收益为 **0**。因此已发现的 NULL 基准错误未影响本次具体 -1.68% 数值；缺失股票池成员仍使结果属于已定价子集条件均值。
 - 固定 seed=1021、1999次、5日期 circular block bootstrap，均值95%区间 **[-2.5212%, -0.8919%]**。仅12个五日块，区间是描述性稳健敏感性结果，不构成策略优势认证。

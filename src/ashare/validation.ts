@@ -209,10 +209,11 @@ export function loadValidationSummary(options: { dbPath?: string; id?: string; a
       if(typeof value.as_of!=='string' || value.as_of>options.asOf) continue;
       if(`VAL-${digest(value).slice(0,24)}`!==row.id) return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'validation_identity_mismatch'};
       const study=value.study;
-      return {status:study?'RESEARCH_ONLY':value.audit?.cohorts?.length?'RESEARCH_ONLY':'DATA_INSUFFICIENT',id:row.id,created_at:row.created_at,
+      return {status:study || value.audit?.cohorts?.length || value.observations?.length ? 'RESEARCH_ONLY':'DATA_INSUFFICIENT',id:row.id,created_at:row.created_at,
         as_of:value.as_of,requested_as_of:options.asOf,type:value.type,version:value.version ?? value.identity?.schema,
         implementation_hash:value.implementation_hash ?? null,rule_hash:value.rule_hash ?? null,score_version:value.score_version ?? null,
-        weights:value.weights ?? null,evidence_level:'UNVERIFIED',proof_status:'HISTORICAL_RESEARCH_DOES_NOT_VALIDATE_ADVANTAGE',
+        weights:value.weights ?? null,evidence_level:'UNVERIFIED',proof_status:value.type==='TRUE_FORWARD_OBSERVATION'?'FORWARD_OBSERVATIONS_DO_NOT_AUTOMATICALLY_VALIDATE_ADVANTAGE':'HISTORICAL_RESEARCH_DOES_NOT_VALIDATE_ADVANTAGE',
+        forward:value.type==='TRUE_FORWARD_OBSERVATION'?{freeze_id:value.freeze_id,observations:value.observations?.length ?? 0,excluded_retrospective:value.excluded_retrospective ?? 0}:null,
         legacy_track_record:value.legacy?{dates:value.legacy.dates,mean_excess_pct:value.legacy.mean_excess_pct,hit_rate:value.legacy.hit_rate}:null,
         corrected_audit:value.audit?{dates:value.audit.cohorts.length,mean_excess_pct:value.audit.mean_excess_pct,win_rate:value.audit.win_rate,inference:value.audit.inference}:null,
         study:study?{sampled_dates:study.sampled_dates.length,first:study.sampled_dates[0],last:study.sampled_dates.at(-1),

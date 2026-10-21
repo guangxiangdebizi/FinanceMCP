@@ -19,6 +19,9 @@ test('audit CLI persists an independent reproducible result, preserves market by
   assert.equal(evidence.type,'RETROSPECTIVE_HOLDOUT');assert.equal(evidence.evidence_level,'UNVERIFIED');assert.equal(evidence.audit.mean_excess_pct,null);
   const summary=loadValidationSummary({dbPath:join(output,'validation.sqlite'),id:a.id,asOf:'20261020'});
   assert.equal(summary.id,a.id);assert.equal(summary.evidence_level,'UNVERIFIED');
+  const registryBefore=hash(join(output,'validation.sqlite'));
+  loadValidationSummary({dbPath:join(output,'validation.sqlite'),id:a.id,asOf:'20261020'});
+  assert.equal(hash(join(output,'validation.sqlite')),registryBefore,'loading a summary cannot change registry bytes');
   assert.equal(JSON.parse(readFileSync(join(output,'run.json'),'utf8')).id,a.id);
   assert.equal(loadValidationSummary({dbPath:join(output,'validation.sqlite'),asOf:'20261019'}).status,'UNAVAILABLE');
   await assert.rejects(()=>runValidationCommand(['audit','--source',source,'--output',output]),/as-of required/);
