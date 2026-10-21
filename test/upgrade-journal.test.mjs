@@ -90,6 +90,9 @@ test('evaluation matures on trading sessions, deducts costs and uses exact bench
     assert.equal(result.observations[0].direction, 'observe');
     assert.equal(result.observations[0].evaluation_basis, 'price_observation_hypothetical_cost_comparison');
     assert.equal(result.observations[0].actual_trade, false);
+    assert.equal(result.observations[0].execution_backtest, false);
+    assert.equal(result.observations[0].entry_price_basis, 'research_date_close_after_the_fact');
+    assert.equal(result.observations[0].exit_price_basis, 'maturity_date_close');
     assert.equal(result.observations[0].realized_pnl_cents, null);
     assert.equal(result.observations[0].gross_return_pct, 10);
     assert.equal(result.observations[0].net_return_pct, 7.9208);

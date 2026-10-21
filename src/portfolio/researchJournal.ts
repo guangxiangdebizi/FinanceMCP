@@ -228,7 +228,8 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
         ts_code: observation.ts_code, quantity: observation.quantity,
         direction: observation.direction ?? 'observe',
         evaluation_basis: observation.direction === 'long' ? 'hypothetical_long_fixed_window' : 'price_observation_hypothetical_cost_comparison',
-        actual_trade: false, realized_pnl_cents: null,
+        actual_trade: false, realized_pnl_cents: null, execution_backtest: false,
+        entry_price_basis: 'research_date_close_after_the_fact', exit_price_basis: 'maturity_date_close',
         status: 'UNAVAILABLE', reason: null, trigger: 'UNKNOWN', invalidation: 'UNKNOWN',
         gross_return_pct: null, net_return_pct: null, benchmark_net_return_pct: null, excess_return_pct: null,
         fees_cents: null, max_drawdown_pct: null, unexpected_loss: 'UNKNOWN',
@@ -285,7 +286,7 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
       result.benchmark_net_return_pct = benchmarkNet;
       result.excess_return_pct = round(cost.net - benchmarkNet);
       result.status = 'EVALUATED';
-      result.note = '固定窗口的假设买入卖出含费用观察；基准使用相同初始资金预算、整手和剩余现金。不是实际成交收益，也不推断触发顺序或盘中可成交价。';
+      result.note = '研究日已发生的收盘价至成熟日收盘价的纸面价格观察，含假设费用；基准使用相同初始资金预算、整手和剩余现金。持仓观察不是实际成交策略，不是下一交易日开盘可执行回测，不计真实成交收益，也不推断触发顺序或盘中可成交价。';
       return result;
     });
     base.status = base.observations.length && base.observations.every(row => row.status === 'EVALUATED') ? 'EVALUATED' : 'UNAVAILABLE';
