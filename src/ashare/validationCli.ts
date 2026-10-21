@@ -9,8 +9,9 @@ import { updateWatchlist, WATCHLIST_RULES } from './watchlist.js';
 import { distribution, evaluateEvents, type EvaluationEvent } from './evaluation.js';
 import { regimeSeries } from './market.js';
 import { SIGNAL_DEFINITIONS } from './signals.js';
+import { shanghaiToday } from './ingest.js';
 import { assertSeparateFromLive } from './snapshot.js';
-import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, VALIDATION_VERSION, type ResearchFee } from './validation.js';
+import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, VALIDATION_VERSION, type ResearchFee } from './validation.js';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -34,8 +35,9 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
   const db = new DatabaseSync(source, { readOnly: true });
   db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=15000; BEGIN;');
   try {
-    const asOf = arg('as-of', '20261020')!;
-    if (!/^\d{8}$/.test(asOf)) throw new Error('Invalid as-of');
+    const asOf = command === 'freeze' ? required('start') : required('as-of');
+    const parsed = /^\d{8}$/.test(asOf) ? new Date(`${asOf.slice(0,4)}-${asOf.slice(4,6)}-${asOf.slice(6,8)}T00:00:00Z`) : null;
+    if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10).replace(/-/g,'')!==asOf) throw new Error('Invalid as-of/start');
     const output = resolve(arg('output', 'data/ashare/validation-20261021')!);
     const researchPath = resolve(arg('research-db', join(output, 'validation.sqlite'))!);
     assertSeparateFromLive(researchPath, source);
@@ -47,6 +49,7 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
       mkdirSync(resolve(researchPath, '..'), { recursive: true });
       const research = openValidationDb(researchPath, source);
       try {
+        if (required('start')<=shanghaiToday()) throw new Error('Forward start must be after the actual freeze day; historical observations cannot be backdated');
         return registerFreeze(research, { start: required('start'), frozen_at: new Date().toISOString(), rule_hash: hash({ rules: SCORE_RULES, pool: WATCHLIST_RULES, models: CONTROL_MODELS }), cost_hash: hash(costs), implementation_hash: identity.implementation_hash, horizons: [5,10,20] });
       } finally { research.close(); }
     }
@@ -99,9 +102,9 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
       interpretation:'No production weights changed. Negative historical results remain visible; historical validation is not untouched out-of-sample evidence.' };
     if (command === 'study') {
       const stride = Number(arg('stride','5')), maxDates = Number(arg('max-dates','100000'));
-      if (!Number.isInteger(stride) || stride < 1 || !Number.isInteger(maxDates) || maxDates < 1) throw new Error('Invalid study sampling');
+      if (!Number.isInteger(stride) || stride < 1 || !Number.isInteger(maxDates) || maxDates < 2) throw new Error('Invalid study sampling; max-dates must be >=2');
       const days = (db.prepare('SELECT cal_date FROM trade_cal WHERE is_open=1 AND cal_date BETWEEN (SELECT MIN(trade_date) FROM daily) AND ? ORDER BY cal_date').all(asOf) as {cal_date:string}[]).map(r=>r.cal_date);
-      const dates = days.filter((_,i)=>i>=129 && (i-129)%stride===0).slice(-maxDates);
+      const dates = sampleValidationDates(days,stride,maxDates);
       const split = arg('split','20260331')!;
       const options = { asOf, horizon:5, buyFeeBps:costs.buy_fee_bps,sellFeeBps:costs.sell_fee_bps,slippageBps:costs.slippage_bps,maxExitDelay:costs.max_exit_delay };
       const events = new Map(CONTROL_MODELS.map(m => [m, [] as EvaluationEvent[]]));
@@ -176,7 +179,7 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
           const evaluated = evaluateEvents(db,events.get(model)!.filter(e=>selected.has(e.date)),options);
           return [model,{summary:evaluated.summary,inference:blockInference(evaluated.summary.by_date.map(d=>d.excess.equal_market),Math.max(1,Math.ceil(10/stride)))}];
         })) }));
-      Object.assign(result,{study:{stride,sampled_dates:dates,input_scan_sha256:scanDigests,split:splitResult,walk_forward:walkForward,comparisons,signals,multiple_testing:holmAdjust(hypotheses),concentration,funded,
+      Object.assign(result,{study:{stride,max_dates:maxDates,sampling:'stride grid, then deterministic coverage across full history if capped; never latest-only truncation',sampled_dates:dates,input_scan_sha256:scanDigests,split:splitResult,walk_forward:walkForward,comparisons,signals,multiple_testing:holmAdjust(hypotheses),concentration,funded,
         limitations:['Sampled rebalance histories have their own state and are not the deployed daily pool.','Block length is measured in sampled observation dates, with an exit-delay buffer. Regime and signal subsets can have irregular spacing.','No fitting or parameter optimization was performed. WALK_FORWARD_VALIDATION requires a predeclared rolling schedule; this run is RETROSPECTIVE_HOLDOUT.','Industry and ST metadata use current stock_basic; original data vintages and complete delisted history cannot be reconstructed.','Event cost scenarios are not capital-funded returns; funded results are separate and stop when required corporate entitlement data is absent.']}});
     }
     mkdirSync(output,{recursive:true});
@@ -188,6 +191,7 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
     const file=join(output,`${id}.json`);
     if (resolve(file)===source) throw new Error('Output aliases source');
     writeFileSync(file,JSON.stringify(evidence,null,2));
+    writeFileSync(join(output,'run.json'),JSON.stringify(loadValidationSummary({dbPath:researchPath,id,asOf}),null,2));
     return {status:result.audit && (audit.cohorts.length===0)?'DATA_INSUFFICIENT':'RESEARCH_ONLY',id,evidence_path:file,as_of:asOf,
       legacy:legacy?{dates:legacy.dates,mean_excess_pct:legacy.mean_excess_pct,hit_rate:legacy.hit_rate,pending_dates:legacy.pending_dates}:null,
       corrected:{dates:audit.cohorts.length,mean_excess_pct:audit.mean_excess_pct,win_rate:audit.win_rate},sampled_study:command==='study'};

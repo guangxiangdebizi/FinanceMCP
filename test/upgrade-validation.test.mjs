@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist } from '../build/ashare/validation.js';
+import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadValidationSummary } from '../build/ashare/validation.js';
 import { openAshareDb, upsertRows } from '../build/ashare/db.js';
 import { seedMarket, weekdays } from './ashare-fixture.mjs';
 import { scanMarket } from '../build/ashare/analysis.js';
@@ -35,6 +35,12 @@ test('purging includes holding horizon and delayed exits; folds never use valida
   for(const f of folds) assert.ok(f.formation.every(d=>days[days.indexOf(d)+8]<=f.split));
   assert.ok(folds.every(f=>f.validation.every(d=>d>f.split)));
   assert.throws(()=>splitDates(days,days,days[30],5,0,'TRUE_FORWARD_OBSERVATION'));
+});
+
+test('limited sampling covers early formation and late validation instead of only recent dates',()=>{
+  const days=weekdays('20240101',650), dates=sampleValidationDates(days,5,12);
+  assert.equal(dates.length,12);assert.equal(dates[0],days[129]);assert.ok(dates.at(-1)>days[600]);
+  assert.equal(new Set(dates).size,12);assert.throws(()=>sampleValidationDates(days,5,1));
 });
 
 test('control models never mutate source scan or original scores',()=>{

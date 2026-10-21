@@ -10,7 +10,7 @@
 
 冻结协议将规则、观察起点、成本、实现 hash 和持有期写入追加数据库。UPDATE/DELETE 触发器阻止覆盖冻结和原始观察；相同内容 ID 幂等。后续更正应添加新协议或新观察，不能改写旧判断。原有 `snapshot.ts` 的 `PROSPECTIVE` 只表示报告后 24 小时内，不能单独作为本次 TRUE_FORWARD 认定；已有 ORIGINAL/REVISED 和 V2 日序状态链继续保留。
 
-`freeze` 必须在起始观察日开盘前执行；`observe` 由服务器取得当前时间和交易日历，不接受调用者传入伪造时间。最新市场缓存日须与观察日一致，要求存在可用 live 报告。新记录保存 8 个模型的前 40 名排序，明确区别于原有逐日动态股票池。`evaluate` 只读匹配冻结且及时保存的观察，拒绝成本或评估实现摘要不符的协议，结果追加保存。
+`freeze` 的起始观察日必须晚于服务器实际冻结日；`observe` 由服务器取得当前时间和交易日历，不接受调用者传入伪造时间。最新市场缓存日须与观察日一致，要求存在可用 live 报告。新记录保存 8 个模型的前 40 名排序，明确区别于原有逐日动态股票池。`evaluate` 只读匹配冻结且及时保存的观察，拒绝成本或评估实现摘要不符的协议，结果追加保存。
 
 ## 现有九类信号
 
@@ -44,8 +44,18 @@
 node --input-type=module -e 'import("./build/ashare/validationCli.js").then(async m=>console.log(JSON.stringify(await m.runValidationCommand(process.argv.slice(1)))))' audit --source /path/to/market.sqlite --as-of 20261020 --output /independent/research
 ```
 
-将 `audit` 换成 `study` 执行完整历史研究，可配置 `--stride 5 --max-dates N --split 20260331 --initial-cents 7600000`。限制采样日期时输出保留实际日期，不能声称完整历史。`freeze --research-db PATH --start YYYYMMDD` 注册规则；`observe --research-db PATH --freeze-id ID --as-of YYYYMMDD` 保存真实新判断；`evaluate` 按相同参数评价已保存记录。所有子命令要求 `--source`，市场连接始终只读。研究库与 JSON 只写独立输出目录。
+将 `audit` 换成 `study` 执行完整历史研究，可配置 `--stride 5 --max-dates N --split 20260331 --initial-cents 7600000`。`--as-of` 为必传，避免未来日期仍悄悄使用固定旧日。限制采样日期时按完整历史等距覆盖，保留早期形成集和晚期验证集；输出保留实际日期，不能声称完整历史。`freeze --research-db PATH --start YYYYMMDD` 注册规则；`observe --research-db PATH --freeze-id ID --as-of YYYYMMDD` 保存真实新判断；`evaluate` 按相同参数评价已保存记录。所有子命令要求 `--source`，市场连接始终只读。研究库与 JSON 只写独立输出目录。
+
+统一数据包可调用只读 `loadValidationSummary({dbPath,id?,asOf})`：打开registry为readOnly/query_only，验证内容ID，拒绝晚于请求日的证据，返回规则/实现版本、时间分割数量、模型区间、Holm和资金结果状态，不重新跑扫描或审计。audit/study同时输出简洁 `run.json`，完整JSON与append-only registry保存可复核细节。证据等级保持UNVERIFIED；摘要可读取不等于策略优势已验证。
+
+可操作前瞻命令（必须使用实际未来日期，不倒填20261020；实际执行后才有freeze ID）：
+
+```sh
+node build/ashare/cli.js research-validation freeze --source /path/to/market.sqlite --research-db /independent/validation.sqlite --start YYYYMMDD
+node build/ashare/cli.js research-validation observe --source /path/to/market.sqlite --research-db /independent/validation.sqlite --freeze-id FRZ_ID --as-of YYYYMMDD
+node build/ashare/cli.js research-validation evaluate --source /path/to/market.sqlite --research-db /independent/validation.sqlite --freeze-id FRZ_ID --as-of YYYYMMDD
+```
 
 ## 实际验证状态
 
-只读审计代码 SHA：`476bfff3672ec2d20208650edbf8e045e6af12e8`。既有研究评估、引擎、快照与 runner 51 项专项测试通过。新增专项覆盖 bootstrap 重复性、缺数门控、Holm、purge、walk-forward、评分不修改原扫描、冻结不可覆盖、迟到与变规则拒绝、整数资金/手数/费用/T+1、公司行动不可得状态、缺失成员覆盖。新增测试在独立临时构建通过8/8；共享构建和最终全套验收由 Lead 集中执行。
+只读审计代码 SHA：`476bfff3672ec2d20208650edbf8e045e6af12e8`。既有研究评估、引擎、快照与 runner 51 项专项测试通过。新增专项覆盖 bootstrap 重复性、缺数门控、Holm、purge、walk-forward、评分不修改原扫描、冻结不可覆盖、迟到与变规则拒绝、整数资金/手数/费用/T+1、公司行动不可得状态、缺失成员覆盖。新增测试在独立临时构建通过11/11（核心9项、CLI/摘要2项）；共享构建和最终全套验收由 Lead 集中执行。

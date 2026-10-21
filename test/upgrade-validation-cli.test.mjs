@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openAshareDb } from '../build/ashare/db.js';
 import { runValidationCommand } from '../build/ashare/validationCli.js';
+import { loadValidationSummary } from '../build/ashare/validation.js';
 
 const hash=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
 test('audit CLI persists an independent reproducible result, preserves market bytes and refuses source alias',async()=>{
@@ -16,6 +17,11 @@ test('audit CLI persists an independent reproducible result, preserves market by
   assert.equal(a.status,'DATA_INSUFFICIENT');assert.equal(a.id,b.id);assert.equal(hash(source),before);
   const evidence=JSON.parse(readFileSync(a.evidence_path,'utf8'));
   assert.equal(evidence.type,'RETROSPECTIVE_HOLDOUT');assert.equal(evidence.evidence_level,'UNVERIFIED');assert.equal(evidence.audit.mean_excess_pct,null);
+  const summary=loadValidationSummary({dbPath:join(output,'validation.sqlite'),id:a.id,asOf:'20261020'});
+  assert.equal(summary.id,a.id);assert.equal(summary.evidence_level,'UNVERIFIED');
+  assert.equal(JSON.parse(readFileSync(join(output,'run.json'),'utf8')).id,a.id);
+  assert.equal(loadValidationSummary({dbPath:join(output,'validation.sqlite'),asOf:'20261019'}).status,'UNAVAILABLE');
+  await assert.rejects(()=>runValidationCommand(['audit','--source',source,'--output',output]),/as-of required/);
   await assert.rejects(()=>runValidationCommand([...args,'--research-db',source]),/同一文件/);
   assert.equal(hash(source),before);
 });
@@ -23,5 +29,5 @@ test('audit CLI persists an independent reproducible result, preserves market by
 test('freeze CLI cannot backdate an already observed day into a new forward protocol',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'validation-cli-freeze-')),source=join(dir,'market.sqlite');
   const db=openAshareDb(source);db.close();
-  await assert.rejects(()=>runValidationCommand(['freeze','--source',source,'--research-db',join(dir,'research.sqlite'),'--start','20200101']),/precede/);
+  await assert.rejects(()=>runValidationCommand(['freeze','--source',source,'--research-db',join(dir,'research.sqlite'),'--start','20200101']),/backdated/);
 });

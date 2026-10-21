@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { SCORE_RULES, SCORE_VERSION, scoreRows, type MarketScan } from './analysis.js';
 import { assertSeparateFromLive, buildSha256 } from './snapshot.js';
@@ -135,6 +135,15 @@ export function walkForwardFolds(days: string[], selection: string[], formationE
   });
 }
 
+/** Deterministic coverage across the entire history when a run limits scans.
+ * This changes the sampled rebalance scenario and is always recorded explicitly. */
+export function sampleValidationDates(days: string[], stride: number, maxDates: number) {
+  if (!Number.isInteger(stride) || stride < 1 || !Number.isInteger(maxDates) || maxDates < 2) throw new Error('Sampling requires stride>=1 and max-dates>=2');
+  const grid = days.filter((_,i)=>i>=129 && (i-129)%stride===0);
+  if (grid.length<=maxDates) return grid;
+  return Array.from({length:maxDates},(_,i)=>grid[Math.round(i*(grid.length-1)/(maxDates-1))]);
+}
+
 export interface FreezeProtocol { start: string; frozen_at: string; rule_hash: string; cost_hash: string; implementation_hash: string; horizons: number[]; }
 /** Independent append-only research registry; never create this on a market cache. */
 export function openValidationDb(path: string, source: string) {
@@ -181,6 +190,39 @@ export function researchIdentity() {
     .update(readFileSync(fileURLToPath(new URL('../portfolio/rules.js',import.meta.url)))).digest('hex');
   return { version: VALIDATION_VERSION, score_version: SCORE_VERSION, weights: SCORE_RULES.weights, rule_hash: digest(SCORE_RULES),
     implementation_hash: digest({ashare_build:buildSha256(),fee_implementation:feeImplementation}) };
+}
+
+/** Cheap read-only bundle projection. Validates content-addressed identity and
+ * cutoff; never recomputes research or opens a writable registry connection. */
+export function loadValidationSummary(options: { dbPath?: string; id?: string; asOf: string }) {
+  if (!options.dbPath || !existsSync(options.dbPath)) return { status:'UNAVAILABLE', evidence_level:'UNVERIFIED', reason:'validation_registry_unavailable' };
+  const db=new DatabaseSync(options.dbPath,{readOnly:true});
+  db.exec('PRAGMA query_only=ON');
+  try {
+    if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='validation_result'").get()) return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'validation_result_table_unavailable'};
+    const candidates=options.id
+      ? db.prepare('SELECT id,created_at,content FROM validation_result WHERE id=?').all(options.id)
+      : db.prepare('SELECT id,created_at,content FROM validation_result ORDER BY created_at DESC,id DESC').all();
+    for(const row of candidates as {id:string;created_at:string;content:string}[]) {
+      const value=JSON.parse(row.content);
+      if(typeof value.as_of!=='string' || value.as_of>options.asOf) continue;
+      if(`VAL-${digest(value).slice(0,24)}`!==row.id) return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'validation_identity_mismatch'};
+      const study=value.study;
+      return {status:study?'RESEARCH_ONLY':value.audit?.cohorts?.length?'RESEARCH_ONLY':'DATA_INSUFFICIENT',id:row.id,created_at:row.created_at,
+        as_of:value.as_of,requested_as_of:options.asOf,type:value.type,version:value.version ?? value.identity?.schema,
+        implementation_hash:value.implementation_hash ?? null,rule_hash:value.rule_hash ?? null,score_version:value.score_version ?? null,
+        weights:value.weights ?? null,evidence_level:'UNVERIFIED',proof_status:'HISTORICAL_RESEARCH_DOES_NOT_VALIDATE_ADVANTAGE',
+        legacy_track_record:value.legacy?{dates:value.legacy.dates,mean_excess_pct:value.legacy.mean_excess_pct,hit_rate:value.legacy.hit_rate}:null,
+        corrected_audit:value.audit?{dates:value.audit.cohorts.length,mean_excess_pct:value.audit.mean_excess_pct,win_rate:value.audit.win_rate,inference:value.audit.inference}:null,
+        study:study?{sampled_dates:study.sampled_dates.length,first:study.sampled_dates[0],last:study.sampled_dates.at(-1),
+          split:{date:study.split.split,formation:study.split.formation.length,validation:study.split.validation.length,purged:study.split.purged.length,pending:study.split.pending.length},
+          models:study.comparisons.map((c:any)=>({model:c.model,segment:c.segment,events:c.summary.denominators.events,completed:c.summary.denominators.completed,
+            date_mean_excess:c.inference.mean,ci95:c.inference.ci95,p_value:c.inference.p_value})),
+          hypothesis_count:study.multiple_testing.length,holm_rejections:study.multiple_testing.filter((h:any)=>h.rejected_at_005).length,
+          funded:Object.fromEntries(Object.entries(study.funded as Record<string,any>).map(([model,r])=>[model,{status:r.status,failure:r.failure,net_return:r.net_return}]))}:null};
+    }
+    return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'no_compatible_result_at_cutoff'};
+  } finally {db.close();}
 }
 
 export interface FeeQuote { total_cents: number; version?: string; evidence?: unknown; }
