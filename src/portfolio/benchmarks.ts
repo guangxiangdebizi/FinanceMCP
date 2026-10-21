@@ -140,6 +140,23 @@ export interface BenchmarkResult {
   weights_status: typeof FROZEN_BASKET_WEIGHTS_STATUS | null;
   /** 明确的缺失代码，便于复核为什么 unavailable。 */
   missing_codes: string[];
+  /** 区间内（未年化）的风险调整指标；unavailable 或分母为 0 时为 null，不外推。 */
+  risk_adjusted?: {
+    return_to_window_vol: number | null;
+    return_to_max_drawdown: number | null;
+    note: string;
+  };
+}
+
+/** 各基准相对沪深300 ETF 的超额（百分点）；区间不同或任一方 unavailable 时为 null 并给原因。 */
+export interface BenchmarkRelative {
+  id: BenchmarkResult['id'];
+  versus: 'csi300_etf_buy_hold';
+  excess_return_pct_points: number | null;
+  status: 'OK' | 'UNAVAILABLE';
+  reason: string | null;
+  window: { start: string; end: string; trading_days: number } | null;
+  reference_window: { start: string; end: string; trading_days: number } | null;
 }
 
 export interface BenchmarkComparisonInput {
@@ -173,6 +190,8 @@ export interface BenchmarkComparisonResult {
     return_formula: string;
   };
   benchmarks: BenchmarkResult[];
+  /** 每个基准相对沪深300 ETF 的超额；不同观察区间不比较。 */
+  relative: BenchmarkRelative[];
   notes: readonly string[];
   disclaimer: string;
 }
@@ -422,6 +441,32 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
   // ---------------------------------------------------------------- 3. 初始五只静态基线
   benchmarks.push(benchmarkFiveStatic(db, tables, dates, window));
 
+  const reference = benchmarks[0];
+  const windowOf = (b: BenchmarkResult) => (b.window ? { ...b.window } : null);
+  const sameWindow = (a: BenchmarkResult, b: BenchmarkResult) => !!a.window && !!b.window
+    && a.window.start === b.window.start && a.window.end === b.window.end && a.window.trading_days === b.window.trading_days;
+  const relative: BenchmarkRelative[] = benchmarks.map(benchmark => {
+    const base = { id: benchmark.id, versus: 'csi300_etf_buy_hold' as const, window: windowOf(benchmark), reference_window: windowOf(reference) };
+    if (benchmark.id === reference.id) return { ...base, excess_return_pct_points: 0, status: 'OK' as const, reason: null };
+    if (benchmark.status === 'UNAVAILABLE' || reference.status === 'UNAVAILABLE' || benchmark.total_return_pct === null || reference.total_return_pct === null) {
+      return { ...base, excess_return_pct_points: null, status: 'UNAVAILABLE' as const,
+        reason: `benchmark_unavailable: ${reference.status === 'UNAVAILABLE' ? `${reference.id}:${reference.reason}` : `${benchmark.id}:${benchmark.reason}`}` };
+    }
+    if (!sameWindow(benchmark, reference)) {
+      return { ...base, excess_return_pct_points: null, status: 'UNAVAILABLE' as const, reason: 'observation_windows_differ: 不同起点的区间收益不可直接相减，也不裁剪任一窗口' };
+    }
+    return { ...base, excess_return_pct_points: r2(benchmark.total_return_pct - reference.total_return_pct), status: 'OK' as const, reason: null };
+  });
+  for (const benchmark of benchmarks) {
+    const days = benchmark.window?.trading_days ?? 0;
+    const windowVol = benchmark.annualized_vol_pct !== null && days > 1 ? benchmark.annualized_vol_pct * Math.sqrt((days - 1) / 252) : null;
+    benchmark.risk_adjusted = {
+      return_to_window_vol: benchmark.total_return_pct !== null && windowVol ? r4(benchmark.total_return_pct / windowVol) : null,
+      return_to_max_drawdown: benchmark.total_return_pct !== null && benchmark.max_drawdown_pct ? r4(benchmark.total_return_pct / Math.abs(benchmark.max_drawdown_pct)) : null,
+      note: '区间收益除以同区间波动或最大回撤的比值，未年化、无无风险利率；窗口很短时不具统计意义，也不是未来收益预测。',
+    };
+  }
+
   const status: 'OK' | 'DEGRADED' | 'UNAVAILABLE' = !db || !tables.fund_daily || !window
     ? 'UNAVAILABLE'
     : benchmarks.some(benchmark => benchmark.status !== 'OK') ? 'DEGRADED' : 'OK';
@@ -444,6 +489,7 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
       return_formula: '总收益 =（期末价值 − 期初含费投入）/ 期初含费投入；最大回撤与年化波动基于逐日组合价值序列（252 个交易日）。',
     },
     benchmarks,
+    relative,
     notes: BENCHMARK_NOTES,
     disclaimer: BENCHMARK_DISCLAIMER,
   };

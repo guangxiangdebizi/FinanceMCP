@@ -242,6 +242,10 @@ export interface DecisionComparison {
     concentration_after: { hhi: number | null; effective_positions: number | null };
     exposure_after: { equity_weight: number | null };
     stress_after: { equity_shock_pct: number; loss_cents: number | null; note: string } | null;
+    /** 压力损失占该情景总资产比例；没有用户确认的组合级风险预算时不判断是否超限。 */
+    risk_budget: { status: 'NO_USER_CONFIRMED_PORTFOLIO_BUDGET'; stress_loss_pct_of_total_assets: number | null; per_stock_plan_risk_limit_pct: 0.5; note: string };
+    /** 主动轮动需要相对优势证据；风险控制依据用户确认的风险约束，但仍受账户状态、交易规则与成本检查。 */
+    decision_basis: 'ACTIVE_ROTATION' | 'RISK_CONTROL' | 'NO_TRADE';
     opportunity_cost: string;
     sell_plan: {
       ts_code: string; quantity: number; sellable_quantity: number; settlement_rule: string;
@@ -807,6 +811,7 @@ function buildDecisionComparison(input: {
   };
   const metrics = (rows: Position[], nextCash: number) => {
     const total = rows.reduce((sum, p) => sum + p.value, 0) + nextCash + wealth;
+    const stressLoss = rows.reduce((sum, p) => sum + Math.round(p.value * DEFAULT_ASSET_CLASS_STRESS.shocks[p.asset_class]), 0);
     const hhi = total > 0 ? r6(rows.reduce((sum, p) => sum + (p.value / total) ** 2, 0)) : null;
     const byClass = ASSET_CLASSES.map(asset_class => {
       const value = rows.filter(p => p.asset_class === asset_class).reduce((sum, p) => sum + p.value, 0);
@@ -822,9 +827,15 @@ function buildDecisionComparison(input: {
       concentration_after: { hhi, effective_positions: hhi && hhi > 0 ? r6(1 / hhi) : null },
       exposure_after: { equity_weight: byClass.find(row => row.asset_class === 'EQUITY')!.weight },
       by_asset_class_after: byClass, theme_exposure_after: exposure('theme'), industry_exposure_after: exposure('industry'),
+      risk_budget: {
+        status: 'NO_USER_CONFIRMED_PORTFOLIO_BUDGET' as const,
+        stress_loss_pct_of_total_assets: total > 0 ? r6(stressLoss / total * 100) : null,
+        per_stock_plan_risk_limit_pct: 0.5 as const,
+        note: '0.5% 净资产单笔计划风险只适用于新建主板个股；尚无用户确认的组合级风险预算，因此不判断是否超限。',
+      },
       stress_after: {
         equity_shock_pct: DEFAULT_ASSET_CLASS_STRESS.shocks.EQUITY,
-        loss_cents: rows.reduce((sum, p) => sum + Math.round(p.value * DEFAULT_ASSET_CLASS_STRESS.shocks[p.asset_class]), 0),
+        loss_cents: stressLoss,
         note: `按资产类别施加声明式压力（${DEFAULT_ASSET_CLASS_STRESS.version}）：权益-10%、债券-1%、黄金-5%、跨境-12%、未知-10%；现金与理财不计冲击，非预测或历史回撤。`,
       },
     };
@@ -839,6 +850,7 @@ function buildDecisionComparison(input: {
   ];
   const option = (action: RotationScenario, label: string, text: string): Option => ({
     action, label, summary: text, executable: false, not_actionable_because: [...noExecution],
+    decision_basis: action === 'ROTATE' ? 'ACTIVE_ROTATION' : action === 'REDUCE' || action === 'DEFENSIVE' ? 'RISK_CONTROL' : 'NO_TRADE',
     ...baseline, fees_cents: 0, fee_breakdowns: [], quantity_basis: 'no_trade', funding_status: 'NO_TRADE',
     opportunity_cost: '保留当前暴露会承担下行风险；卖出或换仓可能放弃后续上涨，并产生费用。',
     sell_plan: null, rotation_plan: null,

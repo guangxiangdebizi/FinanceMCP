@@ -12,6 +12,10 @@
 
 `freeze` 的起始观察日必须晚于服务器实际冻结日；`observe` 由服务器取得当前时间和交易日历，不接受调用者传入伪造时间。最新市场缓存日须与观察日一致，要求存在可用 live 报告。新记录保存 8 个模型的前 40 名排序，明确区别于原有逐日动态股票池。`evaluate` 只读匹配冻结且及时保存的观察，拒绝成本或评估实现摘要不符的协议，结果追加保存。
 
+## 证据等级
+
+`src/ashare/evidenceTier.ts` 提供纯函数 `classifyEvidenceTier`，四级为 `UNVERIFIED`、`RESEARCH_SUPPORTED`、`OUT_OF_SAMPLE_VALIDATED`、`REJECTED`。旧 `classification` 保持不变并按 `evidence_supported→RESEARCH_SUPPORTED`、`research_only→UNVERIFIED`、`contradicted→REJECTED` 映射，旧报告不重写，也未向既有报告 JSON 增字段。`OUT_OF_SAMPLE_VALIDATED` 只接受 `TRUE_FORWARD_OBSERVATION`，并要求冻结 ID、规则版本、实现 hash、时间范围、至少60个独立日期、Holm 校正后 p≤0.05 且扣费后超额 95% 区间整体大于0；`RETROSPECTIVE_HOLDOUT` 与 `WALK_FORWARD_VALIDATION` 最高只到 `RESEARCH_SUPPORTED`。当前注册库中没有任何结果满足条件，全部仍为 `UNVERIFIED`。该函数尚未接入日报输出，现阶段只是分级口径与测试覆盖。
+
 ## 现有九类信号
 
 `signals.ts` 的 `trend_up`、`macd_golden_cross`、`rsi_oversold_rebound`、`boll_squeeze_breakout`、`trend_breakdown` 使用边沿或交叉触发；突破、背离与过热条件可连续触发。研究保持原定义，事件 ID 为日期、股票、信号，连续事件并不等于独立交易。原定义的失效条件目前是说明文字，不自动变为回测止损规则。

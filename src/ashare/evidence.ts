@@ -223,7 +223,8 @@ export function evaluateWatchlist(db: DatabaseSync, start: string, end: string, 
   for (const t of wlDates) {
     const i = days.indexOf(t);
     if (i < 0 || i + horizon >= days.length) continue;
-    const rows = ret.all(days[i + horizon], days[i + 1]) as any[];
+    // A NULL return (e.g. missing adj_factor) must not enter the benchmark mean as 0.
+    const rows = (ret.all(days[i + horizon], days[i + 1]) as any[]).filter(r => Number.isFinite(r.r));
     if (rows.length < minUniverse) continue;
     const byCode = new Map(rows.map(r => [r.ts_code, r.r as number]));
     const pool = (members.all(t) as any[]).map(m => byCode.get(m.ts_code)).filter((v): v is number => Number.isFinite(v));

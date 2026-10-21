@@ -167,6 +167,13 @@ test('defensive and bond rotation apply actual asset class shocks and publish ex
     assert.equal(option(r, 'DEFENSIVE').cash_after_cents, 1800000);
     assert.equal(option(r, 'DEFENSIVE').by_asset_class_after.find(row => row.asset_class === 'BOND').market_value_cents, 1000000);
     assert.equal(option(r, 'DEFENSIVE').stress_after.loss_cents, -10000);
+    // Active rotation needs advantage evidence; risk control does not, but both stay non-executable here.
+    assert.deepEqual(['HOLD', 'REDUCE', 'ROTATE', 'DEFENSIVE', 'NO_ACTION'].map(a => option(r, a).decision_basis),
+      ['NO_TRADE', 'RISK_CONTROL', 'ACTIVE_ROTATION', 'RISK_CONTROL', 'NO_TRADE']);
+    for (const o of r.decision_comparison.options) {
+      assert.equal(o.risk_budget.status, 'NO_USER_CONFIRMED_PORTFOLIO_BUDGET');
+      assert.equal(o.risk_budget.stress_loss_pct_of_total_assets, Math.round(o.stress_after.loss_cents / o.total_assets_after_cents * 1e8) / 1e6);
+    }
   } finally { f.close(); }
 });
 
