@@ -156,10 +156,16 @@ interface Price { raw: number; factor: number | null; high: number | null; low: 
 function price(db: DatabaseSync, code: string, date: string): Price | null {
   for (const [bars, adj, field] of [['fund_daily', 'fund_adj', 'adj_factor'], ['daily', 'adj_factor', 'adj_factor']]) {
     if (!table(db, bars)) continue;
-    const bar = db.prepare(`SELECT close,high,low FROM ${bars} WHERE ts_code=? AND trade_date=?`).get(code, date) as any;
-    if (!bar || !(bar.close > 0)) continue;
+    const bar = db.prepare(`SELECT * FROM ${bars} WHERE ts_code=? AND trade_date=?`).get(code, date) as any;
+    if (!bar) continue;
+    const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+    // A present but malformed bar cannot fall through to another instrument dataset.
+    if (!positive(bar.close) || ['open', 'high', 'low'].some(key => bar[key] != null && !positive(bar[key]))) return null;
+    if ((bar.high != null && bar.high < bar.close) || (bar.low != null && bar.low > bar.close)
+      || (bar.high != null && bar.low != null && bar.low > bar.high)
+      || (bar.open != null && ((bar.high != null && bar.open > bar.high) || (bar.low != null && bar.open < bar.low)))) return null;
     const factor = table(db, adj) ? (db.prepare(`SELECT ${field} value FROM ${adj} WHERE ts_code=? AND trade_date=?`).get(code, date) as any)?.value : null;
-    return { raw: bar.close, factor: factor > 0 ? factor : null, high: bar.high > 0 ? bar.high : null, low: bar.low > 0 ? bar.low : null };
+    return { raw: bar.close, factor: positive(factor) ? factor : null, high: bar.high ?? null, low: bar.low ?? null };
   }
   return null;
 }
@@ -192,8 +198,15 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
     base.maturity_date = dates.length === horizon ? dates.at(-1)! : null;
     if (!base.maturity_date || base.maturity_date > asOf) { base.status = 'PENDING'; base.reason = base.maturity_date ? 'observation_window_not_mature' : 'future_calendar_insufficient'; return finish(); }
     // Backdated imports are preserved but never counted as prospective predictions.
-    const generatedDate = new Date(Date.parse(record.generated_at) + 8 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
-    if (generatedDate > record.as_of_trade_date) { base.reason = 'retrospective_record_not_prospective'; return finish(); }
+    const shanghaiDate = (timestamp: string) => new Date(Date.parse(timestamp) + 8 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
+    const generatedDate = shanghaiDate(record.generated_at);
+    const recordedDate = shanghaiDate(record.recorded_at);
+    const obtainedDate = record.provenance ? shanghaiDate(record.provenance.obtained_at) : null;
+    // Caller-supplied generation dates cannot backdate the server's first observation of a conclusion.
+    if (generatedDate > record.as_of_trade_date || recordedDate > record.as_of_trade_date
+      || (obtainedDate !== null && obtainedDate > record.as_of_trade_date)) {
+      base.reason = 'retrospective_record_not_prospective'; return finish();
+    }
     base.observations = record.observations.map(observation => {
       const result: Record<string, any> = {
         ts_code: observation.ts_code, quantity: observation.quantity,

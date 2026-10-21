@@ -11,6 +11,15 @@ const record = (id = 'r1', extra = {}) => ({
   judgement: { conclusion: 'observe' }, candidates: ['510500.SH'],
   observations: [{ ts_code: '510500.SH', quantity: 100, trigger_price_milli: 1050, invalidation_price_milli: 900 }], evidence: [], ...extra,
 });
+function recordAt(db, input, at = '2026-10-01T21:50:00+08:00') {
+  const ActualDate = globalThis.Date;
+  globalThis.Date = class extends ActualDate {
+    constructor(...args) { super(...(args.length ? args : [at])); }
+    static now() { return ActualDate.parse(at); }
+  };
+  try { return journal.recordResearchJournal(db, input); }
+  finally { globalThis.Date = ActualDate; }
+}
 function fixture() {
   const db = new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE trade_cal(cal_date TEXT PRIMARY KEY,is_open INTEGER);
@@ -47,7 +56,7 @@ test('ChatGPT and combined results require real provenance and actual source par
   const db = new DatabaseSync(':memory:');
   const provenance = { author: 'external researcher', source_reference: 'actual-import-reference', obtained_at: '2026-10-01T21:45:00+08:00' };
   try {
-    journal.recordResearchJournal(db, record());
+    recordAt(db, record());
     assert.throws(() => journal.recordResearchJournal(db, record('chat', { source: 'chatgpt' })), /provenance/);
     assert.throws(() => journal.recordResearchJournal(db, record('combined', { source: 'combined', provenance, parent_record_ids: ['r1'] })), /actual VPS and ChatGPT/);
     journal.recordResearchJournal(db, record('chat', { source: 'chatgpt', provenance }));
@@ -58,7 +67,7 @@ test('ChatGPT and combined results require real provenance and actual source par
 test('evaluation matures on trading sessions, deducts costs and uses exact benchmark window', () => {
   const { db, evaluate } = fixture();
   try {
-    journal.recordResearchJournal(db, record());
+    recordAt(db, record());
     const early = evaluate({ asOf: '20261007' })[0];
     assert.equal(early.status, 'PENDING');
     assert.equal(early.maturity_date, '20261008');
@@ -83,8 +92,8 @@ test('observe and hypothetical long stay separate from actual trades, including 
   const { db, evaluate } = fixture();
   try {
     const observation = record().observations[0];
-    journal.recordResearchJournal(db, record('observe', { observations: [{ ...observation, direction: 'observe' }] }));
-    journal.recordResearchJournal(db, record('long', { observations: [{ ...observation, direction: 'long' }] }));
+    recordAt(db, record('observe', { observations: [{ ...observation, direction: 'observe' }] }));
+    recordAt(db, record('long', { observations: [{ ...observation, direction: 'long' }] }));
     db.prepare('UPDATE fund_daily SET low=NULL WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
     const results = evaluate();
     const watched = results.find(row => row.record_id === 'observe').observations[0];
@@ -102,7 +111,7 @@ test('observe and hypothetical long stay separate from actual trades, including 
 test('missing fees, intermediate prices, benchmark or factors never silently shorten an evaluation', () => {
   const { db, evaluate } = fixture();
   try {
-    journal.recordResearchJournal(db, record());
+    recordAt(db, record());
     assert.equal(evaluate({ feeEstimator: undefined })[0].observations[0].reason, 'fee_rules_unavailable');
     db.prepare('DELETE FROM fund_daily WHERE ts_code=? AND trade_date=?').run('510300.SH', '20261005');
     assert.equal(evaluate()[0].observations[0].reason, 'benchmark_exact_window_unavailable');
@@ -113,10 +122,43 @@ test('missing fees, intermediate prices, benchmark or factors never silently sho
     assert.equal(journal.readResearchJournal(db, 'r1').bundle_id, 'bundle-1');
   } finally { db.close(); }
 });
+test('server recording time and external acquisition time prevent retrospective claims passing as prospective', () => {
+  const { db, evaluate } = fixture();
+  try {
+    journal.recordResearchJournal(db, record('late-recorded'));
+    const late = evaluate().find(row => row.record_id === 'late-recorded');
+    assert.equal(late.status, 'UNAVAILABLE');
+    assert.equal(late.reason, 'retrospective_record_not_prospective');
+    assert.ok(journal.readResearchJournal(db, 'late-recorded').recorded_at > '2026-10-08');
+    recordAt(db, record('late-obtained', { source: 'chatgpt', provenance: {
+      author: 'external researcher', source_reference: 'actual-reference', obtained_at: '2026-10-06T21:45:00+08:00',
+    } }));
+    assert.equal(evaluate().find(row => row.record_id === 'late-obtained').reason, 'retrospective_record_not_prospective');
+    assert.equal(journal.listResearchJournal(db, { accountId: 'synthetic' }).length, 2, 'late authentic records remain stored');
+  } finally { db.close(); }
+});
+test('malformed or nonfinite OHLC prices cannot manufacture evaluated returns or risk triggers', () => {
+  const { db, evaluate } = fixture();
+  try {
+    recordAt(db, record());
+    db.prepare('UPDATE fund_daily SET high=0.5,low=1 WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
+    assert.equal(evaluate()[0].status, 'UNAVAILABLE');
+    assert.equal(evaluate()[0].observations[0].reason, 'missing_exact_window_price');
+    db.prepare('UPDATE fund_daily SET high=2,low=0.5,close=? WHERE ts_code=? AND trade_date=?').run(Infinity, '510500.SH', '20261005');
+    assert.equal(evaluate()[0].observations[0].gross_return_pct, null);
+    db.prepare('UPDATE fund_daily SET high=2,low=0.5,close=1.04 WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
+    db.exec('ALTER TABLE fund_daily ADD COLUMN open REAL');
+    db.prepare('UPDATE fund_daily SET open=3 WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
+    assert.equal(evaluate()[0].status, 'UNAVAILABLE');
+    db.prepare('UPDATE fund_daily SET open=NULL WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261005');
+    db.prepare('UPDATE fund_adj SET adj_factor=? WHERE ts_code=? AND trade_date=?').run(Infinity, '510500.SH', '20261005');
+    assert.equal(evaluate()[0].observations[0].reason, 'adjustment_factor_missing');
+  } finally { db.close(); }
+});
 test('corporate actions and backdated results are unavailable, never hypothetical successful predictions', () => {
   const { db, evaluate } = fixture();
   try {
-    journal.recordResearchJournal(db, record());
+    recordAt(db, record());
     db.prepare('UPDATE fund_adj SET adj_factor=2 WHERE ts_code=? AND trade_date=?').run('510500.SH', '20261008');
     assert.equal(evaluate()[0].observations[0].reason, 'corporate_action_cashflows_unavailable');
     journal.recordResearchJournal(db, record('late', { generated_at: '2026-10-08T21:40:00+08:00' }));
