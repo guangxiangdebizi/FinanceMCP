@@ -46,7 +46,7 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
     const identity = researchIdentity();
     const costs = { buy_fee_bps: 3, sell_fee_bps: 8, slippage_bps: 5, max_exit_delay: 5 };
     const protocol = { ...identity, pool_rules: WATCHLIST_RULES, models: CONTROL_MODELS, costs,
-      costs_note: 'Event observations use explicit research bps, not exact per-order commissions. Funded simulation uses the unified category-default fee engine with historical-date input; broker assumptions and slippage remain explicit.' };
+      costs_note: 'Event observations use explicit research bps, not exact per-order commissions. Funded simulation uses a constant category-default fee scenario with historical-date input: current statutory references throughout the 2024+ window, not reconstructed regulatory vintages. Broker assumptions and slippage remain explicit.' };
     if (command === 'freeze') {
       mkdirSync(resolve(researchPath, '..'), { recursive: true });
       const research = openValidationDb(researchPath, source);
