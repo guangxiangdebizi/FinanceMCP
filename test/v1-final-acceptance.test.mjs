@@ -122,8 +122,7 @@ test('V1F-1 顶层 ACTIONABLE 必须与腿的 executable 一致：没有可执�
   const { db: marketDb, sub } = marketWith({ dates, closes: { '159558.SZ': 1.0, '510300.SH': 4.0 } });
   seedReport(marketDb, sub, dates, asOf, BEARISH_MARKET);
 
-  // 单一持仓恰好占总资产 50.00%：要"降到 50% 以下"所需超额为 0，
-  // 因此只能给出示意数量（null），腿必然不可执行。
+  // 单一持仓恰好占总资产50%；没有显式研究量或优势证据，不自动生成交易。
   const snapshot = snapshotOf([
     { ts_code: '159558.SZ', name: '半导体设备ETF', quantity: 100000, ref_price_milli: 1000, ref_cost_milli: 1000, market_value_cents: 10_000_000 },
   ], 10_000_000);
@@ -133,7 +132,9 @@ test('V1F-1 顶层 ACTIONABLE 必须与腿的 executable 一致：没有可执�
   assert.equal(report.gate.satisfied, true, JSON.stringify(report.gate.reasons));
 
   const legs = report.first_section.actions.flatMap(action => action.legs);
-  assert.ok(legs.length > 0, '该场景应至少生成一个动作');
+  assert.deepEqual(legs, [], '未经验证的阈值不得自动产生交易腿');
+  assert.equal(report.status, 'NO_ACTION');
+  assert.equal(report.decision_comparison.options.find(option => option.action === 'REDUCE').sell_plan, null);
   assert.equal(executableLegCount(report), 0, '该场景不应有任何可执行腿');
   // 核心断言：没有任何可执行腿时，顶层不得声称 ACTIONABLE。
   assert.equal(report.actionable, false, JSON.stringify({ status: report.status, legs }));
@@ -160,17 +161,17 @@ test('V1F-2 未验证的市场证据数量 + 集中度阈值不得生成可执�
   const report = buildDailyReport({ portfolioDb: portfolio, marketDb, accountId: 'acct', asOfTradeDate: asOf });
   assert.equal(report.gate.satisfied, true, JSON.stringify(report.gate.reasons));
 
-  const concentration = report.first_section.actions.find(action => action.code === 'REDUCE_CONCENTRATION');
-  assert.ok(concentration, '集中度动作应存在');
-  // 证据计数与集中度阈值都是研究判断，不能单独授权一笔可执行卖出。
-  for (const leg of concentration.legs) {
-    assert.equal(leg.executable, false, `集中度动作的腿不得可执行：${JSON.stringify(leg)}`);
-    assert.ok(typeof leg.reason === 'string' && leg.reason.length > 0, '不可执行必须给出原因码');
-  }
-  assert.ok(concentration.illustrative, '集中度动作应保留 illustrative 块');
-  assert.ok(concentration.illustrative.legs.every(leg => leg.executable === false));
-  // 研究结论本身必须标为 UNVERIFIED。
-  assert.equal(concentration.fact_meta.claim_status, 'UNVERIFIED');
+  assert.deepEqual(report.first_section.actions, [], '证据计数与集中度不自动授权卖出');
+  assert.equal(report.status, 'NO_ACTION');
+  assert.equal(executableLegCount(report), 0);
+  const explicit = buildDailyReport({ portfolioDb: portfolio, marketDb, accountId: 'acct', asOfTradeDate: asOf,
+    researchScenario: { sellCode: '159558.SZ', sellQuantity: 1000 } });
+  const research = explicit.decision_comparison.options.find(option => option.action === 'REDUCE');
+  assert.equal(research.sell_plan.quantity, 1000);
+  assert.equal(research.executable, false);
+  assert.equal(research.fact_meta.claim_status, 'UNVERIFIED');
+  assert.equal(explicit.actionable, false);
+  assert.equal(executableLegCount(explicit), 0);
   // 报告整体不得因此变成 ACTIONABLE。
   assert.equal(report.actionable, false);
   assert.notEqual(report.status, 'ACTIONABLE');

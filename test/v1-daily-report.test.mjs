@@ -262,36 +262,17 @@ test('D1-2 无证据支持动作 → NO_ACTION，给出观察触发条件与空�
 
 // ---------------------------------------------------------------- 3. 不可执行轮动
 
-test('D1-3 账户未确认 → ILLUSTRATIVE，轮动/减仓腿全部 executable:false', () => {
+test('D1-3 账户未确认且无优势证据 → NO_ACTION，不自动生成减仓或轮动', () => {
   const report = build();
-  assert.equal(report.status, 'ILLUSTRATIVE');
+  assert.equal(report.status, 'NO_ACTION');
   assert.equal(report.actionable, false);
   assert.equal(report.gate.satisfied, false);
   assert.ok(report.gate.reasons.some(reason => reason.code === 'account_not_current'));
   assert.ok(report.gate.reasons.some(reason => reason.code === 'account_not_verified'));
-  assert.ok(report.first_section.actions.length > 0, '合成日报应至少给出一个审视动作');
-  for (const action of report.first_section.actions) {
-    assert.ok(action.legs.length > 0, `${action.code} 应有示意腿`);
-    assert.ok(action.illustrative, `${action.code} 应有 illustrative 块`);
-    assert.equal(action.illustrative.executable, false);
-    for (const leg of action.legs) {
-      assert.equal(leg.executable, false, `${action.code} 的腿不得可执行`);
-      assert.ok(leg.reason, '不可执行腿必须写明原因');
-    }
-    for (const leg of action.illustrative.legs) assert.equal(leg.executable, false);
-    assert.ok(action.fees_cents !== null, '示意腿也要给出假设费用');
-    assert.ok(action.triggers.length > 0);
-    assert.ok(action.invalidation_conditions.length > 0);
-    assert.ok(action.risk_impact.length > 0);
-  }
+  assert.deepEqual(report.first_section.actions, []);
   assert.deepEqual(executableLegs(report), []);
-  // 数量只是示意，且必须是整手。
-  for (const action of report.first_section.actions) {
-    for (const leg of action.legs) {
-      if (leg.quantity === null) continue;
-      assert.equal(leg.quantity % leg.lot_size, 0, '示意数量必须是整手');
-    }
-  }
+  for (const option of report.decision_comparison.options) assert.equal(option.executable, false);
+  assert.equal(report.decision_comparison.options.find(option => option.action === 'REDUCE').sell_plan, null);
 });
 
 test('D1-3b 候选 vs 现金：现金不足一手时显式标注，不臆造买入', () => {
@@ -345,7 +326,7 @@ test('D1-4 持仓行情过期 → DATA_INSUFFICIENT（行情缺失不等于已�
 
 // ---------------------------------------------------------------- 5. 门控满足
 
-test('D1-5 门控满足但动作由未验证研究判断触发 → ILLUSTRATIVE，腿不可执行', () => {
+test('D1-5 门控满足仍需优势证据：NO_ACTION，显式研究量不升级为执行量', () => {
   // 单独建一个已确认的账户，避免影响其它用例的 PENDING 语义。
   const confirmedPortfolio = openPortfolioDb(join(dir, 'portfolio-confirmed.sqlite'), { marketPath: MARKET_MAIN });
   const snapshotId = 'synthetic-confirmed-2026-10-16';
@@ -364,27 +345,23 @@ test('D1-5 门控满足但动作由未验证研究判断触发 → ILLUSTRATIVE�
     accountId: 'confirmed-account',
     asOfTradeDate: LAST,
     generatedAt: '2026-10-16T21:55:00+08:00',
+    researchScenario: { sellCode: '159558.SZ', sellQuantity: 1000, buyCode: '510300.SH', buyQuantity: 100 },
   });
   // 账户门控本身通过……
   assert.equal(report.gate.satisfied, true);
-  // ……但唯一可生成的动作由"集中度阈值 + 未经验证的市场证据计数"触发，
-  // 这两者都是研究判断，不能单独授权一笔可执行卖出（PRD §6/§7）。
   assert.equal(report.actionable, false);
-  assert.notEqual(report.status, 'ACTIONABLE');
-  assert.ok(report.first_section.actions.length > 0);
-  for (const action of report.first_section.actions) {
-    for (const leg of action.legs) {
-      assert.equal(leg.executable, false, `${action.code} 的腿不得可执行`);
-      assert.ok(typeof leg.reason === 'string' && leg.reason.length > 0, '不可执行必须给出原因码');
-    }
-    assert.ok(action.illustrative, '非可执行动作必须保留 illustrative 块');
-    assert.ok(action.illustrative.legs.every(leg => leg.executable === false));
-  }
-  // 数量仍然由程序计算（示意值），不是手填的。
-  const leg = report.first_section.actions[0].legs[0];
-  assert.ok(Number.isInteger(leg.quantity) && leg.quantity > 0);
-  assert.equal(leg.quantity % leg.lot_size, 0);
-  assert.equal(leg.gross_cents, Math.round((leg.quantity * leg.price_milli) / 10));
+  assert.equal(report.status, 'NO_ACTION');
+  assert.deepEqual(report.first_section.actions, []);
+  assert.deepEqual(executableLegs(report), []);
+  const reduce = report.decision_comparison.options.find(option => option.action === 'REDUCE');
+  const rotate = report.decision_comparison.options.find(option => option.action === 'ROTATE');
+  assert.equal(reduce.sell_plan.quantity, 1000);
+  assert.equal(reduce.sell_plan.gross_cents, 93500);
+  assert.equal(rotate.rotation_plan.quantity, 100);
+  assert.equal(reduce.executable, false);
+  assert.equal(rotate.executable, false);
+  assert.equal(rotate.rotation_plan.advantage_status, 'UNVERIFIED');
+  assert.equal(report.data_quality.tiers.trade_plan_executability.status, 'NOT_EXECUTABLE');
 });
 
 // ---------------------------------------------------------------- 6. plan_tracking

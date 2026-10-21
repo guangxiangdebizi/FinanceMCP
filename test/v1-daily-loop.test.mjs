@@ -454,7 +454,9 @@ test('C-6 账户口径对照：数量一致、现金一致，HHI 差异只来自
     assert.equal(report.account_view.revalued_basis.price_source, 'server_cache_close');
     assert.equal(report.account_view.snapshot_basis.hhi, 0.557087);
     assert.ok(typeof report.account_view.reconciliation.find(row => row.field === 'hhi').explanation === 'string');
-    assert.match(report.account_view.note, /数量与用户确认的快照逐只一致/);
+    assert.match(report.account_view.note, /证券数量与参考快照一致/);
+    assert.equal(report.decision_comparison.options.find(row => row.action === 'HOLD').concentration_after.hhi,
+      report.concentration.hhi, '不交易的HHI必须与当前组合完全一致');
     // 可执行性仍必须被账户门控阻止（未上报交易风险）。
     assert.equal(report.actionable, false);
   } finally {

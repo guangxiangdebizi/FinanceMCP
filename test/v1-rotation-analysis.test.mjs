@@ -54,9 +54,14 @@ account.markSnapshotCurrent(portfolio, SNAPSHOT_ID, { confirmedBy: 'test-fixture
 confirmRealAccount(portfolio, 'real-main', { confirm: true, note: 'synthetic fixture' });
 setAccountCompleteness(portfolio, 'real-main', { as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false }, { confirm: true, recordedBy: 'test-fixture' });
 
-const report = buildDailyReport({
+const build = (extra = {}) => buildDailyReport({
   portfolioDb: portfolio, marketDb: market, accountId: 'real-main', asOfTradeDate: LAST, snapshotId: SNAPSHOT_ID,
+  ...extra,
 });
+const report = build();
+const researchReport = build({ researchScenario: {
+  sellCode: '159558.SZ', sellQuantity: 1000, buyCode: '510300.SH', buyQuantity: 100,
+} });
 
 test('D4-1 五个方案同时出现，且都明确标注当前是否可执行', () => {
   const options = report.decision_comparison?.options ?? [];
@@ -71,8 +76,13 @@ test('D4-1 五个方案同时出现，且都明确标注当前是否可执行', 
 });
 
 test('D4-2 卖出方案必须给出资金来源、可卖数量、一手金额与费用', () => {
-  const reduce = report.decision_comparison.options.find(option => option.action === 'REDUCE');
-  assert.ok(reduce.sell_plan, 'REDUCE 必须给出卖出资金测算');
+  const defaultReduce = report.decision_comparison.options.find(option => option.action === 'REDUCE');
+  assert.equal(defaultReduce.sell_plan, null, '不提供研究数量不得自动按50%阈值卖出');
+  assert.equal(defaultReduce.funding_status, 'QUANTITY_REQUIRED');
+  const reduce = researchReport.decision_comparison.options.find(option => option.action === 'REDUCE');
+  assert.ok(reduce.sell_plan, '显式研究数量必须给出资金测算');
+  assert.equal(reduce.sell_plan.quantity, 1000);
+  assert.equal(reduce.executable, false);
   assert.equal(reduce.sell_plan.ts_code, '159558.SZ', '集中度最高的持仓是研究起点');
   assert.ok(reduce.sell_plan.quantity > 0);
   assert.equal(reduce.sell_plan.quantity % 100, 0, '卖出必须是整手');
@@ -83,8 +93,13 @@ test('D4-2 卖出方案必须给出资金来源、可卖数量、一手金额与
 });
 
 test('D4-3 轮动方案必须给出候选、一手金额与现金是否足够，且优势未验证', () => {
-  const rotate = report.decision_comparison.options.find(option => option.action === 'ROTATE');
-  assert.ok(rotate.rotation_plan, 'ROTATE 必须给出候选与资金测算');
+  assert.equal(report.decision_comparison.options.find(option => option.action === 'ROTATE').rotation_plan, null,
+    '不提供买卖研究参数不得自动构造轮动');
+  const rotate = researchReport.decision_comparison.options.find(option => option.action === 'ROTATE');
+  assert.ok(rotate.rotation_plan, '显式轮动研究必须给出候选与资金测算');
+  assert.equal(rotate.rotation_plan.buy_code, '510300.SH');
+  assert.equal(rotate.rotation_plan.quantity, 100);
+  assert.equal(rotate.executable, false);
   assert.ok(rotate.rotation_plan.buy_code, '必须有候选代码');
   assert.ok(rotate.rotation_plan.one_lot_cents > 0);
   assert.equal(typeof rotate.rotation_plan.cash_sufficient_for_one_lot, 'boolean');
@@ -97,9 +112,8 @@ test('D4-4 交易前后集中度与压力情景必须被计算，而不是只写
   assert.ok(comparison.concentration_before.hhi > 0);
   for (const option of comparison.options) {
     if (option.action === 'HOLD' || option.action === 'NO_ACTION') {
-      // HOLD/NO_ACTION 不交易：现金也计入分母，因此 HHI 可能与“只算证券”的基准略有差异。
-      assert.ok(Math.abs(option.concentration_after.hhi - comparison.concentration_before.hhi) < 1e-3,
-        `${option.action} 不交易时 HHI 不应明显变化：${option.concentration_after.hhi} vs ${comparison.concentration_before.hhi}`);
+      assert.equal(option.concentration_after.hhi, comparison.concentration_before.hhi,
+        `${option.action} 不交易时HHI口径与数值必须完全相同`);
     } else {
       assert.ok(option.concentration_after.hhi !== null, `${option.action} 必须给出交易后集中度`);
     }
@@ -109,20 +123,13 @@ test('D4-4 交易前后集中度与压力情景必须被计算，而不是只写
   assert.ok(typeof defensive.stress_after.equity_shock_pct === 'number');
 });
 
-test('D4-5 不使用机械的固定仓位阈值：集中度动作恒为示意，且给出机会成本', () => {
-  // 动作是否出现取决于“集中度 + 反证计数”这一研究判断；这里断言的是：
-  // 一旦出现，它必须是示意，并且披露集中度与机会成本。
-  const action = report.first_section.actions.find(item => item.code === 'REDUCE_CONCENTRATION');
-  if (!action) {
-    const reduce = report.decision_comparison.options.find(option => option.action === 'REDUCE');
-    assert.ok(reduce, '即使没有生成动作，D4 也必须给出 REDUCE 的研究比较');
+test('D4-5 无优势证据时不产生集中度动作，显式研究也不得升级ACTIONABLE', () => {
+  for (const result of [report, researchReport]) {
+    assert.deepEqual(result.first_section.actions, []);
+    assert.equal(result.actionable, false);
+    assert.notEqual(result.status, 'ACTIONABLE');
+    const reduce = result.decision_comparison.options.find(option => option.action === 'REDUCE');
     assert.equal(reduce.executable, false);
     assert.ok(reduce.opportunity_cost.length > 0);
-    return;
   }
-  assert.ok(action.legs.every(leg => leg.executable === false));
-  assert.match(action.legs[0].reason, /unverified|not_actionable|concentration/);
-  const text = [...action.reasons, ...action.counter_evidence, ...action.risk_impact].join(' ');
-  assert.match(text, /集中度/, '必须披露集中度');
-  assert.match(text, /机会成本|反证|上行/, '必须披露潜在上涨的机会成本');
 });

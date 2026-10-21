@@ -1,6 +1,11 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { latestSnapshot, readSnapshot, valueCents, type AccountSnapshot } from './account.js';
+import { valueCents, THEME_BY_CODE, type AccountSnapshot } from './account.js';
+import { resolveAccountSnapshot } from './accounts.js';
+import { ASSET_CLASSES, DEFAULT_ASSET_CLASS_STRESS, INDUSTRY_BY_CODE, classifyAssetClass, type AssetClass } from './decision.js';
+import { calculateFees, resolveFeeRules, type FeeBreakdown } from './fees.js';
+import { loadServerQuote } from './quotes.js';
+import { resolveInstrument, normalizeSecurityCode } from './instrument.js';
 import { buildResearchSummary } from './researchSummary.js';
 import { evaluateAccountStatus, type AccountStatusEvaluation } from './decision.js';
 import { DEFAULT_FEE_RULES, DEFAULT_LOT_RULES, type FeeRules, type LotRules } from './rules.js';
@@ -14,10 +19,9 @@ import { adjustmentRatio } from '../ashare/data.js';
  * 设计边界（PRD §9 / §10 / §13）：
  * - 所有事实（持仓、行情、市场环境、数据质量）都来自 `buildResearchSummary`，
  *   本模块**不重复实现**估值/取价/市场证据。
- * - 所有数字都由程序计算：本文件不做任何 LLM 算术，也不接受调用方传入的数量/价格。
- * - 可执行数量只在一个条件下出现：账户门控（当前快照 + REAL_ACCOUNT_VERIFIED +
- *   同一交易日 + 无未交收卖出）**全部**满足。否则每个腿都是 `executable:false`，
- *   放在 `illustrative` 块里。
+ * - 所有金额、费用与风险数字由程序计算；研究数量只接受显式参数，价格只取缓存。
+ * - 研究情景与账户执行门控独立：即使资金与可卖性满足，未接入独立优势证据或
+ *   用户已确认的持久风险策略时，也不生成交易动作；所有比较 executable:false。
  * - 没有证据支持的动作时返回 `NO_ACTION`，并给出明确的观察触发条件与失效条件。
  * - 研究性主张一律 `UNVERIFIED`；数据质量不足时不给“假装可执行的精确建议”。
  * - 只读：账户库与市场库都只读；历史预案跟踪读 `plan_tracking` 表（若存在），
@@ -68,7 +72,7 @@ export interface DailyReportInput {
   accountConfirmedAt?: string | null;
   /** 行情更新时间（ISO）；缺省取缓存同步日志，缺失时 null。 */
   quoteUpdatedAt?: string | null;
-  /** 生成时间（ISO）；仅作为展示字段，不参与任何计算，也不进入报告哈希。 */
+  /** 生成时间（ISO）；默认当前时间，仅展示，不进入报告哈希。 */
   generatedAt?: string | null;
   /** 候选池筛选类别；缺省全部。 */
   categories?: readonly string[];
@@ -77,6 +81,8 @@ export interface DailyReportInput {
   /** 费用/交易单位假设；缺省 rules.ts 的默认值。 */
   fees?: FeeRules;
   lots?: LotRules;
+  /** Explicit hypothetical quantities; never approval of a strategy or an order. */
+  researchScenario?: { sellCode: string; sellQuantity: number; buyCode?: string; buyQuantity?: number };
 }
 
 export type ActionKind = 'REDUCE' | 'ROTATE';
@@ -158,9 +164,9 @@ export interface HoldingResearch {
     bar_date: string | null;
     as_of_trade_date: string;
     fresh: boolean;
-    /** 用于计算的 bar 根数（最多 60）。 */
+    /** 用于计算的 bar 根数（最多61；60个收益区间）。 */
     bars_used: number;
-    price_basis: 'qfq_adjusted' | 'raw_close_no_adj_factor';
+    price_basis: 'qfq_adjusted' | 'unavailable_adjustment';
   };
   /** 1. 当日行情。 */
   quote: {
@@ -225,6 +231,14 @@ export interface DecisionComparison {
     executable: false;
     not_actionable_because: string[];
     cash_after_cents: number | null;
+    total_assets_after_cents: number | null;
+    fees_cents: number;
+    fee_breakdowns: { ts_code: string; side: 'BUY' | 'SELL'; breakdown: FeeBreakdown }[];
+    quantity_basis: 'user_research_parameter' | 'no_trade' | 'equity_liquidation_stress_only' | 'not_provided';
+    funding_status: 'NO_TRADE' | 'QUANTITY_REQUIRED' | 'INVALID_QUANTITY' | 'PRICE_UNAVAILABLE' | 'SELLABILITY_UNKNOWN' | 'NOT_SELLABLE' | 'INSUFFICIENT_CASH' | 'FUNDED';
+    by_asset_class_after: { asset_class: AssetClass; market_value_cents: number; weight: number }[];
+    theme_exposure_after: { key: string; market_value_cents: number; weight: number }[];
+    industry_exposure_after: { key: string; market_value_cents: number; weight: number }[];
     concentration_after: { hhi: number | null; effective_positions: number | null };
     exposure_after: { equity_weight: number | null };
     stress_after: { equity_shock_pct: number; loss_cents: number | null; note: string } | null;
@@ -236,6 +250,7 @@ export interface DecisionComparison {
     rotation_plan: {
       buy_code: string; buy_name: string | null; category: string; price_milli: number | null;
       one_lot_cents: number | null; cash_sufficient_for_one_lot: boolean | null;
+      quantity: number | null; fees_cents: number | null;
       spend_cents: number | null; cash_after_cents: number | null; advantage_status: 'UNVERIFIED';
     } | null;
     invalidation_conditions: string[];
@@ -256,6 +271,8 @@ export interface CandidateCashCompetition {
     score: number | null;
     price_milli: number | null;
     one_lot_cents: number | null;
+    one_lot_total_cents: number | null;
+    fees_cents: number | null;
     cash_sufficient_for_one_lot: boolean | null;
     note: string;
     /** 每个候选事实都带 as_of / 来源 / 质量状态。 */
@@ -425,26 +442,9 @@ function oneLotCents(priceMilli: number | null, lotSize: number): number | null 
   return priceMilli === null ? null : valueCents(lotSize, priceMilli);
 }
 
-/** 买入腿费用（假设值）：佣金（含最低）+ 过户费 + 单边滑点。 */
-function buyFeesCents(grossCents: number, fees: FeeRules): number {
-  if (!(grossCents > 0)) return 0;
-  return Math.max(fees.commission_min_cents, Math.round(grossCents * fees.commission_rate))
-    + Math.round(grossCents * fees.transfer_fee_rate)
-    + Math.round(grossCents * fees.slippage_rate_per_side);
-}
-
-/** 卖出腿费用（假设值）：佣金（含最低）+ 过户费 + 印花税 + 单边滑点。 */
-function sellFeesCents(grossCents: number, fees: FeeRules): number {
-  if (!(grossCents > 0)) return 0;
-  return Math.max(fees.commission_min_cents, Math.round(grossCents * fees.commission_rate))
-    + Math.round(grossCents * fees.transfer_fee_rate)
-    + Math.round(grossCents * fees.stamp_duty_rate)
-    + Math.round(grossCents * fees.slippage_rate_per_side);
-}
-
 // ---------------------------------------------------------------- 单只持仓研究（D3）
 
-const RESEARCH_WINDOW_BARS = 60;
+const RESEARCH_WINDOW_BARS = 61; // 60 returns require 61 price observations.
 const BROAD_INDEX_CODES = ['000300.SH', '000905.SH', '000852.SH', '000001.SH'];
 
 function pctChange(from: number, to: number): number | null {
@@ -491,7 +491,7 @@ function buildHoldingResearch(
   const code = String(holding.ts_code);
   const unavailable: string[] = [];
   const empty: HoldingResearch = {
-    data: { bar_date: holding.latest_bar_date ?? null, as_of_trade_date: asOf, fresh: false, bars_used: 0, price_basis: 'raw_close_no_adj_factor' },
+    data: { bar_date: holding.latest_bar_date ?? null, as_of_trade_date: asOf, fresh: false, bars_used: 0, price_basis: 'unavailable_adjustment' },
     quote: { close_cny: null, pct_chg: null, amount_cny: null, vol_shares: null, one_lot_cents: null },
     trend: {
       ret5_pct: null, ret20_pct: null, ret60_pct: null, ma20_cny: null, ma60_cny: null,
@@ -519,66 +519,69 @@ function buildHoldingResearch(
     return empty;
   }
   bars.reverse();
-  const validBars = bars.filter(bar => typeof bar.close === 'number' && bar.close > 0 && Number.isFinite(bar.close));
-  if (!validBars.length) {
-    unavailable.push('窗口内没有合法的基金日线');
+  if (!bars.length) {
+    unavailable.push('窗口内没有基金日线');
     return empty;
   }
-
-  // 复权：基准取 asOf 之前最后一个因子；逐日因子缺失的 bar 不参与收益计算。
+  const validOhlc = (bar: any) => [bar.open, bar.high, bar.low, bar.close].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0)
+    && bar.high >= Math.max(bar.open, bar.close, bar.low) && bar.low <= Math.min(bar.open, bar.close, bar.high);
   const base = safeFundBaseFactor(marketDb, code, asOf);
   const factors = new Map<string, number>();
-  if (base) {
-    for (const row of marketDb.prepare('SELECT trade_date, adj_factor FROM fund_adj WHERE ts_code = ? AND trade_date <= ? AND adj_factor > 0')
-      .all(code, asOf) as any[]) {
-      factors.set(String(row.trade_date), Number(row.adj_factor));
-    }
-  }
-  const priced = validBars
-    .map(bar => {
-      const factor = factors.get(String(bar.trade_date));
-      const ratio = base && typeof factor === 'number' && factor > 0
-        ? adjustmentRatio('qfq', factor, base.adj_factor)
-        : 1;
-      return { ...bar, price: Number.isFinite(ratio) ? bar.close * ratio : null };
-    })
-    .filter(bar => bar.price !== null && bar.price > 0);
-  if (!priced.length) {
-    unavailable.push('缺少可用复权因子，无法计算可比收益序列');
-    return empty;
-  }
-  const closes = priced.map(bar => bar.price as number);
+  if (base) for (const row of marketDb.prepare('SELECT trade_date, adj_factor FROM fund_adj WHERE ts_code = ? AND trade_date <= ? AND adj_factor > 0')
+    .all(code, asOf) as any[]) factors.set(String(row.trade_date), Number(row.adj_factor));
+  // Preserve every observation and its date. Missing factors/OHLC invalidate a
+  // window; dropping rows would silently change its holding period.
+  const priced = bars.map(bar => {
+    const factor = factors.get(String(bar.trade_date));
+    const valid = validOhlc(bar);
+    if (!valid) unavailable.push(`OHLC异常:${bar.trade_date}`);
+    if (!base || !factor || !Number.isFinite(factor)) unavailable.push(`复权因子缺失:${bar.trade_date}`);
+    const ratio = base && factor && Number.isFinite(factor) ? adjustmentRatio('qfq', factor, base.adj_factor) : Number.NaN;
+    return { ...bar, price: valid && Number.isFinite(ratio) && ratio > 0 ? bar.close * ratio : null };
+  });
+  const closes = priced.map(bar => bar.price ?? Number.NaN);
   const last = priced.at(-1)!;
-  const lastBar = validBars.at(-1)!;
-  const retOver = (n: number): number | null => (closes.length > n ? pctChange(closes[closes.length - 1 - n], closes[closes.length - 1]) : null);
-  const ma = (n: number): number | null => (closes.length >= n ? mean(closes.slice(-n)) : null);
+  const lastBar = bars.at(-1)!;
+  const expectedDates = tableExists(marketDb, 'trade_cal')
+    ? (marketDb.prepare('SELECT cal_date FROM trade_cal WHERE is_open=1 AND cal_date<=? ORDER BY cal_date DESC LIMIT 61').all(asOf) as any[])
+      .reverse().map(row => String(row.cal_date)) : [];
+  const window = (n: number): number[] | null => {
+    const values = closes.slice(-n);
+    const actualDates = priced.slice(-n).map(bar => String(bar.trade_date));
+    const dates = expectedDates.slice(-n);
+    return values.length === n && values.every(Number.isFinite) && dates.length === n
+      && actualDates.every((date, i) => date === dates[i]) ? values : null;
+  };
+  if (priced.length && expectedDates.length && priced.slice(-expectedDates.length).some((bar, i, rows) =>
+    String(bar.trade_date) !== expectedDates.slice(-rows.length)[i])) unavailable.push('交易日日线缺口：不得压缩收益窗口');
+  const retOver = (n: number): number | null => { const values = window(n + 1); return values ? pctChange(values[0], values.at(-1)!) : null; };
+  const ma = (n: number): number | null => { const values = window(n); return values ? mean(values) : null; };
   const ma20 = ma(20);
   const ma60 = ma(60);
-  const returns = closes.slice(1).map((price, index) => price / closes[index] - 1).filter(value => Number.isFinite(value));
-  const low20 = closes.length >= 20 ? Math.min(...closes.slice(-20)) : null;
+  const riskWindow = window(61);
+  const returns = riskWindow ? riskWindow.slice(1).map((price, index) => price / riskWindow[index] - 1) : [];
+  const lowWindow = window(20);
+  const low20 = lowWindow ? Math.min(...lowWindow) : null;
 
   // 对照：真实的宽基指数与主题行业；只用缓存里确实存在的数据。
   const comparison: HoldingResearch['comparison'] = [];
   let broadRet20: number | null = null;
   let broadName: string | null = null;
-  const indexRow = BROAD_INDEX_CODES.find(indexCode => {
+  for (const indexCode of BROAD_INDEX_CODES) {
     try {
-      return !!marketDb.prepare('SELECT 1 FROM index_daily WHERE ts_code = ? AND trade_date <= ? LIMIT 1').get(indexCode, asOf);
-    } catch {
-      return false;
-    }
-  });
-  if (indexRow) {
-    const rows = marketDb.prepare('SELECT trade_date, close FROM index_daily WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 21')
-      .all(indexRow, asOf) as any[];
-    if (rows.length >= 21) {
-      const ordered = rows.reverse();
-      broadRet20 = pctChange(Number(ordered[0].close), Number(ordered[ordered.length - 1].close));
-      broadName = indexRow;
-      comparison.push({ kind: 'index', reference: indexRow, window_bars: 20, as_of: String(ordered.at(-1)?.trade_date ?? '') });
-    }
+      const rows = (marketDb.prepare('SELECT trade_date, close FROM index_daily WHERE ts_code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 21')
+        .all(indexCode, asOf) as any[]).reverse();
+      const own = priced.slice(-21);
+      if (rows.length !== 21 || own.length !== 21 || !rows.every((row, i) => row.trade_date === own[i].trade_date
+        && typeof row.close === 'number' && Number.isFinite(row.close) && row.close > 0)
+        || own.at(-1)?.trade_date !== asOf) continue;
+      broadRet20 = pctChange(rows[0].close, rows.at(-1)!.close);
+      broadName = indexCode;
+      comparison.push({ kind: 'index', reference: indexCode, window_bars: 20, as_of: rows.at(-1)!.trade_date });
+      break;
+    } catch { /* Missing index cache remains explicitly unavailable. */ }
   }
-  if (!broadRet20) unavailable.push('index_daily 缺少可用宽基指数窗口，无法计算相对宽基强弱');
+  if (broadRet20 === null) unavailable.push('index_daily 缺少与ETF窗口日期一致的宽基指数窗口，无法计算相对宽基强弱');
 
   const themeIndustry = holding.industry && holding.industry !== 'unclassified' ? String(holding.industry) : null;
   const sector = themeIndustry && market?.sectors?.all
@@ -589,14 +592,14 @@ function buildHoldingResearch(
 
   const ret20 = retOver(20);
   const excessBroad = ret20 != null && broadRet20 != null ? r2(ret20 - broadRet20) : null;
-  const excessTheme = ret20 != null && sector && typeof sector.ret20_median_pct === 'number'
+  const excessTheme = ret20 != null && sector && market?.as_of_trade_date === lastBar.trade_date && typeof sector.ret20_median_pct === 'number'
     ? r2(ret20 - sector.ret20_median_pct) : null;
 
-  const priceBasis: HoldingResearch['data']['price_basis'] = base ? 'qfq_adjusted' : 'raw_close_no_adj_factor';
-  if (!base) unavailable.push('缺少 fund_adj 因子，收益按原始收盘计算（拆分日会出现不连续）');
-  if (closes.length < 60) unavailable.push(`可比收益序列只有 ${closes.length} 根（不足 60 根，60 日指标为空或样本偏短）`);
+  const priceBasis: HoldingResearch['data']['price_basis'] = base ? 'qfq_adjusted' : 'unavailable_adjustment';
+  if (!base) unavailable.push('缺少 fund_adj 因子，复权收益不可用，不回退混合原始收盘');
+  if (closes.length < 61) unavailable.push(`可比收益序列只有 ${closes.length} 根（60日收益和风险需要61根）`);
 
-  const closeCny = typeof lastBar.close === 'number' ? lastBar.close : null;
+  const closeCny = validOhlc(lastBar) ? lastBar.close : null;
   const oneLot = closeCny === null ? null : valueCents(lots.etf_lot_size, Math.round(closeCny * 1000));
   const fresh = holding.bar_quality === 'READY';
   if (!fresh) unavailable.push(`行情质量 ${holding.bar_quality}：目标交易日收盘行情不可用`);
@@ -675,8 +678,8 @@ function buildHoldingResearch(
       above_ma60: ma60 === null || last.price === null ? null : last.price >= ma60,
       excess_ret20_vs_broad_pct: excessBroad,
       excess_ret20_vs_theme_pct: excessTheme,
-      realized_vol_60d_pct: returns.length >= 20 ? r2(stdev(returns)! * Math.sqrt(252) * 100) : null,
-      max_drawdown_60d_pct: maxDrawdown(closes),
+      realized_vol_60d_pct: returns.length === 60 ? r2(stdev(returns)! * Math.sqrt(252) * 100) : null,
+      max_drawdown_60d_pct: riskWindow ? maxDrawdown(riskWindow) : null,
       distance_to_20d_low_pct: low20 && last.price ? r2((last.price / low20 - 1) * 100) : null,
     },
     comparison,
@@ -705,6 +708,7 @@ function safeFundBaseFactor(db: DatabaseSync, code: string, asOf: string): { tra
 function buildQualityTiers(
   summary: any, screening: EtfCandidateScreenResult | null, gateSatisfied: boolean,
   accountStatus: string, gateReasons: { code: string }[], holdingsCount: number,
+  accountEvaluation: AccountStatusEvaluation | null,
 ): {
   market_data: { status: string; as_of: string | null; detail: string };
   etf_price: { status: string; ready: string[]; not_ready: string[]; detail: string };
@@ -720,6 +724,7 @@ function buildQualityTiers(
   const notReady: string[] = [...(quotes.stale ?? []), ...(quotes.not_ready ?? []), ...(quotes.missing ?? [])];
   const shareReasons: string[] = (summary?.holdings ?? []).flatMap((holding: any) => (holding.bar_reasons ?? [])
     .filter((reason: string) => /share_|adj_factor/.test(String(reason))));
+  if (screening?.data_coverage.status !== 'READY') shareReasons.push('候选筛选的份额或复权覆盖未全部READY');
   return {
     market_data: {
       status: marketReport.available ? (marketReport.freshness === 'same_day' ? 'READY' : 'STALE') : 'MISSING',
@@ -737,7 +742,7 @@ function buildQualityTiers(
     etf_share_adjustment: {
       status: shareReasons.length === 0 ? 'OK' : 'DEGRADED',
       detail: shareReasons.length === 0
-        ? '五只持仓的复权因子与份额均已找到（份额只影响净申购估计，不影响估值）'
+        ? '缓存未报告份额或复权缺口；逐只研究窗口仍需分别检查，份额不用于持仓估值'
         : `复权/份额存在缺口：${[...new Set(shareReasons)].join('; ')}`,
     },
     account_identity: {
@@ -748,20 +753,18 @@ function buildQualityTiers(
         : '账户身份未确认，账户数字只能作为研究数据',
     },
     account_trade_completeness: {
-      status: gateSatisfied ? 'CONFIRMED_THROUGH_TARGET_DATE' : 'UNCONFIRMED_RISK',
-      detail: gateSatisfied
-        ? '完整性声明覆盖目标交易日且账本无缺口'
-        : `交易完整性未确认：${gateReasons.map(reason => reason.code).join('、') || '未知'}`,
+      status: accountEvaluation?.ok && !accountEvaluation.unreported_trade_risk ? 'CONFIRMED_THROUGH_TARGET_DATE' : 'UNCONFIRMED_RISK',
+      detail: accountEvaluation?.ok && !accountEvaluation.unreported_trade_risk
+        ? '完整性声明覆盖目标交易日且账本门控通过'
+        : `账户完整性或账本门控未满足：${gateReasons.map(reason => reason.code).join('、') || '未知'}`,
     },
     research_evidence: {
       status: 'UNVERIFIED',
       detail: '没有经过前瞻检验的 RESEARCH_VERIFIED 证据；候选分数是启发式排序，不是换仓优势',
     },
     trade_plan_executability: {
-      status: gateSatisfied && notReady.length === 0 ? 'ELIGIBLE' : 'NOT_EXECUTABLE',
-      detail: gateSatisfied && notReady.length === 0
-        ? '账户门控与行情质量满足可执行前提'
-        : '不可执行：账户门控未满足或 ETF 行情未全部 READY',
+      status: 'NOT_EXECUTABLE',
+      detail: '本日报没有独立复核的优势证据或用户已确认的风险策略约束；账户与行情就绪仅是前提，研究情景始终不可执行。',
     },
   };
 }
@@ -778,261 +781,188 @@ function buildQualityTiers(
  * 所有方案恒为 `executable: false`：本模块没有经过验证的轮换优势，也不替用户下单。
  */
 function buildDecisionComparison(input: {
-  asOf: string;
-  holdings: HoldingAssessment[];
-  summary: any;
-  accountView: ReturnType<typeof buildAccountView>;
-  accountEvaluation: AccountStatusEvaluation | null;
-  screening: EtfCandidateScreenResult | null;
-  fees: FeeRules;
-  lots: LotRules;
-  gateReasons: { code: string; detail: string }[];
-  gateSatisfied: boolean;
+  asOf: string; holdings: HoldingAssessment[]; summary: any;
+  accountView: ReturnType<typeof buildAccountView>; accountEvaluation: AccountStatusEvaluation | null;
+  screening: EtfCandidateScreenResult | null; fees: FeeRules; lots: LotRules;
+  gateReasons: { code: string; detail: string }[]; gateSatisfied: boolean;
+  portfolioDb: DatabaseSync; marketDb: DatabaseSync | null | undefined; accountId: string;
+  feeOverride?: FeeRules; scenario?: DailyReportInput['researchScenario'];
 }): DecisionComparison {
-  const { asOf, holdings, accountView, accountEvaluation, screening, fees, lots, gateReasons, gateSatisfied } = input;
+  const { asOf, holdings, summary, accountView, accountEvaluation, lots, scenario } = input;
+  type Option = DecisionComparison['options'][number];
+  type Position = { ts_code: string; value: number; asset_class: AssetClass; theme: string; industry: string };
   const cash = accountView.revalued_basis.cash_cents;
-  const equityHoldings = holdings.filter(holding => (holding as any).research?.quote?.one_lot_cents !== undefined);
-  const focus = holdings.length
-    ? holdings.reduce((best, holding) => (holding.weight > best.weight ? holding : best))
-    : null;
-  const concentrationBefore = {
-    hhi: accountView.revalued_basis.hhi,
-    effective_positions: accountView.revalued_basis.hhi && accountView.revalued_basis.hhi > 0
-      ? r6(1 / accountView.revalued_basis.hhi) : null,
-    top_weight: focus?.weight ?? null,
-    equity_weight: input.summary?.portfolio?.by_asset_class?.find((row: any) => row.asset_class === 'EQUITY')?.weight ?? null,
+  const wealth = summary.portfolio?.wealth_cents ?? 0;
+  const facts = new Map<string, any>((summary.holdings ?? []).map((row: any) => [row.ts_code, row]));
+  const positions: Position[] = holdings.map(h => ({
+    ts_code: h.ts_code, value: h.market_value_cents,
+    asset_class: facts.get(h.ts_code)?.asset_class ?? 'UNKNOWN',
+    theme: facts.get(h.ts_code)?.theme ?? 'unknown', industry: facts.get(h.ts_code)?.industry ?? 'unclassified',
+  }));
+  const feeFor = (code: string, gross: number, side: 'buy' | 'sell') => {
+    const kind = input.marketDb && resolveInstrument(input.marketDb, code).kind === 'STOCK' ? 'STOCK' : 'ETF';
+    return calculateFees(gross, side, input.feeOverride ?? resolveFeeRules({
+      db: input.portfolioDb, accountId: input.accountId, code, kind, asOf,
+    }));
   };
+  const metrics = (rows: Position[], nextCash: number) => {
+    const total = rows.reduce((sum, p) => sum + p.value, 0) + nextCash + wealth;
+    const hhi = total > 0 ? r6(rows.reduce((sum, p) => sum + (p.value / total) ** 2, 0)) : null;
+    const byClass = ASSET_CLASSES.map(asset_class => {
+      const value = rows.filter(p => p.asset_class === asset_class).reduce((sum, p) => sum + p.value, 0);
+      return { asset_class, market_value_cents: value, weight: total > 0 ? r6(value / total) : 0 };
+    });
+    const exposure = (key: 'theme' | 'industry') => {
+      const groups = new Map<string, number>();
+      for (const p of rows) groups.set(p[key], (groups.get(p[key]) ?? 0) + p.value);
+      return [...groups].map(([key, value]) => ({ key, market_value_cents: value, weight: total > 0 ? r6(value / total) : 0 }));
+    };
+    return {
+      cash_after_cents: nextCash, total_assets_after_cents: total,
+      concentration_after: { hhi, effective_positions: hhi && hhi > 0 ? r6(1 / hhi) : null },
+      exposure_after: { equity_weight: byClass.find(row => row.asset_class === 'EQUITY')!.weight },
+      by_asset_class_after: byClass, theme_exposure_after: exposure('theme'), industry_exposure_after: exposure('industry'),
+      stress_after: {
+        equity_shock_pct: DEFAULT_ASSET_CLASS_STRESS.shocks.EQUITY,
+        loss_cents: rows.reduce((sum, p) => sum + Math.round(p.value * DEFAULT_ASSET_CLASS_STRESS.shocks[p.asset_class]), 0),
+        note: `按资产类别施加声明式压力（${DEFAULT_ASSET_CLASS_STRESS.version}）：权益-10%、债券-1%、黄金-5%、跨境-12%、未知-10%；现金与理财不计冲击，非预测或历史回撤。`,
+      },
+    };
+  };
+  const baseline = metrics(positions, cash);
+  const focus = holdings.length ? holdings.reduce((best, h) => h.weight > best.weight ? h : best) : null;
   const sellable: DecisionComparison['sellable'] = {};
-  for (const [code, row] of Object.entries(accountEvaluation?.sellable ?? {})) {
-    sellable[code] = { quantity: row.quantity, sellable_quantity: row.sellable_quantity, settlement_rule: row.settlement_rule };
-  }
-  const minEquityLot = holdings.length
-    ? Math.min(...holdings.map(holding => (holding as any).research?.quote?.one_lot_cents ?? Number.POSITIVE_INFINITY))
-    : null;
-  const minEquityLotCents = Number.isFinite(minEquityLot) ? minEquityLot : null;
-
-  const priceOf = (holding: HoldingAssessment) => holding.price_milli > 0 ? holding.price_milli : null;
-  const totalAssets = accountView.revalued_basis.total_assets_cents;
-  /** 交易后的 HHI：卖出持仓换成现金（现金权重上升），买入则从现金换成候选。 */
-  const concentrationAfter = (delta: { sellCode?: string; sellCents?: number; buyCents?: number }) => {
-    let sec = 0;
-    for (const holding of holdings) {
-      let value = holding.market_value_cents;
-      if (delta.sellCode && holding.ts_code === delta.sellCode) value = Math.max(0, value - (delta.sellCents ?? 0));
-      sec += value;
-    }
-    sec += delta.buyCents ?? 0;
-    const cashAfter = cash - (delta.buyCents ?? 0) + (delta.sellCents ?? 0);
-    const total = sec + cashAfter;
-    if (!(total > 0)) return { hhi: null, effective_positions: null };
-    const hhi = r6(holdings.reduce((sum, holding) => {
-      const value = delta.sellCode && holding.ts_code === delta.sellCode
-        ? Math.max(0, holding.market_value_cents - (delta.sellCents ?? 0))
-        : holding.market_value_cents;
-      return sum + (value / total) ** 2;
-    }, 0) + (cashAfter / total) ** 2);
-    return { hhi, effective_positions: hhi > 0 ? r6(1 / hhi) : null };
-  };
-  const stressOf = (equityCents: number, shockPct: number) => ({
-    equity_shock_pct: shockPct,
-    loss_cents: Math.round(equityCents * shockPct),
-    note: `声明式压力：对权益仓位施加 ${(shockPct * 100).toFixed(1)}% 冲击；不是收益预测，也不是历史回撤。`,
-  });
-
-  const notActionable = [
-    ...(gateSatisfied ? [] : gateReasons.map(reason => `${reason.code}: ${reason.detail}`)),
-    '没有可追溯的 RESEARCH_VERIFIED 轮动证据：相对优势未经前瞻检验（PRD §6）。',
+  for (const [code, row] of Object.entries(accountEvaluation?.sellable ?? {})) sellable[code] = { ...row };
+  const noExecution = [
+    ...input.gateReasons.map(reason => `${reason.code}: ${reason.detail}`),
+    '相对优势 UNVERIFIED；本次研究数量不是用户确认的策略约束或交易授权。',
   ];
-  if (!focus) notActionable.push('账户库中没有持仓，无法比较交易方案。');
-
-  // HOLD：不交易；机会成本来自持仓自身的下行风险与集中度。
-  const holdStress = stressOf(accountView.revalued_basis.securities_mv_cents, -0.10);
-  // REDUCE：以集中度最高的持仓为起点，卖出到“权益持仓不超过总资产 50%”所需的最小整手。
-  let reducePlan: DecisionComparison['options'][number]['sell_plan'] = null;
-  if (focus) {
-    const sellableRow = sellable[focus.ts_code] ?? { quantity: focus.quantity, sellable_quantity: focus.quantity, settlement_rule: 'unknown_no_ledger' };
-    const priceMilli = priceOf(focus);
-    if (priceMilli !== null) {
-      const oneLot = valueCents(lots.etf_lot_size, priceMilli);
-      const targetCents = Math.round(totalAssets * 0.5);
-      const excessCents = Math.max(0, focus.market_value_cents - targetCents);
-      const sharesForExcess = Math.ceil((excessCents * 10) / priceMilli);
-      const lotsToSell = Math.ceil(sharesForExcess / lots.etf_sell_multiple);
-      const maxLots = Math.floor(sellableRow.sellable_quantity / lots.etf_sell_multiple);
-      const quantity = Math.max(0, Math.min(lotsToSell, maxLots)) * lots.etf_sell_multiple;
-      if (quantity > 0) {
-        const gross = valueCents(quantity, priceMilli);
-        const fee = sellFeesCents(gross, fees);
-        const net = gross - fee;
-        reducePlan = {
-          ts_code: focus.ts_code, quantity, sellable_quantity: sellableRow.sellable_quantity,
-          settlement_rule: sellableRow.settlement_rule, one_lot_cents: oneLot,
-          gross_cents: gross, fees_cents: fee, net_cents: net, cash_after_cents: cash + net,
+  const option = (action: RotationScenario, label: string, text: string): Option => ({
+    action, label, summary: text, executable: false, not_actionable_because: [...noExecution],
+    ...baseline, fees_cents: 0, fee_breakdowns: [], quantity_basis: 'no_trade', funding_status: 'NO_TRADE',
+    opportunity_cost: '保留当前暴露会承担下行风险；卖出或换仓可能放弃后续上涨，并产生费用。',
+    sell_plan: null, rotation_plan: null,
+    invalidation_conditions: ['持仓、现金、费用模型、行情或可卖数量变化后重算；出现独立复核的相对优势证据后重新研究。'],
+    fact_meta: { as_of: asOf, source: 'research_summary + server_cache + portfolio_fee_model', quality: 'OK', claim_status: 'UNVERIFIED' },
+  });
+  const hold = option('HOLD', '继续持有，不交易', '保留现有持仓和现金；不把集中度或启发式分数当作卖出理由。');
+  const reduce = option('REDUCE', '显式数量减仓研究', '需要用户提供研究标的和数量；不按固定50%阈值生成卖量。');
+  const rotate = option('ROTATE', '显式数量轮动研究', '需要用户提供卖出、买入标的和整手数量；没有优势证据时不产生动作。');
+  const defensive = option('DEFENSIVE', '权益清零压力对照', '仅作权益清零压力对照，保留债券、黄金和跨境资产；受可卖数量与费用约束。');
+  const noAction = option('NO_ACTION', '没有充分证据时不操作', '缺少经过复核的相对优势证据或用户已确认的风险策略约束，明确不操作。');
+  reduce.quantity_basis = rotate.quantity_basis = scenario ? 'user_research_parameter' : 'not_provided';
+  reduce.funding_status = rotate.funding_status = 'QUANTITY_REQUIRED';
+  const reject = (target: Option, status: Option['funding_status'], detail: string) => {
+    target.funding_status = status;
+    target.summary = detail;
+    target.not_actionable_because.push(detail);
+    target.fact_meta.quality = 'DEGRADED';
+  };
+  let soldRows: Position[] | null = null;
+  if (scenario) {
+    const code = normalizeSecurityCode(scenario.sellCode);
+    const holding = holdings.find(h => h.ts_code === code);
+    const quantity = scenario.sellQuantity;
+    const availability = sellable[code];
+    if (!holding || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity % lots.etf_sell_multiple !== 0 || quantity > holding.quantity) {
+      reject(reduce, 'INVALID_QUANTITY', '研究卖量必须是持仓以内的正整数整手，不自动截断或补足。');
+    } else if (!availability) {
+      reject(reduce, 'SELLABILITY_UNKNOWN', '账本未提供可卖数量，不能假设全部持仓可卖。');
+    } else if (quantity > availability.sellable_quantity) {
+      reject(reduce, 'NOT_SELLABLE', `研究卖量超过截至${asOf}的可卖数量${availability.sellable_quantity}。`);
+    } else if (holding.bar_quality !== 'READY' || holding.latest_bar_date !== asOf || holding.price_source !== 'server_cache_close') {
+      reject(reduce, 'PRICE_UNAVAILABLE', '卖出标的缺少目标交易日可校验行情。');
+    } else {
+      const gross = valueCents(quantity, holding.price_milli);
+      const fee = feeFor(code, gross, 'sell');
+      const nextCash = cash + gross - fee.total_cents;
+      if (nextCash < 0) reject(reduce, 'INSUFFICIENT_CASH', '卖出后现金不足支付费用。');
+      else {
+        soldRows = positions.map(p => p.ts_code === code ? { ...p, value: valueCents(holding.quantity - quantity, holding.price_milli) } : { ...p });
+        Object.assign(reduce, metrics(soldRows, nextCash));
+        reduce.funding_status = 'FUNDED'; reduce.fees_cents = fee.total_cents;
+        reduce.fee_breakdowns = [{ ts_code: code, side: 'SELL', breakdown: fee }];
+        reduce.sell_plan = { ts_code: code, quantity, sellable_quantity: availability.sellable_quantity,
+          settlement_rule: availability.settlement_rule, one_lot_cents: valueCents(lots.etf_lot_size, holding.price_milli),
+          gross_cents: gross, fees_cents: fee.total_cents, net_cents: gross - fee.total_cents, cash_after_cents: nextCash };
+        reduce.summary = `研究卖出${quantity}份${code}，费用及滑点估计${fee.total_cents}分，现金${nextCash}分；仅示意。`;
+      }
+    }
+    if (!soldRows) reject(rotate, reduce.funding_status, reduce.summary);
+    else if (scenario.buyCode) {
+      const buyCode = normalizeSecurityCode(scenario.buyCode);
+      const resolved = input.marketDb ? resolveInstrument(input.marketDb, buyCode) : null;
+      const quote = input.marketDb && resolved?.kind === 'ETF' ? loadServerQuote(input.marketDb, buyCode, asOf, 'ETF') : null;
+      const quantity = scenario.buyQuantity ?? lots.etf_lot_size;
+      if (!Number.isSafeInteger(quantity) || quantity < lots.etf_min_buy || quantity % lots.etf_lot_size !== 0) {
+        reject(rotate, 'INVALID_QUANTITY', '研究买量必须满足最小买入份数和整手规则。');
+      } else if (!quote || quote.quality !== 'READY' || quote.trade_date !== asOf || quote.price === null) {
+        reject(rotate, 'PRICE_UNAVAILABLE', '候选必须是具有同日可校验行情的场内ETF。');
+      } else {
+        const price = Math.round(quote.price * 1000);
+        const basic = input.marketDb!.prepare('SELECT * FROM fund_basic WHERE ts_code=?').get(buyCode) as any;
+        const assetClass = classifyAssetClass(basic).asset_class;
+        const oneLot = valueCents(lots.etf_lot_size, price);
+        const gross = valueCents(quantity, price);
+        const buyFee = feeFor(buyCode, gross, 'buy');
+        const budget = reduce.cash_after_cents!;
+        const oneLotCost = oneLot + feeFor(buyCode, oneLot, 'buy').total_cents;
+        const funded = budget >= gross + buyFee.total_cents;
+        rotate.rotation_plan = {
+          buy_code: buyCode, buy_name: basic?.name ?? null, category: assetClass,
+          price_milli: price, one_lot_cents: oneLot, cash_sufficient_for_one_lot: budget >= oneLotCost,
+          quantity: funded ? quantity : null, fees_cents: funded ? buyFee.total_cents : null,
+          spend_cents: funded ? gross + buyFee.total_cents : null, cash_after_cents: funded ? budget - gross - buyFee.total_cents : null,
+          advantage_status: 'UNVERIFIED',
         };
+        if (!funded) reject(rotate, 'INSUFFICIENT_CASH', '卖出净回款与原现金不足支付候选整手金额及买入费用；整个轮动情景保持HOLD。');
+        else {
+          const rows = soldRows.map(p => ({ ...p }));
+          const existing = rows.find(p => p.ts_code === buyCode);
+          if (existing) existing.value += gross;
+          else rows.push({ ts_code: buyCode, value: gross, asset_class: assetClass, theme: THEME_BY_CODE[buyCode] ?? 'unknown', industry: INDUSTRY_BY_CODE[buyCode] ?? 'unclassified' });
+          Object.assign(rotate, metrics(rows, budget - gross - buyFee.total_cents));
+          rotate.funding_status = 'FUNDED'; rotate.sell_plan = reduce.sell_plan;
+          rotate.fees_cents = reduce.fees_cents + buyFee.total_cents;
+          rotate.fee_breakdowns = [...reduce.fee_breakdowns, { ts_code: buyCode, side: 'BUY', breakdown: buyFee }];
+          rotate.summary = `研究卖出${scenario.sellQuantity}份${code}并买入${quantity}份${buyCode}；双边费用及滑点估计${rotate.fees_cents}分，优势UNVERIFIED。`;
+        }
       }
     }
   }
-  // ROTATE：从候选池里选一个“买得起一手且不是持仓”的候选；只是资金可行性，不是优势。
-  const heldCodes = new Set(holdings.map(holding => holding.ts_code));
-  const candidate = (screening?.candidates ?? [])
-    .filter((row: EtfCandidateRow) => !heldCodes.has(row.ts_code) && row.data.latest_close_milli !== null)
-    .sort((a: EtfCandidateRow, b: EtfCandidateRow) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null;
-  const candidateLot = candidate?.data.latest_close_milli != null
-    ? valueCents(lots.etf_lot_size, candidate.data.latest_close_milli) : null;
-  const rotationSpend = reducePlan && candidateLot !== null ? Math.min(candidateLot, reducePlan.net_cents) : null;
-  const rotationPlan: DecisionComparison['options'][number]['rotation_plan'] = candidate ? {
-    buy_code: candidate.ts_code,
-    buy_name: candidate.name ?? null,
-    category: candidate.category,
-    price_milli: candidate.data.latest_close_milli,
-    one_lot_cents: candidateLot,
-    cash_sufficient_for_one_lot: candidateLot === null ? null : cash >= candidateLot,
-    spend_cents: rotationSpend,
-    cash_after_cents: rotationSpend === null ? null : cash + (reducePlan?.net_cents ?? 0) - rotationSpend,
-    advantage_status: 'UNVERIFIED',
-  } : null;
-
-  // DEFENSIVE：把权益仓位降到零（只保留现金），用于衡量下行敞口的上限。
-  const defensiveCash = cash + accountView.revalued_basis.securities_mv_cents;
-
-  const reasonSummary = (extra: string) => [...notActionable, extra];
-  const options: DecisionComparison['options'] = [
-    {
-      action: 'HOLD',
-      label: '继续持有，不交易',
-      summary: `不改变任何持仓与现金；当前权益权重 ${((concentrationBefore.equity_weight ?? 0) * 100).toFixed(2)}%，HHI ${concentrationBefore.hhi ?? '不可用'}。`,
-      executable: false,
-      not_actionable_because: reasonSummary('HOLD 是“不操作”的研究姿态；在行情与账户门控齐全时仍然不是下单动作。'),
-      cash_after_cents: cash,
-      concentration_after: concentrationAfter({}),
-      exposure_after: { equity_weight: concentrationBefore.equity_weight },
-      stress_after: holdStress,
-      opportunity_cost: '继续持有承担集中度与主题下行风险；若持仓后续跑输宽基，机会成本即相对收益差。',
-      sell_plan: null,
-      rotation_plan: null,
-      invalidation_conditions: [
-        '任一只持仓收盘跌破最近 20 日最低收盘后重新评估。',
-        '相对沪深300 的 20 日超额收益持续为负且扩大。',
-        '出现可追溯的 RESEARCH_VERIFIED 轮动证据。',
-      ],
-      fact_meta: {
-        as_of: asOf, source: 'portfolio_daily_report:hold', quality: 'OK', claim_status: 'FACT',
-        detail: '权重、HHI 与压力损失由程序从当日缓存计算。',
-      },
-    },
-    {
-      action: 'REDUCE',
-      label: '部分降低集中暴露',
-      summary: reducePlan
-        ? `卖出 ${reducePlan.quantity} 份 ${focus?.ts_code}（占可卖 ${reducePlan.sellable_quantity} 份），净回款 ${(reducePlan.net_cents / 100).toFixed(2)} 元，预计现金升至 ${(reducePlan.cash_after_cents / 100).toFixed(2)} 元。`
-        : '无法给出最小整手卖出量：缺少可卖数量或当日价格；不臆造数量。',
-      executable: false,
-      not_actionable_because: reasonSummary('集中度是风险披露；没有经过验证的相对优势时，降低集中度不是被证明更优的动作。'),
-      cash_after_cents: reducePlan?.cash_after_cents ?? null,
-      concentration_after: concentrationAfter(reducePlan ? { sellCode: reducePlan.ts_code, sellCents: reducePlan.gross_cents } : {}),
-      exposure_after: { equity_weight: concentrationBefore.equity_weight === null || !reducePlan || !totalAssets
-        ? null : r6(Math.max(0, accountView.revalued_basis.securities_mv_cents - reducePlan.gross_cents) / (totalAssets - reducePlan.fees_cents)) },
-      stress_after: reducePlan
-        ? stressOf(Math.max(0, accountView.revalued_basis.securities_mv_cents - reducePlan.gross_cents), -0.10)
-        : null,
-      opportunity_cost: '卖出后若持仓反弹，未实现的上涨由用户承担；费用与滑点按假设值扣除。',
-      sell_plan: reducePlan,
-      rotation_plan: null,
-      invalidation_conditions: [
-        '该持仓的可卖数量因 T+1 或未上报成交而变化。',
-        '集中度降至研究阈值以下后不再需要审视。',
-      ],
-      fact_meta: {
-        as_of: asOf, source: 'portfolio_daily_report:reduce', quality: reducePlan ? 'OK' : 'DEGRADED', claim_status: 'FACT',
-        detail: '数量与费用由程序计算；费率为假设值。',
-      },
-    },
-    {
-      action: 'ROTATE',
-      label: '权益内部轮动',
-      summary: rotationPlan
-        ? `候选 ${rotationPlan.buy_code}（${rotationPlan.category}）一手 ${((rotationPlan.one_lot_cents ?? 0) / 100).toFixed(2)} 元；现金${rotationPlan.cash_sufficient_for_one_lot ? '足够' : '不足'}买入一手。`
-        : '候选池没有可用的非持仓候选，无法给出轮动测算。',
-      executable: false,
-      not_actionable_because: reasonSummary('轮动候选只是启发式排序；优势状态为 UNVERIFIED，不能据此换仓。'),
-      cash_after_cents: rotationPlan?.cash_after_cents ?? null,
-      // 轮动只比较“卖出所得资金 + 现有现金是否够买一手”。若资金不足，不假设
-      // 额外卖出（那会变成第二个未测算的卖出计划），交易后组合保持与 HOLD 相同。
-      concentration_after: rotationPlan && rotationPlan.spend_cents !== null && reducePlan
-        ? concentrationAfter({ sellCode: reducePlan.ts_code, sellCents: reducePlan.gross_cents, buyCents: rotationPlan.spend_cents })
-        : concentrationAfter({}),
-      exposure_after: { equity_weight: concentrationBefore.equity_weight },
-      stress_after: rotationPlan ? stressOf(accountView.revalued_basis.securities_mv_cents, -0.10) : null,
-      opportunity_cost: '换仓可能卖掉后续表现更好的持仓；新候选的跟踪误差、流动性与折溢价未经验证。',
-      sell_plan: null,
-      rotation_plan: rotationPlan,
-      invalidation_conditions: [
-        '候选在下一交易日停牌、涨跌停或流动性不足。',
-        '候选相对持仓的相对强弱转为不利。',
-        '证据被撤回、过期或无法复核。',
-      ],
-      fact_meta: {
-        as_of: candidate?.data.latest_bar_date ?? asOf, source: 'etf_candidate_screen', quality: candidate?.status === 'OK' ? 'OK' : 'DEGRADED', claim_status: 'UNVERIFIED',
-        detail: '候选筛选分数是启发式排序，不是相对优势证据。',
-      },
-    },
-    {
-      action: 'DEFENSIVE',
-      label: '必要时降低权益风险',
-      summary: `若清空权益仓位，证券市值 ${(accountView.revalued_basis.securities_mv_cents / 100).toFixed(2)} 元转为现金，总现金 ${(defensiveCash / 100).toFixed(2)} 元；损失上限换为机会成本。`,
-      executable: false,
-      not_actionable_because: reasonSummary('这是压力情景的上限测算，不是建议清仓；没有证据支持把全部权益转为现金。'),
-      cash_after_cents: defensiveCash,
-      concentration_after: { hhi: totalAssets > 0 ? 1 : null, effective_positions: totalAssets > 0 ? 1 : null },
-      exposure_after: { equity_weight: 0 },
-      stress_after: stressOf(0, -0.10),
-      opportunity_cost: '清仓后市场反弹的收益全部放弃；现金长期跑输权益的历史经验不构成未来保证。',
-      sell_plan: null,
-      rotation_plan: null,
-      invalidation_conditions: ['仅在出现可复核的系统性风险事实时重新评估；不得由单一阈值自动触发。'],
-      fact_meta: {
-        as_of: asOf, source: 'portfolio_daily_report:defensive', quality: 'OK', claim_status: 'FACT',
-        detail: '只是把当前证券市值记为可转为现金的上限；未计算真实卖出冲击。',
-      },
-    },
-    {
-      action: 'NO_ACTION',
-      label: '没有充分证据时不操作',
-      summary: '在行情、账户完整性或研究证据不足时，明确不操作，并保留观察触发条件。',
-      executable: false,
-      not_actionable_because: reasonSummary('NO_ACTION 本身就是结论：缺少可复核的优势证据。'),
-      cash_after_cents: cash,
-      concentration_after: concentrationAfter({}),
-      exposure_after: { equity_weight: concentrationBefore.equity_weight },
-      stress_after: holdStress,
-      opportunity_cost: '不操作的代价与 HOLD 相同；区别是它明确承认“没有证据”，而不是把缺失当结论。',
-      sell_plan: null,
-      rotation_plan: null,
-      invalidation_conditions: [
-        '行情补齐并 READY。',
-        '账户交易完整性声明覆盖目标交易日。',
-        '出现可追溯的 RESEARCH_VERIFIED 证据。',
-      ],
-      fact_meta: {
-        as_of: asOf, source: 'portfolio_daily_report:no_action', quality: 'OK', claim_status: 'FACT',
-        detail: '状态语义事实，不是市场判断。',
-      },
-    },
-  ];
-
+  // A named stress comparison, never an automatically generated sell instruction.
+  defensive.quantity_basis = 'equity_liquidation_stress_only';
+  let defensiveCash = cash;
+  let defensiveStatus: Option['funding_status'] = 'FUNDED';
+  const defensiveFees: Option['fee_breakdowns'] = [];
+  for (const position of positions.filter(p => p.asset_class === 'EQUITY' && p.value > 0)) {
+    const holding = holdings.find(h => h.ts_code === position.ts_code)!;
+    const available = sellable[position.ts_code];
+    if (!available) defensiveStatus = 'SELLABILITY_UNKNOWN';
+    else if (available.sellable_quantity < holding.quantity || holding.quantity % lots.etf_sell_multiple !== 0) defensiveStatus = 'NOT_SELLABLE';
+    else if (holding.bar_quality !== 'READY' || holding.latest_bar_date !== asOf) defensiveStatus = 'PRICE_UNAVAILABLE';
+    const fee = feeFor(position.ts_code, position.value, 'sell');
+    defensiveCash += position.value - fee.total_cents;
+    defensiveFees.push({ ts_code: position.ts_code, side: 'SELL', breakdown: fee });
+  }
+  if (defensiveCash < 0) defensiveStatus = 'INSUFFICIENT_CASH';
+  if (defensiveStatus === 'FUNDED') {
+    Object.assign(defensive, metrics(positions.map(p => p.asset_class === 'EQUITY' ? { ...p, value: 0 } : p), defensiveCash));
+    defensive.fees_cents = defensiveFees.reduce((sum, row) => sum + row.breakdown.total_cents, 0);
+    defensive.fee_breakdowns = defensiveFees;
+    defensive.funding_status = 'FUNDED';
+  } else reject(defensive, defensiveStatus, '权益清零对照因可卖性、行情或费用约束无法成立；保持HOLD，不伪造清仓回款。');
+  const equityLots = holdings.filter(h => facts.get(h.ts_code)?.asset_class === 'EQUITY' && h.bar_quality === 'READY')
+    .map(h => { const gross = valueCents(lots.etf_lot_size, h.price_milli); return gross + feeFor(h.ts_code, gross, 'buy').total_cents; });
+  const minLot = equityLots.length ? Math.min(...equityLots) : null;
   return {
     as_of_trade_date: asOf,
     focus: focus ? { ts_code: focus.ts_code, name: focus.name, weight: focus.weight, market_value_cents: focus.market_value_cents, quantity: focus.quantity } : null,
-    cash: {
-      before_cents: cash,
-      min_equity_lot_cents: minEquityLotCents,
-      sufficient_for_one_lot: minEquityLotCents === null ? null : cash >= minEquityLotCents,
-    },
-    concentration_before: concentrationBefore,
-    sellable,
-    options,
-    note: '五个方案都只是研究比较，全部 executable=false。集中度阈值只用于选择研究起点，'
-      + '不作为自动卖出指令；费用、滑点与压力幅度均为假设值。',
+    cash: { before_cents: cash, min_equity_lot_cents: minLot, sufficient_for_one_lot: minLot === null ? null : cash >= minLot },
+    concentration_before: { hhi: baseline.concentration_after.hhi, effective_positions: baseline.concentration_after.effective_positions,
+      top_weight: focus?.weight ?? null, equity_weight: baseline.exposure_after.equity_weight },
+    sellable, options: [hold, reduce, rotate, defensive, noAction],
+    note: '五方案均为非执行研究比较。HHI仅累加证券权重平方，分母含现金与理财；现金不作为证券加入分子。数量来自显式研究参数，费用采用账户/代码模型；缺乏优势与已确认风险策略时不生成交易动作。',
   };
 }
 
@@ -1049,6 +979,7 @@ function buildDecisionComparison(input: {
 function buildAccountView(
   snapshot: AccountSnapshot | undefined, accountId: string, holdings: HoldingAssessment[],
   concentration: { hhi: number | null; effective_positions: number | null }, asOf: string,
+  portfolio: any,
 ): {
   as_of_trade_date: string;
   account_id_in_report: string;
@@ -1072,12 +1003,12 @@ function buildAccountView(
     ? r6(positions.reduce((sum, position) => sum + (position.market_value_cents / snapshotTotal) ** 2, 0))
     : null;
   const revaluedSecurities = holdings.reduce((sum, holding) => sum + holding.market_value_cents, 0);
-  const revaluedCash = snapshot?.totals.cash_cents ?? 0;
-  const revaluedWealth = snapshot?.totals.wealth_cents ?? 0;
+  const revaluedCash = portfolio?.cash_cents ?? 0;
+  const revaluedWealth = portfolio?.wealth_cents ?? 0;
   const revaluedTotal = revaluedSecurities + revaluedCash + revaluedWealth;
   const fallbackCodes = holdings.filter(holding => holding.price_source !== 'server_cache_close').map(holding => holding.ts_code);
   const quantityByCode = new Map(positions.map(position => [position.ts_code, position.quantity]));
-  const quantityConsistent = holdings.every(holding => quantityByCode.get(holding.ts_code) === holding.quantity);
+  const quantityConsistent = holdings.length === positions.length && holdings.every(holding => quantityByCode.get(holding.ts_code) === holding.quantity);
   return {
     as_of_trade_date: asOf,
     account_id_in_report: accountId,
@@ -1103,7 +1034,7 @@ function buildAccountView(
     reconciliation: [
       {
         field: 'cash_cents', snapshot: snapshotCash, revalued: revaluedCash,
-        explanation: '现金直接取自用户确认的快照；日报不会重估现金。',
+        explanation: '重估现金来自目标交易日账户状态（基线及已记录事件）；快照现金保留作对照。',
       },
       {
         field: 'securities_mv_cents', snapshot: snapshotSecurities, revalued: revaluedSecurities,
@@ -1111,7 +1042,7 @@ function buildAccountView(
       },
       {
         field: 'total_assets_cents', snapshot: snapshotTotal, revalued: revaluedTotal,
-        explanation: '快照总资产 + 证券重估差额；现金与理财不变，因此差额只来自行情变动。',
+        explanation: '目标日账户持仓按收盘重估，加目标日现金与理财；与基线差异可来自事件及价格。',
       },
       {
         field: 'hhi', snapshot: snapshotHhi, revalued: concentration.hhi,
@@ -1119,8 +1050,8 @@ function buildAccountView(
       },
     ],
     note: quantityConsistent
-      ? '证券数量与用户确认的快照逐只一致；市值/HHI 的差异只来自价格口径（快照参考价 vs 当日收盘）。'
-      : '证券数量与快照不一致：必须先核对账户事件，再使用任何可执行数量。',
+      ? '证券数量与参考快照一致；现金、市值和HHI按目标日账户状态与收盘行情计算。'
+      : '目标日证券数量与参考快照不同；差异须结合已记录账户事件核对，不把旧快照当作重建后的余额。',
   };
 }
 
@@ -1180,178 +1111,27 @@ interface ActionContext {
   candidates: EtfCandidateScreenResult | null;
 }
 
-function legOf(
-  side: 'SELL' | 'BUY', code: string, name: string | null, quantity: number | null,
-  priceMilli: number | null, quoteTradeDate: string | null, ctx: ActionContext, gateReason: string | null,
-): ActionLeg {
-  const lotSize = ctx.lots.etf_lot_size;
-  const lots = quantity === null ? null : Math.floor(quantity / lotSize);
-  const gross = quantity !== null && priceMilli !== null ? valueCents(quantity, priceMilli) : null;
-  const fee = gross === null ? null : side === 'SELL' ? sellFeesCents(gross, ctx.fees) : buyFeesCents(gross, ctx.fees);
-  const net = gross === null || fee === null ? null : side === 'SELL' ? gross - fee : -(gross + fee);
-  return {
-    side, ts_code: code, name, quantity, lot_size: lotSize, lots,
-    price_milli: priceMilli, gross_cents: gross, fees_cents: fee, net_cents: net,
-    quote_trade_date: quoteTradeDate,
-    executable: ctx.gateSatisfied && gateReason === null,
-    reason: ctx.gateSatisfied ? gateReason : (gateReason ?? 'account_gate_unsatisfied'),
-  };
-}
-
-/**
- * 选择动作。优先级（PRD §9）：重大持仓风险 → 现有仓位审视 → 再配置 → 新机会。
- * 本实现只用**可复核的事实**：行情质量、市场证据方向、候选与现金的比较。
- * 没有满足条件的事实时不生成动作，由调用方返回 NO_ACTION。
- *
- * 注意：“等待行情补齐”不是交易动作，不能算作 0–3 个动作之一；它作为
- * `blockers` 返回，由调用方并入 NO_ACTION 的观察触发条件。
- */
+/** Research scores and concentration do not authorize a sale. Until a persisted,
+ * user-confirmed risk policy or independently verified advantage is available,
+ * the action section must explicitly conclude NO_ACTION. Scenario quantities
+ * live in decision_comparison and never become executable legs. */
 function buildActions(ctx: ActionContext): { actions: ActionPlan[]; blockers: string[] } {
-  const { summary, asOf } = ctx;
-  const actions: ActionPlan[] = [];
-  const blockers: string[] = [];
-  const holdings: any[] = Array.isArray(summary.holdings) ? summary.holdings : [];
-  const evidence = summary.market_evidence ?? { support: [], contradiction: [] };
-  const staleHoldings = holdings.filter(holding => holding.bar_quality !== 'READY');
-  const topHolding = holdings.length > 0 ? holdings.reduce((a, b) => (b.weight > a.weight ? b : a)) : null;
-  const concentration = summary.portfolio?.concentration ?? { hhi: null, effective_positions: null };
-
-  // ---- 行情过期/缺失：任何动作都不可靠 → 不生成动作，只记录阻塞原因。
-  if (staleHoldings.length > 0) {
-    const codes = staleHoldings.map(holding => holding.ts_code);
-    blockers.push(
-      `${codes.join('、')} 的最新 bar 不是目标交易日或缺失；行情补齐前不生成任何交易动作。`,
-      '触发条件：目标交易日的 fund_daily 收盘 bar 落库且通过 OHLC 校验，行情质量回到 READY。',
-      '失效条件：出现新的、可复核的重大持仓风险事实时，本等待结论立即失效并重新评估。',
-    );
-    return { actions, blockers };
-  }
-
-  // ---- 动作 2：集中度 + 市场反证 → 降低单一持仓（只示意，不猜数量）
-  const contradictionCount = Array.isArray(evidence.contradiction) ? evidence.contradiction.length : 0;
-  const supportCount = Array.isArray(evidence.support) ? evidence.support.length : 0;
-  if (topHolding && contradictionCount > supportCount && topHolding.weight >= 0.5) {
-    const sellShares = Math.floor(topHolding.quantity / ctx.lots.etf_sell_multiple) * ctx.lots.etf_sell_multiple;
-    // 只给“降低到总资产 50% 以下”所需的最小整手数量，作为**示意**，不是建议数量。
-    const totalAssetsCents = summary.portfolio?.total_assets_cents ?? 0;
-    const targetCents = Math.round(totalAssetsCents * 0.5);
-    const excessCents = Math.max(0, topHolding.market_value_cents - targetCents);
-    const sharesForExcess = topHolding.price_milli > 0 ? Math.ceil((excessCents * 10) / topHolding.price_milli) : 0;
-    const illustrativeShares = Math.min(
-      sellShares,
-      Math.ceil(sharesForExcess / ctx.lots.etf_sell_multiple) * ctx.lots.etf_sell_multiple,
-    );
-    const quantity = illustrativeShares > 0 ? illustrativeShares : null;
-    // 这个动作由"集中度阈值 + 未经验证的市场证据计数"触发，两者都是研究判断，
-    // 不是可追溯的 RESEARCH_VERIFIED 证据。因此它永远只能是示意：即使账户门控
-    // 全部满足，也不得据此生成可执行的卖出腿（PRD §6/§7）。
-    const leg = legOf('SELL', topHolding.ts_code, topHolding.name, quantity, topHolding.price_milli,
-      topHolding.latest_bar_date, ctx,
-      quantity === null ? 'quantity_unavailable' : 'concentration_threshold_unverified');
-    actions.push({
-      code: 'REDUCE_CONCENTRATION',
-      kind: 'REDUCE',
-      rank: 2,
-      title: `审视 ${topHolding.name}（${topHolding.ts_code}）的集中度`,
-      reasons: [
-        `${topHolding.ts_code} 权重 ${(topHolding.weight * 100).toFixed(2)}%，占总资产一半以上`,
-        `市场反证 ${contradictionCount} 项多于支持 ${supportCount} 项（见市场证据）`,
-        `组合 HHI ${concentration.hhi}，有效持仓数 ${concentration.effective_positions}`,
-        '集中度阈值与市场证据计数都是研究判断（UNVERIFIED），本身不构成可执行的卖出依据；'
-          + '只有可追溯的 RESEARCH_VERIFIED 证据才能把该动作升级为可执行。',
-      ],
-      counter_evidence: [
-        '集中度本身不是卖出理由；降低集中度也不意味着必须清空该资产（PRD §6）。',
-        '若行业相对强弱仍为正，减仓可能带来机会成本。',
-        '浮亏状态不构成必须等待回本的理由，也不构成必须卖出的理由。',
-      ],
-      legs: [leg],
-      illustrative: { executable: false, legs: [{ ...leg, executable: false }] },
-      fees_cents: leg.fees_cents,
-      fees_assumed: true,
-      triggers: [
-        `下一交易日收盘价仍低于 ${topHolding.latest_bar_date} 的收盘参考，且市场反证未减少`,
-        '用户已确认当前账户与可用现金口径',
-      ],
-      invalidation_conditions: [
-        '市场证据转为支持项占多数，且该持仓行业相对强弱转正',
-        '出现可复核的重大基本面事实改变集中度判断',
-      ],
-      risk_impact: [
-        '降低单一标的暴露，同时等比例降低上涨参与度',
-        '卖出回款进入现金，现金比例上升；不自动买入替代资产',
-      ],
-      fact_meta: {
-        // 权重、HHI 与证据计数是程序计算的**事实**，但这个动作本身（"因此应减仓"）
-        // 是研究推断，没有可追溯的 VERIFIED 证据支持，因此整条动作标为 UNVERIFIED。
-        as_of: topHolding.latest_bar_date, source: 'research_summary + fund_daily', quality: 'OK', claim_status: 'UNVERIFIED',
-        detail: '权重、HHI 与证据计数都是程序计算的事实；"因此应减仓"这一步是研究判断，'
-          + '未经前瞻验证，也不构成可执行交易依据。',
-      },
-    });
-  }
-
-  // ---- 动作 3：候选 vs 现金 → 轮动示意（只在现金不足/候选更优时提出）
-  const competition = buildCandidateCashCompetition(summary, ctx.candidates, ctx.lots);
-  const bestCandidate = competition.entries.find(entry =>
-    entry.price_milli !== null && entry.cash_sufficient_for_one_lot === false && entry.status !== 'DEGRADED');
-  if (bestCandidate && actions.length < 3) {
-    const sellHolding = topHolding ?? holdings[0] ?? null;
-    const buyLeg = legOf('BUY', bestCandidate.ts_code, bestCandidate.name, bestCandidate.one_lot_cents && bestCandidate.price_milli
-      ? Math.floor((bestCandidate.one_lot_cents * 10) / bestCandidate.price_milli / ctx.lots.etf_lot_size) * ctx.lots.etf_lot_size
-      : null, bestCandidate.price_milli, null, ctx, 'candidate_quote_date_unknown');
-    const sellLeg = sellHolding
-      ? legOf('SELL', sellHolding.ts_code, sellHolding.name,
-        Math.floor(sellHolding.quantity / ctx.lots.etf_sell_multiple) * ctx.lots.etf_sell_multiple,
-        sellHolding.price_milli, sellHolding.latest_bar_date, ctx, 'rotation_advantage_unverified')
-      : null;
-    actions.push({
-      code: 'ROTATE_CANDIDATE_VS_CASH',
-      kind: 'ROTATE',
-      rank: actions.length + 1,
-      title: `比较 ${bestCandidate.name ?? bestCandidate.ts_code} 与现金`,
-      reasons: [
-        `现金 ${((competition.cash_cents ?? 0) / 100).toFixed(2)} 元不足以买入一手候选（一手约 ${((bestCandidate.one_lot_cents ?? 0) / 100).toFixed(2)} 元）`,
-        `候选 ${bestCandidate.ts_code} 的筛选状态 ${bestCandidate.status}，启发式分 ${bestCandidate.score ?? '不可用'}`,
-        '候选筛选只是研究排序，不构成相对优势证据。',
-      ],
-      counter_evidence: [
-        '没有可追溯的 RESEARCH_VERIFIED 研究证据，轮动优势按 UNVERIFIED 处理（PRD §6）。',
-        '卖出持仓会改变行业暴露，且可能承担冲击成本。',
-        '现金本身是合法的防御仓位。',
-      ],
-      legs: sellLeg ? [sellLeg, buyLeg] : [buyLeg],
-      illustrative: { executable: false, legs: (sellLeg ? [sellLeg, buyLeg] : [buyLeg]).map(leg => ({ ...leg, executable: false })) },
-      fees_cents: (sellLeg?.fees_cents ?? 0) + (buyLeg.fees_cents ?? 0),
-      fees_assumed: true,
-      triggers: [
-        '候选有与卖出标的同日的缓存行情，且价格未被标记为过期',
-        '用户确认当前账户与可用现金',
-        '出现可追溯的轮动优势研究证据（evidence_id）',
-      ],
-      invalidation_conditions: [
-        '候选在下一交易日停牌、涨跌停或流动性不足',
-        '候选相对持仓的行业相对强弱转为不利',
-        '账户现金已足够买入一手候选，无需卖出',
-      ],
-      risk_impact: [
-        '换仓前后行业集中度与资产类别暴露需要重新核对',
-        '费用按假设值扣除，真实费用以券商对账单为准',
-      ],
-      fact_meta: {
-        as_of: asOf, source: 'etf_candidate_screen + research_summary', quality: 'DEGRADED', claim_status: 'UNVERIFIED',
-        detail: '候选筛选状态与分数是程序计算；相对优势主张未经前瞻检验。',
-      },
-    });
-  }
-
-  return { actions: actions.slice(0, 3), blockers };
+  const stale = (ctx.summary.holdings ?? []).filter((holding: any) => holding.bar_quality !== 'READY');
+  return {
+    actions: [],
+    blockers: stale.length ? [
+      `${stale.map((holding: any) => holding.ts_code).join('、')} 缺少目标交易日可校验行情。`,
+      '触发条件：补齐收盘行情和复权数据后重算。',
+      '失效条件：目标交易日、账户状态或行情被更正。',
+    ] : [],
+  };
 }
 
 // ---------------------------------------------------------------- 候选 vs 现金
 
 function buildCandidateCashCompetition(
   summary: any, screening: EtfCandidateScreenResult | null, lots: LotRules,
+  context: { portfolioDb: DatabaseSync; accountId: string; asOf: string; feeOverride?: FeeRules },
 ): CandidateCashCompetition {
   const cashCents: number | null = typeof summary?.portfolio?.cash_cents === 'number' ? summary.portfolio.cash_cents : null;
   if (!screening) {
@@ -1366,6 +1146,11 @@ function buildCandidateCashCompetition(
   const entries = screening.candidates.slice(0, 8).map((candidate: EtfCandidateRow) => {
     const priceMilli = candidate.data.latest_close_milli;
     const lotCost = oneLotCents(priceMilli, lots.etf_lot_size);
+    const fees = lotCost === null ? null : calculateFees(lotCost, 'buy', context.feeOverride ?? resolveFeeRules({
+      db: context.portfolioDb, accountId: context.accountId, code: candidate.ts_code, kind: 'ETF', asOf: context.asOf,
+    })).total_cents;
+    const totalCost = lotCost === null || fees === null ? null : lotCost + fees;
+    const fresh = candidate.data.latest_bar_date === context.asOf;
     return {
       ts_code: candidate.ts_code,
       name: candidate.name,
@@ -1374,7 +1159,9 @@ function buildCandidateCashCompetition(
       score: candidate.score,
       price_milli: priceMilli,
       one_lot_cents: lotCost,
-      cash_sufficient_for_one_lot: lotCost === null || cashCents === null ? null : cashCents >= lotCost,
+      one_lot_total_cents: totalCost,
+      fees_cents: fees,
+      cash_sufficient_for_one_lot: !fresh || totalCost === null || cashCents === null ? null : cashCents >= totalCost,
       note: candidate.status === 'DEGRADED'
         ? `候选数据降级：${candidate.status_reasons.join('; ') || '缓存缺表或字段'}`
         : `一手 ${lots.etf_lot_size} 份；价格为 ${candidate.data.latest_bar_date ?? '缺失'} 的缓存收盘`,
@@ -1401,9 +1188,15 @@ function buildCandidateCashCompetition(
 export function buildDailyReport(input: DailyReportInput): DailyReportResult {
   const asOf = String(input.asOfTradeDate ?? '').trim();
   if (!YMD.test(asOf)) throw new Error('as_of_trade_date 需要 YYYYMMDD 格式');
+  const parsedDate = new Date(`${asOf.slice(0, 4)}-${asOf.slice(4, 6)}-${asOf.slice(6, 8)}T00:00:00Z`);
+  if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10).replace(/-/g, '') !== asOf) throw new Error('as_of_trade_date 不是有效日期');
+  if (input.generatedAt != null && !Number.isFinite(Date.parse(input.generatedAt))) throw new Error('generatedAt 需要有效ISO时间');
   const { portfolioDb, marketDb, accountId } = input;
   const fees = input.fees ?? DEFAULT_FEE_RULES;
   const lots = input.lots ?? DEFAULT_LOT_RULES;
+  for (const size of [lots.etf_lot_size, lots.etf_sell_multiple, lots.etf_min_buy]) {
+    if (!Number.isSafeInteger(size) || size <= 0) throw new Error('交易单位必须为正整数');
+  }
   const maxActions = input.maxActions === undefined ? 3 : Math.max(0, Math.min(3, Math.trunc(input.maxActions)));
 
   // 复用研究摘要：持仓、行情质量、市场环境与证据都来自这里，不重复实现。
@@ -1415,9 +1208,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     snapshotId: input.snapshotId,
   });
 
-  const snapshot: AccountSnapshot | undefined = input.snapshotId
-    ? readSnapshot(portfolioDb, input.snapshotId)
-    : latestSnapshot(portfolioDb);
+  const snapshot: AccountSnapshot | undefined = resolveAccountSnapshot(portfolioDb, accountId, input.snapshotId).snapshot;
 
   // 账户门控：必须与 decision.ts 的 evaluateAccountStatus 同源，否则会出现
   // "决策说可执行、日报说不可执行"两套口径。这里直接调用同一个门控函数。
@@ -1553,7 +1344,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
   });
 
   // 独立数据质量维度（D1）：在持仓与门控都算完之后统一生成。
-  const qualityTiers = buildQualityTiers(summary, screening, gateSatisfied, accountStatus, gateReasons, holdings.length);
+  const qualityTiers = buildQualityTiers(summary, screening, gateSatisfied, accountStatus, gateReasons, holdings.length, accountEvaluation);
 
   const dataQualityNotes: string[] = [];
   if (!screening) dataQualityNotes.push('候选池筛选不可用（缓存缺少 fund_* 表或未提供市场缓存）');
@@ -1590,30 +1381,27 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     },
   ];
 
-  const reportId = createHash('sha256').update(JSON.stringify({
-    schema: DAILY_REPORT_SCHEMA,
-    account_id: accountId,
-    snapshot_id: snapshot?.snapshot_id ?? null,
-    as_of_trade_date: asOf,
-    account_status: accountStatus,
-    gate_satisfied: gateSatisfied,
-    status,
-    actions: normalizedActions.map(action => [action.code, action.legs.map(leg => [leg.side, leg.ts_code, leg.quantity, leg.price_milli])]),
-    holdings: holdings.map(holding => [holding.ts_code, holding.quantity, holding.price_milli, holding.bar_quality]),
-    screening_status: screening?.data_coverage.status ?? null,
-  })).digest('hex');
-
-  const concentration = summary.portfolio?.concentration ?? { hhi: null, effective_positions: null };
+  const reportTotal = summary.portfolio?.total_assets_cents ?? 0;
+  const reportHhi = reportTotal > 0 ? r6(holdings.reduce((sum, h) => sum + (h.market_value_cents / reportTotal) ** 2, 0)) : null;
+  const concentration = { hhi: reportHhi, effective_positions: reportHhi && reportHhi > 0 ? r6(1 / reportHhi) : null };
   const equityClass = (summary.portfolio?.by_asset_class ?? []).find((row: any) => row.asset_class === 'EQUITY');
   // 与私有 MCP / CLI 的账户口径保持一致：集中度用**同一份快照**（持仓数量 × 当前收盘价）
   // 计算。`mergeAccountViews` 会同时返回账户汇总口径与日报口径，并显式说明差异来源
   // （是否使用当日收盘重估、是否含现金/理财），避免同一个账户在两处出现相互矛盾的 HHI
   // 或“证券数量 / 现金 / 总资产”不一致（任务书 C4）。
-  const accountView = buildAccountView(snapshot, accountId, holdings, concentration, asOf);
+  const accountView = buildAccountView(snapshot, accountId, holdings, concentration, asOf, summary.portfolio);
   const decisionComparison = buildDecisionComparison({
     asOf, holdings, summary, accountView, accountEvaluation: accountEvaluation ?? null, screening, fees, lots,
-    gateReasons, gateSatisfied,
+    gateReasons, gateSatisfied, portfolioDb, marketDb, accountId, feeOverride: input.fees, scenario: input.researchScenario,
   });
+  const reportId = createHash('sha256').update(JSON.stringify({
+    schema: DAILY_REPORT_SCHEMA, account_id: accountId, as_of_trade_date: asOf,
+    summary_id: summary.summary_id, status,
+    gate: accountEvaluation ? { state_basis: accountEvaluation.state_basis, reasons: accountEvaluation.reasons,
+      completeness: accountEvaluation.completeness, unreported_trade_risk: accountEvaluation.unreported_trade_risk,
+      sellable: accountEvaluation.sellable } : null,
+    holdings, market, screening, decision_comparison: decisionComparison, lots,
+  })).digest('hex');
 
   return {
     schema: DAILY_REPORT_SCHEMA,
@@ -1644,7 +1432,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       as_of_trade_date: asOf,
       account_confirmed_at: input.accountConfirmedAt ?? snapshot?.is_current_confirmed_at ?? null,
       quote_updated_at: input.quoteUpdatedAt ?? quoteUpdatedAt(marketDb),
-      generated_at: input.generatedAt ?? null,
+      generated_at: input.generatedAt ?? new Date().toISOString(),
     },
     account_status: accountStatus,
     /** 账户身份是显式提供还是按本部署唯一真实账户推导（C1）。 */
@@ -1698,7 +1486,7 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       },
     },
     holdings,
-    candidate_vs_cash: buildCandidateCashCompetition(summary, screening, lots),
+    candidate_vs_cash: buildCandidateCashCompetition(summary, screening, lots, { portfolioDb, accountId, asOf, feeOverride: input.fees }),
     concentration: {
       hhi: concentration.hhi ?? null,
       effective_positions: concentration.effective_positions ?? null,
