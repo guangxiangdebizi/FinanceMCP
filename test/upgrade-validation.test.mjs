@@ -14,7 +14,7 @@ test('block inference is reproducible, respects missing dates and does not inven
   const a=blockInference(values,5,499,42);
   assert.deepEqual(a,blockInference(values,5,499,42));
   assert.ok(a.ci95[0]>0 && a.p_value<0.05);
-  assert.equal(a.independent_blocks,16);
+  assert.equal(a.nominal_blocks,16);
   assert.equal(blockInference([1,2,3],5).ci95,null);
   assert.equal(blockInference([...values,null],5).status,'DATA_INSUFFICIENT');
   assert.throws(()=>blockInference(values,0));
@@ -99,6 +99,14 @@ test('corporate entitlement and unknown exit constraints stop funded claims inst
   try {db.prepare('UPDATE adj_factor SET adj_factor=2 WHERE trade_date=?').run(days[3]);
     const a=simulateFunded(db,[{date:days[0],codes:[code]}],{asOf:days.at(-1),initial_cents:200000,horizon:5,max_exit_delay:0,slippage_bps:0,fee});
     assert.equal(a.status,'DATA_INSUFFICIENT');assert.equal(a.net_return,null);assert.equal(a.failure,'corporate_action_entitlement_unavailable');
+  } finally {db.close();}
+});
+
+test('a missing holding adjustment factor cannot silently produce a funded return',()=>{
+  const {db,days,code}=fundedFixture();
+  try { db.prepare('DELETE FROM adj_factor WHERE trade_date=?').run(days[3]);
+    const a=simulateFunded(db,[{date:days[0],codes:[code]}],{asOf:days.at(-1),initial_cents:200000,horizon:5,max_exit_delay:0,slippage_bps:0,fee});
+    assert.equal(a.failure,'held_adjustment_factor_unavailable');assert.equal(a.net_return,null);
   } finally {db.close();}
 });
 

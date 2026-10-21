@@ -23,7 +23,7 @@ export function blockInference(values: readonly (number | null)[], blockLength =
   const missing = values.filter(v => !finite(v)).length;
   const v = values.filter(finite), n = v.length, avg = mean(v);
   const unavailable = { method: 'circular_moving_block_bootstrap', n, missing, block_length: blockLength, repetitions, seed,
-    mean: avg, ci95: null as [number, number] | null, p_value: null as number | null, status: 'DATA_INSUFFICIENT', independent_blocks: Math.floor(n / blockLength) };
+    mean: avg, ci95: null as [number, number] | null, p_value: null as number | null, status: 'DATA_INSUFFICIENT', nominal_blocks: Math.floor(n / blockLength) };
   if (missing || n < Math.max(20, blockLength * 4)) return unavailable;
   let state = seed >>> 0;
   const random = () => { state = (Math.imul(1664525, state) + 1013904223) >>> 0; return state / 4294967296; };
@@ -204,7 +204,8 @@ export function loadValidationSummary(options: { dbPath?: string; id?: string; a
       ? db.prepare('SELECT id,created_at,content FROM validation_result WHERE id=?').all(options.id)
       : db.prepare('SELECT id,created_at,content FROM validation_result ORDER BY created_at DESC,id DESC').all();
     for(const row of candidates as {id:string;created_at:string;content:string}[]) {
-      const value=JSON.parse(row.content);
+      let value: any;
+      try { value=JSON.parse(row.content); } catch { return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'validation_content_invalid'}; }
       if(typeof value.as_of!=='string' || value.as_of>options.asOf) continue;
       if(`VAL-${digest(value).slice(0,24)}`!==row.id) return {status:'UNAVAILABLE',evidence_level:'UNVERIFIED',reason:'validation_identity_mismatch'};
       const study=value.study;
@@ -286,6 +287,7 @@ export function simulateFunded(db: DatabaseSync, selections: { date: string; cod
     }
     for (let p = positions.length - 1; p >= 0; p--) {
       const position = positions[p], b = bar.get(position.code, date) as any;
+      if (b && (!finite(b.adj_factor) || b.adj_factor<=0)) { failure = 'held_adjustment_factor_unavailable'; break; }
       if (b && finite(b.adj_factor) && Math.abs(b.adj_factor - position.factor) > 1e-10) { failure = 'corporate_action_entitlement_unavailable'; break; }
       const isSuspended = !!b?.suspended || !!suspended.get(position.code,date);
       if (b && finite(b.close) && b.close > 0) position.mark = b.close;

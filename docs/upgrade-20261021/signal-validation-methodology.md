@@ -58,4 +58,4 @@ node build/ashare/cli.js research-validation evaluate --source /path/to/market.s
 
 ## 实际验证状态
 
-只读审计代码 SHA：`476bfff3672ec2d20208650edbf8e045e6af12e8`。既有研究评估、引擎、快照与 runner 51 项专项测试通过。新增专项覆盖 bootstrap 重复性、缺数门控、Holm、purge、walk-forward、评分不修改原扫描、冻结不可覆盖、迟到与变规则拒绝、整数资金/手数/费用/T+1、公司行动不可得状态、缺失成员覆盖。新增测试在独立临时构建通过11/11（核心9项、CLI/摘要2项）；共享构建和最终全套验收由 Lead 集中执行。
+只读审计代码 SHA：`476bfff3672ec2d20208650edbf8e045e6af12e8`。既有研究评估、引擎、快照与 runner 51 项专项测试通过。新增专项覆盖 bootstrap 重复性、缺数门控、Holm、purge、walk-forward、评分不修改原扫描、冻结不可覆盖、迟到与变规则拒绝、整数资金/手数/费用/T+1、公司行动不可得状态、缺失成员覆盖。新增测试在独立临时构建通过12/12（核心10项、CLI/摘要2项，包含持仓期复权因子缺失门控）；共享构建和最终全套验收由 Lead 集中执行。
