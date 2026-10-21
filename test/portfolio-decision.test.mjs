@@ -117,6 +117,13 @@ evidenceModule.recordResearchEvidence(portfolio, {
   recorded_by: 'test-fixture', note: '受控测试证据（不是真实研究结论）',
 }, { confirm: true });
 
+// CLI 始终携带部署级可信策略：正例证据必须带来源并登记在可信策略中（旧无来源证据不得冒称严格验证）。
+evidenceModule.recordResearchEvidence(portfolio, {
+  evidence_id: 'EV-SYNTH-CLI', kind: 'ROTATION', buy_code: '510300.SH', sell_code: '159558.SZ',
+  strategy_id: 'r2-cli-trusted', as_of: LAST, valid_until: null, status: 'VERIFIED',
+  recorded_by: 'test-fixture', note: '受控测试证据（不是真实研究结论）',
+  provenance: { source: 'synthetic-validation', rule_version: 'fixture-1', claim: '研究结论', validation_run_id: 'fixture-run', observation_type: 'WALK_FORWARD_VALIDATION' },
+}, { confirm: true });
 const current = accountSummary(readSnapshot(portfolio, SYNTH.snapshot_id));
 const mixed = accountSummary(readSnapshot(portfolio, MIXED.snapshot_id));
 const NAV = current.totals.total_assets_cents;
@@ -463,9 +470,9 @@ test('9. CLI portfolio-decision 输出 JSON 且只读（exit 0）', () => {
     '--account', 'synthetic-test', '--action', 'sell-buy', '--snapshot', SYNTH.snapshot_id,
     '--sell', '159558.SZ', '--shares', '10000', '--buy', '510300.SH',
     '--trade-date', LAST, '--advantage-source', 'RESEARCH_VERIFIED',
-    '--advantage-claim', '研究结论', '--evidence-id', 'EV-SYNTH-001',
+    '--advantage-claim', '研究结论', '--evidence-id', 'EV-SYNTH-CLI',
     '--db', process.env.ASHARE_PORTFOLIO_DB_PATH, '--market-db', process.env.ASHARE_DB_PATH,
-  ], { cwd: dir, env: process.env, encoding: 'utf8' });
+  ], { cwd: dir, env: { ...process.env, ASHARE_RESEARCH_TRUSTED_STRATEGIES: JSON.stringify([{ strategy_id: 'r2-cli-trusted', source: 'synthetic-validation', rule_version: 'fixture-1' }]) }, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   const out = JSON.parse(run.stdout);
   assert.equal(out.schema, 'ashare-portfolio-decision/1.0');

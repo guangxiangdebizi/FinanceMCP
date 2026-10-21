@@ -49,6 +49,30 @@ SUPER_ETF只来自本账户明确标记，不能推断同公司其他基金也�
 所有交易由我最终决定并在券商手动执行。你不下单、不更新账户完整性、不自认RESEARCH_VERIFIED。
 ```
 
+## MCP调用顺序
+
+1. 私有`ashare_investment_research_bundle`（account_id="real-main"）：核验report_id、as_of_trade_date、generated_at、status、data_quality、account_status、evidence_status。
+2. 仅在需要时深入：公共`ashare_watchlist`/`ashare_stock_analysis`/`ashare_sector_rank`/`ashare_etf_quotes`/`ashare_etf_candidates`，私有`ashare_portfolio_daily_report`/`ashare_portfolio_decision`/`ashare_portfolio_benchmarks`。
+3. 所有深入调用须使用与步骤1相同的as_of_trade_date；日期不一致的结果不得合并为同日结论。
+4. 第二层外部研究，再做账户综合判断。
+
+## 停用重复任务的安全步骤与回退
+
+- 先确认编辑后的“收盘研究助手”手动运行成功、且首个真实交易日21:40实际触发后，才停用（不删除）“动态股票池扫描”。
+- 回退：重新启用被停用任务并恢复第1步记下的原提示词、调度、通知；VPS股票池定时器全程不动。
+
+## 真实数据验收样例（部署后填写；仅聚合，无私有持仓/现金）
+
+当前生产镜像尚未包含本工具，因此下表尚无真实值，不得用合成值冒充。部署并在真实交易日调用后，记录：
+
+| 项 | 记录 |
+|---|---|
+| report_id / as_of_trade_date / generated_at | |
+| status / market.status / etf.quality / account_status / evidence_status | |
+| 股票池数量与增减数、ETF候选数与覆盖 | |
+| evidence_gaps 条目（仅模块与原因） | |
+| 21:40网页任务实际触发时间与工具响应核对 | |
+
 ## 降级与验收标准
 
 - 市场NOT_READY：无当日市场判断、无可执行数量；列出具体数据日期与恢复条件。
