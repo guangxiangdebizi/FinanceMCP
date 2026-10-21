@@ -49,6 +49,7 @@ const FIELDS: FeeField[] = ['commission_rate', 'commission_min_cents', 'transfer
 const CLASSES: FeeClass[] = ['STOCK', 'NORMAL_ETF', 'SUPER_ETF', 'OTHER_ETF'];
 const LEVELS: FeeEvidence[] = ['CONFIRMED', 'PUBLIC_REFERENCE', 'ASSUMED', 'UNKNOWN'];
 const DATE = /^\d{8}$/;
+const SUPER_ETF_OBSERVED = { commission_rate: 0.00005, commission_min_cents: 0 };
 const keyFor = (accountId: string) => `fee_profiles:${accountId}`;
 
 export function validateFeeProfile(profile: FeeProfile): FeeProfile {
@@ -122,6 +123,13 @@ export function feeRulesFor(context: FeeContext, code: string, kind: 'ETF' | 'ST
   const evidence = Object.fromEntries(FIELDS.map(field => [field, { level: 'ASSUMED', source: 'Conservative category default; broker terms unverified' }])) as Record<FeeField, FeeFieldEvidence>;
   evidence.transfer_fee_rate = { level: 'PUBLIC_REFERENCE', source: kind === 'STOCK' ? 'ChinaClear A-share transfer fee reference (2022-04-29)' : 'Exchange-traded ETF transfer fee exemption reference' };
   evidence.stamp_duty_rate = { level: 'PUBLIC_REFERENCE', source: kind === 'STOCK' ? 'A-share sell stamp duty reference (2023-08-28)' : 'Exchange-traded ETF stamp duty exemption reference' };
+  if (classification === 'SUPER_ETF') {
+    // Marked codes only: the observed discount tier has no 5-yuan floor. Never inferred for other ETFs.
+    values.commission_rate = SUPER_ETF_OBSERVED.commission_rate;
+    values.commission_min_cents = SUPER_ETF_OBSERVED.commission_min_cents;
+    evidence.commission_rate = { level: 'ASSUMED', source: 'Observed discount tier on explicitly marked codes; not a broker-confirmed category rate' };
+    evidence.commission_min_cents = { level: 'ASSUMED', source: 'Observed fills show no 5-yuan floor for marked codes; hidden billing unit unverified' };
+  }
   const applied = [...category, ...specific];
   for (const p of applied) for (const field of FIELDS) if (Object.hasOwn(p.values, field)) {
     const value = p.values[field];
