@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { ETF_UNIVERSE } from '../ashare/etf.js';
-import { DEFAULT_FEE_RULES, type FeeRules } from './rules.js';
+import { DEFAULT_FEE_RULES, FEE_RULE_VERSION, type FeeRules } from './rules.js';
+import { calculateFees, feeRulesFor, type FeeContext } from './fees.js';
 
 /**
  * C6 冻结对照基准（只读、确定性）。
@@ -148,6 +149,7 @@ export interface BenchmarkComparisonInput {
   end?: string;
   /** 费用假设；缺省 DEFAULT_FEE_RULES（标记 assumed）。 */
   fees?: FeeRules;
+  fee_context?: FeeContext;
 }
 
 export interface BenchmarkComparisonResult {
@@ -251,10 +253,7 @@ function loadSeries(
 /** 期初买入费用：佣金（有最低）+ 单边滑点，整数分。 */
 function entryFeeCents(grossCents: number, fees: FeeRules): number {
   if (!(grossCents > 0)) return 0;
-  const commission = Math.max(fees.commission_min_cents, Math.round(grossCents * fees.commission_rate));
-  const transfer = Math.round(grossCents * fees.transfer_fee_rate);
-  const slippage = Math.round(grossCents * fees.slippage_rate_per_side);
-  return commission + transfer + slippage;
+  return calculateFees(grossCents, 'buy', fees).total_cents;
 }
 
 function drawdownPct(values: number[]): number {
@@ -415,10 +414,10 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
     label: '沪深300 ETF（510300.SH）买入持有',
     code: CSI300_ETF_CODE,
     notionalCents: 1_000_000, // 10,000 元等额名义本金，仅用于归一化
-  }));
+  }, input.fee_context));
 
   // ---------------------------------------------------------------- 2. 多资产常量权重篮子
-  benchmarks.push(benchmarkWeightBasket(db, tables, dates, window, fees));
+  benchmarks.push(benchmarkWeightBasket(db, tables, dates, window, fees, input.fee_context));
 
   // ---------------------------------------------------------------- 3. 初始五只静态基线
   benchmarks.push(benchmarkFiveStatic(db, tables, dates, window));
@@ -436,7 +435,7 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
     window,
     data_quality: { status, tables, missing_tables: missingTables, reasons },
     conventions: {
-      fees: { version_note: 'DEFAULT_FEE_RULES（r0-fees-1.0.0，假设值，未与券商核对）', assumed: true, values: { ...fees } },
+      fees: { version_note: `${FEE_RULE_VERSION}; effective-date per-security resolution when a private fee context is supplied`, assumed: true, values: { ...fees } },
       cash: '前两个基准期初按收盘价一次性买入并扣除费用，此后现金为 0；'
         + `第三个基准从 ${FROZEN_FIVE_START_DATE} 的实际持仓与账户现金 ${(FROZEN_FIVE_CASH_CENTS / 100).toFixed(2)} 元出发，`
         + '已持有不再计建仓费用。三者期间都不再投入、不取现、不分红再投资（分红体现在复权因子中）。',
@@ -459,6 +458,7 @@ function benchmarkSingle(
   window: { start: string; end: string; trading_days: number } | null,
   fees: FeeRules,
   spec: { id: BenchmarkResult['id']; label: string; code: string; notionalCents: number },
+  context?: FeeContext,
 ): BenchmarkResult {
   if (!db || !window) {
     return unavailableBenchmark(spec.id, spec.label, 'window_unavailable', '没有可用的市场缓存或交易日窗口', [spec.code]);
@@ -483,7 +483,7 @@ function benchmarkSingle(
     return unavailableBenchmark(spec.id, spec.label, 'notional_too_small', '名义本金不足一份', [spec.code]);
   }
   const grossCents = Math.round(quantity * startPrice! * 100); // 份 × 元/份 × 100 = 分
-  const fee = entryFeeCents(grossCents, fees);
+  const fee = entryFeeCents(grossCents, context ? feeRulesFor({ ...context, asOf: window.start }, spec.code, 'ETF') : fees);
   const { values: prices, carried } = fillPrices(series, dates);
   const values = prices.map(price => (Number.isFinite(price) ? quantity * price * 100 : Number.NaN));
   const invested = grossCents + fee;
@@ -529,6 +529,7 @@ function benchmarkWeightBasket(
   dates: string[],
   window: { start: string; end: string; trading_days: number } | null,
   fees: FeeRules,
+  context?: FeeContext,
 ): BenchmarkResult {
   const id: BenchmarkResult['id'] = 'frozen_multi_asset_basket';
   const label = '冻结多资产 ETF 篮子（40% 权益 / 25% 债券 / 15% 黄金 / 20% 跨境）';
@@ -555,7 +556,7 @@ function benchmarkWeightBasket(
     if (quantity <= 0) { missing.push(`${code}:notional_too_small`); continue; }
     const gross = Math.round(quantity * startPrice * 100);
     grossTotal += gross;
-    feeTotal += entryFeeCents(gross, fees);
+    feeTotal += entryFeeCents(gross, context ? feeRulesFor({ ...context, asOf: window.start }, code, 'ETF') : fees);
     legs.push({ series, quantity });
     legViews.push({
       ts_code: code,

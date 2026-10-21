@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { ashareDbPath } from '../ashare/db.js';
-import { accountSummary, latestSnapshot, readSnapshot } from './account.js';
+import { accountSummary } from './account.js';
+import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { openPortfolioDb, portfolioDbPath } from './db.js';
 import { buildDecision, type DecisionAction, type RotationClaim } from './decision.js';
 import type { PortfolioCliHelpers } from './cli.js';
@@ -40,14 +41,15 @@ function openMarketReadOnly(path: string | undefined): DatabaseSync | null {
 }
 
 export function runDecisionCommand(h: PortfolioCliHelpers): boolean {
-  const accountId = requireArg(h, 'account');
+  const requestedAccountId = h.arg('account');
   const actionRaw = h.arg('action') ?? 'hold';
   const snapshotId = h.arg('snapshot');
 
   const db = openPortfolioReadOnly(h.arg('db'));
   let market: DatabaseSync | null = null;
   try {
-    const snapshot = snapshotId ? readSnapshot(db, snapshotId) : latestSnapshot(db);
+    const accountId = resolveAccountId(db, requestedAccountId).account_id;
+    const snapshot = resolveAccountSnapshot(db, accountId, snapshotId).snapshot;
     if (!snapshot) throw new Error(snapshotId ? `账户快照 ${snapshotId} 不存在` : '账户库中没有任何快照，请先运行 portfolio-import');
     const summary = accountSummary(snapshot);
     const asOf = h.arg('trade-date') ? h.ymd(h.arg('trade-date'), '--trade-date') : snapshot.as_of.replace(/-/g, '');

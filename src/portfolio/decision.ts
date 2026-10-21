@@ -7,6 +7,9 @@ import {
   type FeeRules, type InstrumentInfo, type LotRules, type StockRules,
 } from './rules.js';
 import { affordableLots, computeFees, type FeeBreakdown } from './scenario.js';
+import { loadFeeContext, feeRulesFor } from './fees.js';
+import { resolveAccountState } from './accounts.js';
+import { accountSummary, readSnapshot } from './account.js';
 import {
   checkInstrumentClaim, normalizeSecurityCode, resolveInstrument,
   type InstrumentClaim, type ResolvedInstrument,
@@ -15,7 +18,7 @@ import { assessQuoteIntegrity, suspensionSynced } from './quotes.js';
 import { verifyResearchEvidence, type EvidenceReason } from './evidence.js';
 import {
   readAccountCompleteness, readBaseline, realAccountGate, reconcileAccountVsLedger, replayAccount,
-  settlementCalendarFromDb,
+  settlementCalendarFromDb, validateLedger,
   type AccountCompleteness, type ReconciliationResult, type SettlementCalendar,
 } from './ledger.js';
 
@@ -785,6 +788,8 @@ export function evaluateAccountStatus(
         baselineAsOf = baseline.as_of;
         try {
           const replay = replayAccount(portfolioDb, accountId, { asOf, calendar: options.calendar });
+          const validation = validateLedger(portfolioDb, accountId);
+          if (!validation.ok || validation.conflicts_recorded > 0) reasons.push({ code: 'account_reconstruction_unavailable', detail: 'Ledger has invariant violations or unresolved import conflicts; reconcile before execution' });
           pendingSettlement = replay.cash.unsettled_cents;
           // A4：账本给出的可卖数量（T+1 排除决策日当日买入）。键统一归一化，
           // 避免事件里的代码写法与决策输入写法不同导致静默跳过校验。
@@ -1090,6 +1095,16 @@ export function evaluateStockPlan(
 const DISCLAIMER = '本决策对照为只读、确定性的静态计算：不访问券商、不下单、不预测收益。行情只来自服务端只读缓存，压力参数、费用与交易单位均为假设值；用户需自行在券商手动执行。';
 
 export function buildDecision(input: DecisionInput): DecisionResult {
+  const originalSnapshot = input.portfolio_db && readSnapshot(input.portfolio_db, input.snapshot.snapshot_id)
+    ? accountSummary(readSnapshot(input.portfolio_db, input.snapshot.snapshot_id)!) : input.snapshot;
+  if (input.portfolio_db && readBaseline(input.portfolio_db, input.account_id)) {
+    const state = resolveAccountState(input.portfolio_db, input.account_id, input.as_of_trade_date, input.snapshot.snapshot_id, { calendar: settlementCalendarOf(input.market_db) });
+    input = { ...input, snapshot: accountSummary(state.snapshot) };
+  }
+  const feeContext = loadFeeContext(input.portfolio_db, input.account_id, input.as_of_trade_date);
+  const feeFor = (code: string, kind: 'ETF' | 'STOCK') => input.rules?.fees || (kind === 'STOCK' && input.rules?.stock)
+    ? kind === 'STOCK' ? input.rules?.stock?.fees ?? DEFAULT_STOCK_RULES.fees : input.rules!.fees!
+    : feeRulesFor(feeContext, code, kind);
   const fees = input.rules?.fees ?? DEFAULT_FEE_RULES;
   const lots = input.rules?.lots ?? DEFAULT_LOT_RULES;
   const stockRules = input.rules?.stock ?? DEFAULT_STOCK_RULES;
@@ -1154,7 +1169,7 @@ export function buildDecision(input: DecisionInput): DecisionResult {
 
   // 账户门控（R2 A1）：当日确认快照 **或** 账本按决策日重建；两者都要求
   // REAL_ACCOUNT_VERIFIED + 无未交收卖出 + 完整性已披露。快照旧于决策日只发警告。
-  const accountStatus = evaluateAccountStatus(portfolioDb, input.snapshot, input.account_id, asOf, {
+  const accountStatus = evaluateAccountStatus(portfolioDb, originalSnapshot, input.account_id, asOf, {
     calendar: settlementCalendarOf(db),
   });
   const accountCurrent = accountStatus.is_current;
@@ -1211,9 +1226,9 @@ export function buildDecision(input: DecisionInput): DecisionResult {
       detail: '账户存在未上报交易的风险：可执行数量依赖当前现金与份额，未上报成交可能已使其失效，因此只给示意。',
     });
   }
-  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, accountStatus));
+  options.push(optionReduce(before, reduceSpec, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, accountStatus, feeFor));
 
-  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, evidence, accountStatus);
+  const rotate = optionRotate(input, before, quotes, resolveFor, asOf, stressRules, fees, lots, stockRules, accountIssuesForOptions, tradingDayOk, evidence, accountStatus, feeFor);
   options.push(rotate);
 
   options.push(optionNoAction(before, input.action.type === 'NO_ACTION' ? (input.action.reason ?? '调用方选择不操作') : '保留现金与现有持仓，不产生交易', stressRules, fees));
@@ -1546,6 +1561,7 @@ function optionReduce(
   quotes: Map<string, QuoteLookup>, resolveFor: (raw: string) => ResolvedInstrument, asOf: string,
   stressRules: AssetClassStressRules, fees: FeeRules, lots: LotRules, stockRules: StockRules,
   accountIssues: Reason[], tradingDayOk: boolean, accountStatus: AccountStatusEvaluation,
+  feeFor: (code: string, kind: 'ETF' | 'STOCK') => FeeRules,
 ): DecisionOption {
   const base = {
     action: 'REDUCE_EQUITY' as const,
@@ -1573,7 +1589,7 @@ function optionReduce(
   const info = resolveFor(code);
   const isStock = info.kind === 'STOCK';
   const lotMultiple = isStock ? stockRules.sell_multiple : lots.etf_sell_multiple;
-  const feeRules = isStock ? stockRules.fees : fees;
+  const feeRules = feeFor(code, isStock ? 'STOCK' : 'ETF');
   const quote = quotes.get(code);
   const position = state.positions.find(p => normalizeSecurityCode(p.ts_code) === code);
   const reasons: Reason[] = [];
@@ -1631,6 +1647,7 @@ function optionRotate(
   stressRules: AssetClassStressRules, fees: FeeRules, lots: LotRules, stockRules: StockRules,
   accountIssues: Reason[], tradingDayOk: boolean, evidence: DecisionResult['evidence'],
   accountStatus: AccountStatusEvaluation,
+  feeFor: (code: string, kind: 'ETF' | 'STOCK') => FeeRules,
 ): DecisionOption {
   const base = {
     action: 'SELL_AND_BUY' as const,
@@ -1662,8 +1679,8 @@ function optionRotate(
   const buyInfo = resolveFor(buyCode);
   const sellIsStock = sellInfo.kind === 'STOCK';
   const buyIsStock = buyInfo.kind === 'STOCK';
-  const sellFeeRules = sellIsStock ? stockRules.fees : fees;
-  const buyFeeRules = buyIsStock ? stockRules.fees : fees;
+  const sellFeeRules = feeFor(sellCode, sellIsStock ? 'STOCK' : 'ETF');
+  const buyFeeRules = feeFor(buyCode, buyIsStock ? 'STOCK' : 'ETF');
   const sellMultiple = sellIsStock ? stockRules.sell_multiple : lots.etf_sell_multiple;
   const buyLot = buyIsStock ? stockRules.lot_size : lots.etf_lot_size;
   const buyMin = buyIsStock ? stockRules.min_buy : lots.etf_min_buy;
@@ -1881,7 +1898,8 @@ function decisionId(
       reconciliation_ok: accountStatus.reconciliation ? accountStatus.reconciliation.ok : null,
     },
     rules: {
-      fees, lots,
+      fees, lots, stock: input.rules?.stock ?? null,
+      fee_profiles: loadFeeContext(input.portfolio_db, input.account_id, input.as_of_trade_date).profiles,
       stress_version: stress.version,
       stress_shocks: stress.shocks,
       industry_map_version: INDUSTRY_MAP_VERSION,

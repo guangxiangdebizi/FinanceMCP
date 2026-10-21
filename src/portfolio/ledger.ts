@@ -843,6 +843,9 @@ function recordOne(db: DatabaseSync, event: NormalizedEvent): RecordResult {
   if (reversedTarget) {
     db.prepare('UPDATE account_event SET reversed_by = ? WHERE event_id = ?').run(event.event_id, reversedTarget.event_id);
   }
+  // A newly recorded fact invalidates a prior completeness assertion, including same-day additions.
+  // Duplicate imports do not reach this branch. The update shares the event transaction/dry-run.
+  if (completenessTablePresent(db)) db.prepare('UPDATE account_completeness SET unreported_trade_risk=1 WHERE account_id=?').run(event.account_id);
 
   return {
     status: 'RECORDED', event_id: event.event_id, event_type: event.event_type,
@@ -2071,6 +2074,8 @@ export function confirmRealAccount(
   if (!ledgerTablesPresent(db)) throw new Error('账户库中没有 P2 账本表，请先运行 portfolio-ledger-init');
   const baseline = readBaseline(db, id);
   if (!baseline) throw new Error(`账户 ${id} 没有基线，不能确认为真实账户`);
+  const validation = validateLedger(db, id);
+  if (!validation.ok || validation.conflicts_recorded > 0) throw new Error('Ledger invariants or import conflicts must be reconciled before real-account confirmation');
   const at = new Date().toISOString();
   inPortfolioTransaction(db, () => {
     db.prepare(`INSERT INTO account_meta (key, value) VALUES (?, ?)

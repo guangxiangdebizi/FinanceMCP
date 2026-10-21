@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
-import { DEMO_SNAPSHOT_ID, latestSnapshot, readSnapshot, type AccountSnapshot } from './account.js';
+import { DEMO_SNAPSHOT_ID, latestSnapshot, readSnapshot, valueCents, type AccountSnapshot } from './account.js';
+import { readBaseline, replayAccount, type SettlementCalendar } from './ledger.js';
 
 /**
  * 真实账户解析（V1.0 C1）。
@@ -131,13 +132,6 @@ export function resolveAccountId(
       ids,
     );
   }
-  // 库里只有一个快照且没有账本（例如仅导入过演示快照）：可以把它当作展示用的
-  // 唯一账户，但**不是**默认值猜测 —— 门控仍会返回 REAL_ACCOUNT_PENDING。
-  // 真正要避免的是“有真实账户却静默落到演示账户”，这种情况在下面被拒绝。
-  if (tablePresent('account_snapshot')) {
-    const snapshots = db.prepare('SELECT snapshot_id FROM account_snapshot').all() as any[];
-    if (snapshots.length === 1) return { account_id: String(snapshots[0].snapshot_id), source: 'default' };
-  }
   throw new AccountResolutionError(
     'no_default_account',
     '本部署没有配置任何真实账户（没有账本基线或真实账户确认）。请先用 finance-ashare 导入账户并确认；'
@@ -161,10 +155,19 @@ export function resolveAccountId(
 export function resolveAccountSnapshot(
   db: DatabaseSync, accountId: string, explicitSnapshotId?: unknown,
 ): { snapshot: AccountSnapshot; snapshot_id: string; source: 'ledger_baseline' | 'single_snapshot' | 'explicit' | 'demo' } {
+  resolveAccountId(db, accountId);
   if (explicitSnapshotId !== undefined && explicitSnapshotId !== null && String(explicitSnapshotId).trim() !== '') {
     const id = String(explicitSnapshotId).trim();
     const snapshot = readSnapshot(db, id);
     if (!snapshot) throw new Error(`账户快照 ${id} 不存在`);
+    const owned = baselineSnapshotId(db, accountId);
+    const configured = listConfiguredAccounts(db);
+    const snapshotRows = db.prepare('SELECT snapshot_id FROM account_snapshot WHERE snapshot_id != ?').all(DEMO_SNAPSHOT_ID) as any[];
+    const exclusivelyOwned = !owned && configured.length === 1 && configured[0].account_id === accountId
+      && snapshotRows.length === 1 && snapshotRows[0].snapshot_id === id;
+    if (accountId === DEMO_SNAPSHOT_ID ? id !== DEMO_SNAPSHOT_ID : owned ? id !== owned && !exclusivelyOwned : !exclusivelyOwned) {
+      throw new AccountResolutionError('account_not_configured', 'Explicit snapshot is not associated with the requested account');
+    }
     return { snapshot, snapshot_id: id, source: id === DEMO_SNAPSHOT_ID ? 'demo' : 'explicit' };
   }
   const baseline = baselineSnapshotId(db, accountId);
@@ -197,6 +200,38 @@ export function resolveAccountSnapshot(
     `账户 ${accountId} 没有账本基线，也找不到唯一的持仓快照；请显式提供 snapshot_id。`,
     rows.map(row => String(row.snapshot_id)),
   );
+}
+
+/** Derive quantities and cash from events; prices only value the derived quantities. No writes. */
+export function resolveAccountState(
+  db: DatabaseSync, accountId: string, asOf: string, snapshotId?: unknown,
+  options: { calendar?: SettlementCalendar } = {},
+) {
+  const resolved = resolveAccountSnapshot(db, accountId, snapshotId);
+  const baseline = readBaseline(db, accountId);
+  if (!baseline) return { ...resolved, reconstruction: null };
+  if (!/^\d{8}$/.test(asOf) || asOf < baseline.as_of) throw new Error('Account reconstruction date precedes baseline');
+  const replay = replayAccount(db, accountId, { asOf, calendar: options.calendar });
+  const prices = new Map(resolved.snapshot.positions.map(p => [p.ts_code, p]));
+  const positions = replay.positions.filter(p => p.quantity !== 0).map(p => {
+    const old = prices.get(p.ts_code);
+    const cost = Math.round(p.cost_milli_avg);
+    const price = old?.ref_price_milli ?? cost;
+    return { ts_code: p.ts_code, name: old?.name ?? p.ts_code, quantity: p.quantity,
+      ref_price_milli: price, ref_cost_milli: cost, market_value_cents: valueCents(p.quantity, price) };
+  });
+  const securities = positions.reduce((sum, p) => sum + p.market_value_cents, 0);
+  const snapshot: AccountSnapshot = {
+    ...resolved.snapshot,
+    positions,
+    source: 'ledger_reconstruction',
+    warnings: [...new Set([...resolved.snapshot.warnings, 'event_derived_quantities_and_cash',
+      ...(positions.some(p => !prices.has(p.ts_code)) ? ['new_position_price_cost_fallback'] : [])])],
+    totals: { ...resolved.snapshot.totals, cash_cents: replay.cash.balance_cents, securities_mv_cents: securities,
+      total_assets_cents: securities + replay.cash.balance_cents + resolved.snapshot.totals.wealth_cents,
+      unrealized_pnl_cents: securities - replay.totals.securities_cost_cents },
+  };
+  return { ...resolved, snapshot, reconstruction: replay.reconstruction, cash: replay.cash };
 }
 
 /** 账户所属的基线快照；没有基线时返回 null。 */

@@ -5,6 +5,9 @@ import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
 import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quotes.js';
 import type { EtfQuoteInput, ScenarioAction, ScenarioEvidence } from './scenario.js';
 import { buildScenario } from './scenario.js';
+import { resolveAccountId, resolveAccountSnapshot, resolveAccountState } from './accounts.js';
+import { loadFeeContext } from './fees.js';
+import { evaluateAccountStatus } from './decision.js';
 
 /**
  * MCP 账户工具实现。与市场工具隔离：账户数据只从 `portfolio.sqlite`（只读）读取；
@@ -34,7 +37,9 @@ function readDb(): DatabaseSync {
 function summaryTool(args: Record<string, any>): ToolResult {
   const db = readDb();
   try {
-    const snapshot = args.snapshot_id ? readSnapshot(db, String(args.snapshot_id)) : latestSnapshot(db);
+    const accountId = resolveAccountId(db, args.account_id).account_id;
+    const resolved = resolveAccountSnapshot(db, accountId, args.snapshot_id);
+    const snapshot = resolveAccountState(db, accountId, ymdOr(args.as_of_trade_date, resolved.snapshot.as_of.replace(/-/g, '')), args.snapshot_id).snapshot;
     if (!snapshot) throw new Error('账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
     const body: Record<string, unknown> = {
       summary: accountSummary(snapshot),
@@ -53,13 +58,12 @@ function scenarioTool(args: Record<string, any>): ToolResult {
   try {
     const actionRaw = String(args.action ?? 'hold');
     if (actionRaw !== 'hold' && actionRaw !== 'sell-buy') throw new Error('action 需要 hold 或 sell-buy');
-    // 优先使用用户确认过的当前账户；没有时退回最新快照（演示基线），此时结果最多 ILLUSTRATIVE。
-    const snapshot = args.snapshot_id
-      ? readSnapshot(db, String(args.snapshot_id))
-      : (currentSnapshot(db) ?? latestSnapshot(db));
-    if (!snapshot) throw new Error(args.snapshot_id ? `账户快照 ${args.snapshot_id} 不存在` : '账户库中没有任何快照，请先运行 finance-ashare portfolio-import');
+    const accountId = resolveAccountId(db, args.account_id).account_id;
+    const original = resolveAccountSnapshot(db, accountId, args.snapshot_id).snapshot;
+    const tradeDate = ymdOr(args.as_of_trade_date, original.as_of.replace(/-/g, ''));
+    const snapshot = resolveAccountState(db, accountId, tradeDate, args.snapshot_id).snapshot;
     const summary = accountSummary(snapshot);
-    const tradeDate = ymdOr(args.as_of_trade_date, snapshot.as_of.replace(/-/g, ''));
+    const accountGate = evaluateAccountStatus(db, original, accountId, tradeDate);
 
     // 默认只信任服务端只读缓存；只有调用方显式声明 mode:'research' 才接受自填价格。
     const mode: ScenarioMode = String(args.mode ?? 'server').toLowerCase() === 'research' ? 'research' : 'server';
@@ -120,7 +124,8 @@ function scenarioTool(args: Record<string, any>): ToolResult {
       action,
       evidence,
       resolved: bundle.resolved,
-      preconditions: bundle.preconditions,
+      preconditions: [...bundle.preconditions, ...(!accountGate.ok || accountGate.unreported_trade_risk ? [{ code: 'account_not_current' as const, detail: 'Account ledger completeness or verification is insufficient' }] : [])],
+      fee_context: loadFeeContext(db, accountId, tradeDate),
       share_data_available: false,
     });
 

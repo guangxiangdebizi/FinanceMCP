@@ -9,7 +9,7 @@ import {
 import { openPortfolioDb, portfolioDbPath } from './db.js';
 import {
   buildNavSeries, confirmRealAccount, importEvents, initBaseline, readAccountCompleteness, recordEvent,
-  replayAccount, setAccountCompleteness, validateLedger,
+  replayAccount, setAccountCompleteness, settlementCalendarFromDb, validateLedger,
   type LedgerEventInput, type PriceTable,
 } from './ledger.js';
 import { buildScenarioQuotes, openMarketCache, type ScenarioMode } from './quotes.js';
@@ -17,10 +17,14 @@ import { buildScenario, type EtfQuoteInput, type ScenarioAction } from './scenar
 import { DEFAULT_FEE_RULES, DEFAULT_STRESS_RULES } from './rules.js';
 import { runDecisionCommand } from './decisionCli.js';
 import { defaultTradeDate, runResearchSummaryCommand } from './researchCli.js';
-import { listConfiguredAccounts, resolveAccountId, resolveAccountSnapshot } from './accounts.js';
+import { listConfiguredAccounts, resolveAccountId, resolveAccountSnapshot, resolveAccountState } from './accounts.js';
+import { evaluateAccountStatus } from './decision.js';
 import { buildDailyReport } from './dailyReport.js';
 import { screenEtfCandidates } from '../ashare/etfUniverse.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
+import { runFeeCommand, FEE_USAGE } from './feeCli.js';
+import { parseTradeCsv } from './tradeImport.js';
+import { loadFeeContext } from './fees.js';
 import {
   EVIDENCE_STATUSES, ensureEvidenceSchema, readEvidenceStatusHistory, recordResearchEvidence,
   revokeResearchEvidence, type EvidenceStatus,
@@ -73,7 +77,8 @@ export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [opti
         [--ratio 3/1] [--reverses EVENT_ID] [--note TEXT] [--source synthetic|broker_statement]
         [--dry-run]                                  记录一条事件（同 id 同内容幂等，不同内容拒绝覆盖）
   portfolio-ledger-import --account ID --file PATH [--continue-on-conflict] [--dry-run] [--db PATH]
-                                                       批量导入 JSON 事件数组；默认冲突即整批回滚
+                                                       批量导入 JSON 或券商 CSV（UTF-8）；默认冲突即整批回滚
+${FEE_USAGE}
   portfolio-ledger-replay --account ID [--as-of YYYYMMDD] [--db PATH]
                                                        重放持仓/现金/成本/已实现盈亏
   portfolio-ledger-nav --account ID --from YYYYMMDD --to YYYYMMDD [--prices FILE] [--db PATH]
@@ -300,6 +305,7 @@ function parseSnapshotFile(path: string): AccountSnapshot {
 }
 
 export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): boolean {
+  if (runFeeCommand(command, h)) return true;
   switch (command) {
     case 'portfolio-import': {
       const file = h.arg('file');
@@ -620,7 +626,11 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
       const accountId = requireArg(h, 'account');
       const db = openPortfolioDb(h.arg('db'));
       try {
-        const result = recordEvent(db, eventFromArgs(h, accountId), { mode: h.flag('dry-run') ? 'dry_run' : 'live' });
+        resolveAccountId(db, accountId);
+        const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
+        let result;
+        try { result = recordEvent(db, eventFromArgs(h, accountId), { mode: h.flag('dry-run') ? 'dry_run' : 'live', calendar: market ? settlementCalendarFromDb(market) : undefined }); }
+        finally { market?.close(); }
         h.print({ ...result, db: portfolioDbPath(), dry_run: h.flag('dry-run') });
       } finally {
         db.close();
@@ -632,21 +642,29 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
       const file = requireArg(h, 'file');
       if (!existsSync(file)) throw new Error(`事件文件不存在：${file}`);
       let parsed: unknown;
-      try {
-        parsed = JSON.parse(readFileSync(file, 'utf8'));
-      } catch (error: any) {
-        throw new Error(`事件文件不是合法 JSON：${error?.message ?? error}`);
+      const text = readFileSync(file, 'utf8');
+      if (h.arg('format') === 'csv' || /\.csv$/i.test(file)) {
+        parsed = parseTradeCsv(text, { accountId, brokerId: h.arg('broker') }).events;
+      } else {
+        try { parsed = JSON.parse(text); }
+        catch (error: any) { throw new Error(`事件文件不是合法 JSON：${error?.message ?? error}`); }
       }
       const list = Array.isArray(parsed)
         ? parsed
         : Array.isArray((parsed as any)?.events) ? (parsed as any).events : null;
-      if (!list) throw new Error('事件文件需要是 JSON 数组，或 {"events": [...]}');
+      if (!list) throw new Error('事件文件需要 JSON events 或券商 CSV');
       const db = openPortfolioDb(h.arg('db'));
       try {
-        const result = importEvents(db, accountId, list as LedgerEventInput[], {
-          continueOnConflict: h.flag('continue-on-conflict'),
-          mode: h.flag('dry-run') ? 'dry_run' : 'live',
-        });
+        resolveAccountId(db, accountId);
+        const market = openMarketCache(h.arg('market-db') ?? ashareDbPath());
+        let result;
+        try {
+          result = importEvents(db, accountId, list as LedgerEventInput[], {
+            continueOnConflict: h.flag('continue-on-conflict'),
+            mode: h.flag('dry-run') ? 'dry_run' : 'live',
+            calendar: market ? settlementCalendarFromDb(market) : undefined,
+          });
+        } finally { market?.close(); }
         h.print({
           ...result,
           file,
@@ -713,9 +731,12 @@ export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): bo
 
 /** 供 CLI 与 MCP 共用；所有参数都显式，不读 process.argv。 */
 export function runScenario(db: DatabaseSync, action: string, h: PortfolioCliHelpers) {
-  const snapshot = loadSnapshot(db, h.arg('snapshot'));
+  const accountId = resolveAccountId(db, h.arg('account')).account_id;
+  const original = resolveAccountSnapshot(db, accountId, h.arg('snapshot')).snapshot;
+  const tradeDate = h.arg('trade-date') ?? original.as_of.replace(/-/g, '');
+  const snapshot = resolveAccountState(db, accountId, tradeDate, h.arg('snapshot')).snapshot;
   const summary = accountSummary(snapshot);
-  const tradeDate = h.arg('trade-date') ?? snapshot.as_of.replace(/-/g, '');
+  const accountGate = evaluateAccountStatus(db, original, accountId, tradeDate);
 
   // 默认只信任服务端只读缓存（--market-db，缺省 ASHARE_DB_PATH）；
   // 只有显式 --mode research 才接受 --sell-price/--buy-price 的自填价格。
@@ -794,7 +815,8 @@ export function runScenario(db: DatabaseSync, action: string, h: PortfolioCliHel
       action: scenarioAction,
       evidence,
       resolved: bundle.resolved,
-      preconditions: bundle.preconditions,
+      preconditions: [...bundle.preconditions, ...(!accountGate.ok || accountGate.unreported_trade_risk ? [{ code: 'account_not_current' as const, detail: 'Account ledger completeness or verification is insufficient' }] : [])],
+      ...(!h.arg('commission') && !h.arg('slippage') ? { fee_context: loadFeeContext(db, accountId, tradeDate) } : {}),
       rules: { fees, stress },
     }),
     quote_mode: bundle.mode,

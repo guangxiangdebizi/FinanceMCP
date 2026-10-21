@@ -4,7 +4,8 @@ import {
   THEME_BY_CODE, THEME_LABELS, accountSummary, latestSnapshot, readSnapshot, round, valueCents,
   type AccountSnapshot, type AccountSummary,
 } from './account.js';
-import { realAccountGate, type RealAccountStatus } from './ledger.js';
+import { realAccountGate, settlementCalendarFromDb, type RealAccountStatus } from './ledger.js';
+import { resolveAccountState } from './accounts.js';
 import {
   ASSET_CLASSES, ASSET_CLASS_LABELS, INDUSTRY_BY_CODE, buildDecision, classifyAssetClass,
   loadEtfQuote, normalizeSecurityCode,
@@ -601,9 +602,8 @@ export function buildResearchSummary(input: ResearchSummaryInput): any {
   const fatal: ReasonCode[] = [];
   const warnings: string[] = [];
 
-  const snapshot: AccountSnapshot | undefined = input.snapshotId
-    ? readSnapshot(portfolioDb, input.snapshotId)
-    : latestSnapshot(portfolioDb);
+  const snapshot: AccountSnapshot | undefined = resolveAccountState(portfolioDb, accountId, asOf, input.snapshotId,
+    { calendar: marketDb ? settlementCalendarFromDb(marketDb) : undefined }).snapshot;
   if (!snapshot) {
     fatal.push({ code: 'snapshot_missing', detail: input.snapshotId ? `账户快照 ${input.snapshotId} 不存在` : '账户库中没有任何快照' });
   } else if (!snapshot.is_current) {

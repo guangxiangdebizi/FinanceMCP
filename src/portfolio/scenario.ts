@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { calculateFees, feeRulesFor, type FeeContext } from './fees.js';
+export type { FeeBreakdown } from './fees.js';
+import type { FeeBreakdown } from './fees.js';
 import type { AccountSummary, PositionWeight, SnapshotPosition } from './account.js';
 import { THEME_BY_CODE, THEME_LABELS, round, valueCents } from './account.js';
 import type { ResolvedInstrument } from './instrument.js';
@@ -105,6 +108,7 @@ export interface ScenarioInput {
   quotes: Map<string, EtfQuoteInput> | Record<string, EtfQuoteInput>;
   action: ScenarioAction;
   rules?: { fees?: FeeRules; lots?: LotRules; stress?: StressRules; stock?: StockRules };
+  fee_context?: FeeContext;
   /** 候选相对优势证据；缺省视为"无证据"。 */
   evidence?: ScenarioEvidence | null;
   /** 本次情景是否读取到了 ETF 份额数据；R0 默认为 false，会写入 warning。 */
@@ -145,15 +149,6 @@ export type ReasonCode =
 export interface Reason {
   code: ReasonCode;
   detail: string;
-}
-
-export interface FeeBreakdown {
-  commission_cents: number;
-  transfer_fee_cents: number;
-  stamp_duty_cents: number;
-  slippage_estimate_cents: number;
-  total_cents: number;
-  assumed: true;
 }
 
 export interface PositionAfter {
@@ -361,18 +356,10 @@ export function inferInstrumentKind(code: string): InstrumentKind {
  * 滑点按估计比例从现金中扣除，是保守成本，不是真实成交价差。
  */
 export function computeFees(grossCents: number, side: 'buy' | 'sell', rules: FeeRules): FeeBreakdown {
-  const commission = Math.max(Math.round(grossCents * rules.commission_rate), rules.commission_min_cents);
-  const transfer = Math.round(grossCents * rules.transfer_fee_rate);
-  const stamp = side === 'sell' ? Math.round(grossCents * rules.stamp_duty_rate) : 0;
-  const slippage = Math.round(grossCents * rules.slippage_rate_per_side);
-  return {
-    commission_cents: commission,
-    transfer_fee_cents: transfer,
-    stamp_duty_cents: stamp,
-    slippage_estimate_cents: slippage,
-    total_cents: commission + transfer + stamp + slippage,
-    assumed: true,
-  };
+  const calculated = calculateFees(grossCents, side, rules);
+  if (rules.fee_model) return calculated;
+  const { actual_fee_estimate_cents: _actual, ...legacy } = calculated;
+  return legacy;
 }
 
 /** 一笔买入（含费用）的总现金需求。 */
@@ -550,8 +537,8 @@ export function buildScenario(input: ScenarioInput): ScenarioResult {
   const sellIsStock = sellIdentity.kind === 'STOCK';
   const buyIsStock = buyIdentity.kind === 'STOCK';
   const tPlusOne = sellIsStock || buyIsStock;
-  const sellFeeRules = sellIsStock ? stockRules.fees : fees;
-  const buyFeeRules = buyIsStock ? stockRules.fees : fees;
+  const sellFeeRules = input.fee_context ? feeRulesFor(input.fee_context, sellCode!, sellIsStock ? 'STOCK' : 'ETF') : sellIsStock ? stockRules.fees : fees;
+  const buyFeeRules = input.fee_context ? feeRulesFor(input.fee_context, buyCode!, buyIsStock ? 'STOCK' : 'ETF') : buyIsStock ? stockRules.fees : fees;
   const sellLotMultiple = sellIsStock ? stockRules.sell_multiple : lotsRule.etf_sell_multiple;
   const sellAllowOdd = sellIsStock ? stockRules.allow_odd_lot_sell : lotsRule.allow_odd_lot_sell;
   const buyLotSize = buyIsStock ? stockRules.lot_size : lotsRule.etf_lot_size;
@@ -953,7 +940,7 @@ function decisionId(
       ? { advantage: input.evidence.advantage, basis: input.evidence.basis, source: input.evidence.source ?? 'UNVERIFIED', evidence_id: input.evidence.evidence_id ?? null }
       : null,
     shares: input.share_data_available === true,
-    rules: { fees, lots, stress },
+    rules: { fees, lots, stress, stock: input.rules?.stock ?? null, fee_context: input.fee_context ?? null },
   });
   return createHash('sha256').update(canonical).digest('hex');
 }

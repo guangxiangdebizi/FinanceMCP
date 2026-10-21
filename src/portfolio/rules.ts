@@ -10,6 +10,8 @@
 
 /** 费率规则。所有字段均为假设值，见 FEE_RULE_PROVENANCE。 */
 export interface FeeRules {
+  /** Resolved per-field evidence and billing uncertainty, when resolved by fees.ts. */
+  fee_model?: import('./fees.js').FeeResolution;
   /** 佣金费率（单边）。 */
   commission_rate: number;
   /** 单笔最低佣金（分）。 */
@@ -48,7 +50,7 @@ export const DEFAULT_LOT_RULES: LotRules = {
   allow_odd_lot_sell: false,
 };
 
-export const FEE_RULE_VERSION = 'r0-fees-1.0.0';
+export const FEE_RULE_VERSION = 'fees-2.0.0';
 export const LOT_RULE_VERSION = 'r0-lots-1.0.0';
 export const STRESS_RULE_VERSION = 'r0-stress-1.0.0';
 export const STOCK_RULE_VERSION = 'r1-stock-1.0.0';
@@ -58,7 +60,7 @@ type Provenance = { assumed: true; source: string };
 const P = (source: string): Provenance => ({ assumed: true, source });
 
 /** 每个假设值的来源标注，随每次情景输出一起返回。 */
-export const FEE_RULE_PROVENANCE: Record<keyof FeeRules, Provenance> = {
+export const FEE_RULE_PROVENANCE: Record<Exclude<keyof FeeRules, 'fee_model'>, Provenance> = {
   commission_rate: P('assumed: PRD §14 待确认（券商实际佣金率未核对）'),
   commission_min_cents: P('assumed: PRD §14 待确认（券商最低佣金未核对）'),
   transfer_fee_rate: P('assumed: ETF 场内交易按无过户费处理，PRD §14 未确认'),
@@ -168,7 +170,7 @@ export function describeRules(
   stock: StockRules = DEFAULT_STOCK_RULES,
 ) {
   return {
-    fees: { version: FEE_RULE_VERSION, assumed: true as const, values: { ...fees }, provenance: FEE_RULE_PROVENANCE },
+    fees: { version: fees.fee_model?.version ?? FEE_RULE_VERSION, assumed: fees.fee_model?.estimated ?? true, values: { ...fees }, provenance: fees.fee_model?.evidence ?? FEE_RULE_PROVENANCE },
     lots: { version: LOT_RULE_VERSION, assumed: true as const, values: { ...lots }, provenance: LOT_RULE_PROVENANCE },
     stock: describeStockRules(stock),
     stress: { version: STRESS_RULE_VERSION, assumed: true as const, values: { ...stress }, provenance: STRESS_RULE_PROVENANCE },
