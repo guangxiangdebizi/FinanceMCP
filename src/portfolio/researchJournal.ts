@@ -40,12 +40,18 @@ CREATE TABLE IF NOT EXISTS research_journal (
  content_json TEXT NOT NULL, recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS research_journal_account_date ON research_journal(account_id,as_of_trade_date);
+CREATE TRIGGER IF NOT EXISTS research_journal_no_replace BEFORE INSERT ON research_journal
+ WHEN EXISTS (SELECT 1 FROM research_journal WHERE record_id=NEW.record_id)
+ BEGIN SELECT RAISE(ABORT,'research_journal is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS research_journal_no_update BEFORE UPDATE ON research_journal BEGIN SELECT RAISE(ABORT,'research_journal is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS research_journal_no_delete BEFORE DELETE ON research_journal BEGIN SELECT RAISE(ABORT,'research_journal is immutable'); END;
 CREATE TABLE IF NOT EXISTS research_journal_evaluation (
  evaluation_id TEXT PRIMARY KEY, record_id TEXT NOT NULL, account_id TEXT NOT NULL,
  as_of_trade_date TEXT NOT NULL, content_hash TEXT NOT NULL, content_json TEXT NOT NULL, recorded_at TEXT NOT NULL
 );
+CREATE TRIGGER IF NOT EXISTS research_journal_evaluation_no_replace BEFORE INSERT ON research_journal_evaluation
+ WHEN EXISTS (SELECT 1 FROM research_journal_evaluation WHERE evaluation_id=NEW.evaluation_id)
+ BEGIN SELECT RAISE(ABORT,'research_journal_evaluation is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS research_journal_evaluation_no_update BEFORE UPDATE ON research_journal_evaluation BEGIN SELECT RAISE(ABORT,'research_journal_evaluation is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS research_journal_evaluation_no_delete BEFORE DELETE ON research_journal_evaluation BEGIN SELECT RAISE(ABORT,'research_journal_evaluation is immutable'); END;
 `;
@@ -101,13 +107,24 @@ function normalized(input: ResearchJournalInput): ResearchJournalInput {
   return JSON.parse(canonicalJson(record));
 }
 
+function checkedJournalRow(row: any): JournalRecord {
+  const content = JSON.parse(row.content_json);
+  if (hash(content) !== row.content_hash || content.record_id !== row.record_id
+    || content.account_id !== row.account_id || content.source !== row.source
+    || content.as_of_trade_date !== row.as_of_trade_date || content.bundle_id !== row.bundle_id) {
+    throw new Error(`journal_integrity_error: ${row.record_id}`);
+  }
+  return { ...content, content_hash: row.content_hash, recorded_at: row.recorded_at };
+}
 export function readResearchJournal(db: DatabaseSync, id: string): JournalRecord | null {
   if (!table(db, 'research_journal')) return null;
   const row = db.prepare('SELECT * FROM research_journal WHERE record_id=?').get(id) as any;
-  return row ? { ...JSON.parse(row.content_json), content_hash: row.content_hash, recorded_at: row.recorded_at } : null;
+  return row ? checkedJournalRow(row) : null;
 }
 export function recordResearchJournal(db: DatabaseSync, input: ResearchJournalInput) {
   const record = normalized(input), digest = hash(record);
+  // Explicit write entrypoint also installs additive protections on earlier journal tables.
+  db.exec(SCHEMA);
   const existing = readResearchJournal(db, record.record_id);
   if (existing) {
     if (existing.content_hash !== digest) throw new Error(`journal_id_conflict: ${record.record_id}; append a correction with a new ID`);
@@ -122,7 +139,6 @@ export function recordResearchJournal(db: DatabaseSync, input: ResearchJournalIn
     const sources = new Set(record.parent_record_ids!.map(id => readResearchJournal(db, id)!.source));
     if (!sources.has('vps') || !sources.has('chatgpt')) throw new Error('Combined research requires actual VPS and ChatGPT parent records');
   }
-  db.exec(SCHEMA);
   const recordedAt = new Date().toISOString();
   db.prepare('INSERT INTO research_journal VALUES (?,?,?,?,?,?,?,?)').run(record.record_id, record.account_id, record.source, record.as_of_trade_date, record.bundle_id, digest, canonicalJson(record), recordedAt);
   return { created: true, record: { ...record, content_hash: digest, recorded_at: recordedAt } };
@@ -131,7 +147,7 @@ export function listResearchJournal(db: DatabaseSync, input: { accountId: string
   if (!table(db, 'research_journal')) return [];
   const limit = Math.min(1000, Math.max(1, Math.trunc(input.limit ?? 100)));
   return (db.prepare('SELECT * FROM research_journal WHERE account_id=? AND as_of_trade_date<=? ORDER BY as_of_trade_date DESC,record_id LIMIT ?').all(input.accountId, input.asOf ?? '99991231', limit) as any[])
-    .map(row => ({ ...JSON.parse(row.content_json), content_hash: row.content_hash, recorded_at: row.recorded_at }));
+    .map(checkedJournalRow);
 }
 
 export type JournalFeeEstimator = (input: { ts_code: string; side: 'BUY' | 'SELL'; quantity: number; price_milli: number; trade_date: string }) => { total_cents: number; estimated: boolean; version: string } | null;
@@ -287,8 +303,14 @@ export function recordJournalEvaluations(db: DatabaseSync, results: JournalEvalu
       const original = readResearchJournal(db, result.record_id);
       if (!original || original.account_id !== result.account_id || original.content_hash !== result.record_content_hash) throw new Error('Evaluation original record mismatch');
       const digest = hash(result);
-      const row = db.prepare('SELECT content_hash FROM research_journal_evaluation WHERE evaluation_id=?').get(result.evaluation_id) as any;
-      if (row) { if (row.content_hash !== digest) throw new Error('evaluation_id_conflict'); continue; }
+      const row = db.prepare('SELECT * FROM research_journal_evaluation WHERE evaluation_id=?').get(result.evaluation_id) as any;
+      if (row) {
+        const stored = JSON.parse(row.content_json);
+        if (hash(stored) !== row.content_hash || stored.record_id !== row.record_id || stored.account_id !== row.account_id
+          || stored.as_of_trade_date !== row.as_of_trade_date || stored.evaluation_id !== row.evaluation_id) throw new Error('evaluation_integrity_error');
+        if (row.content_hash !== digest) throw new Error('evaluation_id_conflict');
+        continue;
+      }
       db.prepare('INSERT INTO research_journal_evaluation VALUES (?,?,?,?,?,?,?)').run(result.evaluation_id, result.record_id, result.account_id, result.as_of_trade_date, digest, canonicalJson(result), new Date().toISOString());
       created++;
     }

@@ -46,10 +46,24 @@ test('journal imports are canonical, immutable, account isolated and corrections
     assert.throws(() => journal.recordResearchJournal(db, record('r1', { judgement: 'rewritten' })), /journal_id_conflict/);
     assert.throws(() => db.exec("UPDATE research_journal SET content_json='{}'"), /immutable/);
     assert.throws(() => db.exec('DELETE FROM research_journal'), /immutable/);
+    db.exec('PRAGMA recursive_triggers=OFF');
+    assert.throws(() => db.exec("INSERT OR REPLACE INTO research_journal SELECT record_id,account_id,source,as_of_trade_date,bundle_id,content_hash,'{}',recorded_at FROM research_journal WHERE record_id='r1'"), /immutable/);
+    assert.throws(() => db.exec("REPLACE INTO research_journal SELECT * FROM research_journal WHERE record_id='r1'"), /immutable/);
     assert.equal(journal.recordResearchJournal(db, record('r2', { correction_of: 'r1', judgement: 'corrected' })).created, true);
     assert.equal(journal.listResearchJournal(db, { accountId: 'other' }).length, 0);
     assert.deepEqual(journal.readResearchJournal(db, 'r1').judgement, { conclusion: 'observe' });
     assert.throws(() => journal.recordResearchJournal(db, record('r3', { account_id: 'other', correction_of: 'r1' })), /same account/);
+  } finally { db.close(); }
+});
+test('journal reads fail closed on an earlier database whose content was replaced without updating its digest', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    recordAt(db, record());
+    db.exec('DROP TRIGGER research_journal_no_replace; PRAGMA recursive_triggers=OFF');
+    db.exec("INSERT OR REPLACE INTO research_journal SELECT record_id,account_id,source,as_of_trade_date,bundle_id,content_hash,'{}',recorded_at FROM research_journal");
+    assert.throws(() => journal.readResearchJournal(db, 'r1'), /journal_integrity_error/);
+    assert.throws(() => journal.listResearchJournal(db, { accountId: 'synthetic' }), /journal_integrity_error/);
+    assert.throws(() => recordAt(db, record()), /journal_integrity_error/);
   } finally { db.close(); }
 });
 test('ChatGPT and combined results require real provenance and actual source parents', () => {
@@ -86,6 +100,8 @@ test('evaluation matures on trading sessions, deducts costs and uses exact bench
     assert.deepEqual(journal.recordJournalEvaluations(db, [result]), { created: 1, existing: 0 });
     assert.deepEqual(journal.recordJournalEvaluations(db, [result]), { created: 0, existing: 1 });
     assert.throws(() => db.exec('DELETE FROM research_journal_evaluation'), /immutable/);
+    db.exec('PRAGMA recursive_triggers=OFF');
+    assert.throws(() => db.exec('INSERT OR REPLACE INTO research_journal_evaluation SELECT * FROM research_journal_evaluation'), /immutable/);
   } finally { db.close(); }
 });
 test('observe and hypothetical long stay separate from actual trades, including missing risk bars', () => {
