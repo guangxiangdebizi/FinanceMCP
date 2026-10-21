@@ -8,6 +8,7 @@ import { buildScenario } from './scenario.js';
 import { resolveAccountId, resolveAccountSnapshot, resolveAccountState } from './accounts.js';
 import { loadFeeContext } from './fees.js';
 import { evaluateAccountStatus } from './decision.js';
+import { trustedEvidencePolicy, verifyTrustedRotation } from './trustedEvidence.js';
 
 /**
  * MCP 账户工具实现。与市场工具隔离：账户数据只从 `portfolio.sqlite`（只读）读取；
@@ -117,12 +118,18 @@ function scenarioTool(args: Record<string, any>): ToolResult {
           as_of: args.evidence_as_of === undefined ? undefined : ymdOr(args.evidence_as_of, tradeDate),
         };
 
+    const verification = evidence && action.type === 'SELL_AND_BUY' ? verifyTrustedRotation(db, {
+      evidence_id: evidence.evidence_id, claim: evidence.basis, buyCode: action.buy_code, sellCode: action.sell_code, asOf: tradeDate,
+    }, trustedEvidencePolicy()) : null;
+    const checkedEvidence = evidence ? { ...evidence,
+      source: verification?.verified && evidence.source === 'RESEARCH_VERIFIED' ? 'RESEARCH_VERIFIED' as const : 'UNVERIFIED' as const,
+    } : null;
     const result = buildScenario({
       snapshot: summary,
       as_of_trade_date: tradeDate,
       quotes: bundle.quotes,
       action,
-      evidence,
+      evidence: checkedEvidence,
       resolved: bundle.resolved,
       preconditions: [...bundle.preconditions, ...(!accountGate.ok || accountGate.unreported_trade_risk ? [{ code: 'account_not_current' as const, detail: 'Account ledger completeness or verification is insufficient' }] : [])],
       fee_context: loadFeeContext(db, accountId, tradeDate),
@@ -131,6 +138,7 @@ function scenarioTool(args: Record<string, any>): ToolResult {
 
     return json({
       ...result,
+      evidence_verification: verification ? { verified: verification.verified, reason: verification.reason } : null,
       quote_mode: bundle.mode,
       server_quote_source: 'market_cache',
       server_quotes: bundle.server_quotes.map(q => ({

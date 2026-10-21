@@ -52,6 +52,7 @@ test('stock/ETF taxes, slippage isolation and zero notional', () => {
   assert.equal(stock.transfer_fee_cents, 10);
   assert.equal(etf.stamp_duty_cents, 0);
   assert.equal(etf.transfer_fee_cents, 0);
+  assert.notEqual(stock.fee_model.version, etf.fee_model.version, 'fee version binds asset kind and resolved taxes');
   assert.equal(stock.total_cents, stock.actual_fee_estimate_cents + stock.slippage_estimate_cents);
   assert.equal(calculateFees(0, 'buy', feeRulesFor(ctx, '159999.SZ', 'ETF')).total_cents, 0);
   assert.throws(() => calculateFees(-1, 'buy', feeRulesFor(ctx, '159999.SZ', 'ETF')), /nonnegative/);

@@ -501,8 +501,8 @@ test('14c. 开启门控后账户工具只在私有清单出现，且描述声明
   for (const name of ['ashare_portfolio_summary', 'ashare_portfolio_scenario']) {
     const tool = tools.find(t => t.name === name);
     assert.equal(tool.annotations.readOnlyHint, true);
-    assert.match(tool.description, /演示\/只读账户/);
-    assert.match(tool.description, /假设值/);
+    assert.match(tool.description, /只读账户/);
+    assert.match(tool.description, /CONFIRMED\/PUBLIC_REFERENCE\/ASSUMED\/UNKNOWN/);
     assert.match(tool.description, /隔离/);
   }
   // 读取的是真实导入的账户库

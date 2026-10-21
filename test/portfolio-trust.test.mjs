@@ -25,6 +25,8 @@ const account = await import('../build/portfolio/account.js');
 const { runPortfolioTool } = await import('../build/portfolio/tools.js');
 const instrument = await import('../build/portfolio/instrument.js');
 const ledger = await import('../build/portfolio/ledger.js');
+const evidenceStore = await import('../build/portfolio/evidence.js');
+process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES = JSON.stringify([{ strategy_id: 'fixture-trust', source: 'synthetic-validation', rule_version: 'fixture-1' }]);
 
 const { DEMO_SNAPSHOT, DEMO_SNAPSHOT_ID, accountSummary, importDemoSnapshot, importSnapshot, markSnapshotCurrent } = account;
 
@@ -126,6 +128,12 @@ for (const snapshot of [ETF_CURRENT, STOCK_CURRENT]) {
   ledger.initBaseline(pdb, snapshot.snapshot_id, { asOf: LAST, snapshotId: snapshot.snapshot_id });
   ledger.confirmRealAccount(pdb, snapshot.snapshot_id, { confirm: true });
   ledger.setAccountCompleteness(pdb, snapshot.snapshot_id, { as_of: LAST, reported_events_through: LAST, unreported_trade_risk: false }, { confirm: true, recordedBy: 'fixture' });
+}
+for (const [id, buy, sell] of [['TEST-EVID-1', '510300.SH', '159558.SZ'], ['TEST-EVID-STOCK', '601318.SH', '600000.SH']]) {
+  evidenceStore.recordResearchEvidence(pdb, { evidence_id: id, kind: 'ROTATION', buy_code: buy, sell_code: sell,
+    strategy_id: 'fixture-trust', as_of: LAST, status: 'VERIFIED', recorded_by: 'fixture',
+    provenance: { source: 'synthetic-validation', rule_version: 'fixture-1', claim: '合成测试证据', validation_run_id: 'fixture-run', observation_type: 'WALK_FORWARD_VALIDATION' },
+  }, { confirm: true });
 }
 pdb.close();
 
@@ -361,7 +369,7 @@ test('A4-11. 当前账户 + 服务端缓存行情 + 已验证证据 + ETF → EX
 test('A4-12. 主板个股买入（股票规则）→ EXECUTABLE，卖出含印花税且 t_plus_one=true', async () => {
   const s = await callAsStock({
     action: 'sell-buy', sell_code: '600000.SH', sell_shares: 10000, buy_code: '601318.SH',
-    as_of_trade_date: LAST, ...VERIFIED,
+    as_of_trade_date: LAST, ...VERIFIED, evidence_id: 'TEST-EVID-STOCK',
   });
   assert.equal(s.status, 'EXECUTABLE', JSON.stringify(s.reasons));
   assert.equal(s.t_plus_one, true);
@@ -386,6 +394,47 @@ test('A4-12b. ETF 情景不套用个股印花税/过户费', async () => {
   });
   assert.equal(s.trade.sell.fees.stamp_duty_cents, 0);
   assert.equal(s.trade.sell.fees.transfer_fee_cents, 0);
+});
+
+test('private scenario verifies stored provenance and ignores client attempts to disable strict checks', async () => {
+  const args = { action: 'sell-buy', sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', as_of_trade_date: LAST, ...VERIFIED };
+  for (const patch of [{ evidence_id: 'made-up' }, { advantage_basis: 'different claim' }, { strict: false, trusted_evidence_policy: { requireProvenance: false }, evidence_id: 'made-up' }]) {
+    const result = await callAsEtf({ ...args, ...patch });
+    assert.notEqual(result.status, 'EXECUTABLE');
+    assert.equal(result.evidence.verified, false);
+    assert.equal(result.trade.sell.quantity, 0);
+  }
+  const original = process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES;
+  try {
+    process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES = JSON.stringify([{ strategy_id: 'fixture-trust', source: 'wrong-source', rule_version: 'fixture-1' }]);
+    assert.equal((await callAsEtf(args)).evidence.verified, false);
+    process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES = JSON.stringify([{ strategy_id: 'fixture-trust', source: 'synthetic-validation', rule_version: 'wrong-version' }]);
+    assert.equal((await callAsEtf(args)).evidence.verified, false);
+  } finally { process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES = original; }
+});
+
+test('private decision tool binds source, strategy, rule version and concrete claim on real calls', async () => {
+  setCurrent(ETF_CURRENT.snapshot_id);
+  const { runDecisionTool } = await import('../build/portfolio/decisionTool.js');
+  const invoke = async patch => JSON.parse((await runDecisionTool({ account_id: ETF_CURRENT.snapshot_id, action: 'sell-buy',
+    sell_code: '159558.SZ', sell_shares: 10000, buy_code: '510300.SH', as_of_trade_date: LAST,
+    advantage_source: 'RESEARCH_VERIFIED', advantage_claim: '合成测试证据', advantage_evidence_id: 'TEST-EVID-1', ...patch,
+  })).content[0].text);
+  const good = await invoke({});
+  assert.equal(good.evidence.verified, true);
+  assert.equal(good.status, 'ACTIONABLE', JSON.stringify(good.reasons));
+  for (const patch of [{ advantage_claim: 'different claim' }, { advantage_evidence_id: 'made-up' },
+    { strict: false, trusted_evidence_policy: { strategies: [] }, advantage_claim: 'different claim' }]) {
+    const result = await invoke(patch);
+    assert.equal(result.evidence.verified, false);
+    assert.notEqual(result.status, 'ACTIONABLE');
+    assert.deepEqual(result.options.find(option => option.action === 'SELL_AND_BUY').legs, []);
+  }
+  const original = process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES;
+  try {
+    delete process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES;
+    assert.equal((await invoke({})).evidence.verified, false, 'unregistered strategies fail closed');
+  } finally { process.env.ASHARE_RESEARCH_TRUSTED_STRATEGIES = original; }
 });
 
 // ---------------------------------------------------------------- 13. 隐私门控

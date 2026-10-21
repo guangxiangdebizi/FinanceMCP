@@ -9,6 +9,7 @@ import {
 import { affordableLots, computeFees, type FeeBreakdown } from './scenario.js';
 import { loadFeeContext, feeRulesFor } from './fees.js';
 import { resolveAccountState } from './accounts.js';
+import { verifyTrustedRotation, trustedEvidencePolicy, type TrustedEvidencePolicy } from './trustedEvidence.js';
 import { accountSummary, readSnapshot } from './account.js';
 import {
   checkInstrumentClaim, normalizeSecurityCode, resolveInstrument,
@@ -377,6 +378,8 @@ export interface StockPlanInput {
 }
 
 export interface DecisionInput {
+  /** Server-only configuration; private tool mappers always supply the deployment policy. */
+  trusted_evidence_policy?: TrustedEvidencePolicy;
   account_id: string;
   snapshot: AccountSummary;
   as_of_trade_date: string;
@@ -1209,6 +1212,7 @@ export function buildDecision(input: DecisionInput): DecisionResult {
 
   const before = buildState(input, quotes);
   const evidence = normalizeEvidence(input.evidence, {
+    policy: input.trusted_evidence_policy,
     portfolioDb,
     asOf,
     buyCode: input.action.type === 'SELL_AND_BUY' ? normalizeSecurityCode(input.action.buy_code) : null,
@@ -1830,7 +1834,7 @@ function optionActionOf(type: DecisionAction['type']): OptionAction {
 
 function normalizeEvidence(
   claim: RotationClaim | null | undefined,
-  ctx: { portfolioDb: DatabaseSync | null; asOf: string; buyCode: string | null; sellCode: string | null },
+  ctx: { portfolioDb: DatabaseSync | null; asOf: string; buyCode: string | null; sellCode: string | null; policy?: TrustedEvidencePolicy },
 ): DecisionResult['evidence'] {
   if (!claim) {
     return {
@@ -1842,13 +1846,11 @@ function normalizeEvidence(
   const evidenceId = claim.evidence_id?.trim() || null;
   const strict = !!ctx.portfolioDb?.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_meta'").get()
     && (ctx.portfolioDb.prepare('SELECT value FROM account_meta WHERE key=?').get('research_evidence_require_provenance') as any)?.value === '1';
-  const result = verifyResearchEvidence(ctx.portfolioDb, { evidence_id: evidenceId }, {
-    buyCode: ctx.buyCode ?? '',
-    sellCode: ctx.sellCode,
-    asOf: ctx.asOf,
-    expectedKind: 'ROTATION',
-    requireProvenance: strict,
-    ...(strict ? { expectedClaim: claim.claim } : {}),
+  const policy = ctx.policy ?? (strict ? trustedEvidencePolicy() : undefined);
+  const result = policy ? verifyTrustedRotation(ctx.portfolioDb, {
+    evidence_id: evidenceId, claim: claim.claim, buyCode: ctx.buyCode ?? '', sellCode: ctx.sellCode, asOf: ctx.asOf,
+  }, policy) : verifyResearchEvidence(ctx.portfolioDb, { evidence_id: evidenceId }, {
+    buyCode: ctx.buyCode ?? '', sellCode: ctx.sellCode, asOf: ctx.asOf, expectedKind: 'ROTATION',
   });
   const sourceMatches = claim.source === 'RESEARCH_VERIFIED';
   const verified = sourceMatches && result.verified;
@@ -1917,6 +1919,7 @@ function decisionId(
     rules: {
       fees, lots, stock: input.rules?.stock ?? null,
       fee_profiles: loadFeeContext(input.portfolio_db, input.account_id, input.as_of_trade_date).profiles,
+      trusted_evidence_policy: input.trusted_evidence_policy ?? null,
       stress_version: stress.version,
       stress_shocks: stress.shocks,
       industry_map_version: INDUSTRY_MAP_VERSION,

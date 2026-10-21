@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { ashareDbPath } from '../ashare/db.js';
 import { accountSummary } from './account.js';
 import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
+import { trustedEvidencePolicy } from './trustedEvidence.js';
 import { openPortfolioDb, portfolioDbPath } from './db.js';
 import { buildDecision, type DecisionAction, type RotationClaim } from './decision.js';
 import type { PortfolioCliHelpers } from './cli.js';
@@ -103,6 +104,7 @@ export function runDecisionCommand(h: PortfolioCliHelpers): boolean {
       market_db: market,
       // 研究证据与真实账户门控只从独立账户库复核；没有它一律不可执行。
       portfolio_db: db,
+      trusted_evidence_policy: trustedEvidencePolicy(),
       action,
       evidence,
       stock_plan: stockPlan,

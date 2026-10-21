@@ -185,7 +185,7 @@ test('V1-P5 benchmarks are UNAVAILABLE rather than fabricated when data is missi
   try {
     const res = await server.rpc('/private/mcp', 'tools/call', {
       name: 'ashare_portfolio_benchmarks',
-      arguments: {},
+      arguments: { account_id: 'synthetic-private', end_date: '20261016' },
     }, AUTH);
     assert.equal(res.status, 200, res.text);
     const cmp = JSON.parse(res.body.result.content[0].text);

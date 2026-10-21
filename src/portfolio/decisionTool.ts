@@ -5,6 +5,7 @@ import { accountSummary } from './account.js';
 import { resolveAccountId, resolveAccountSnapshot } from './accounts.js';
 import { openPortfolioDb, portfolioDbPath, portfolioEnabled } from './db.js';
 import { buildDecision, type DecisionAction, type DecisionInput, type RotationClaim } from './decision.js';
+import { trustedEvidencePolicy } from './trustedEvidence.js';
 
 /**
  * 私有账户工具 `ashare_portfolio_decision` 的实现。
@@ -107,6 +108,7 @@ export function decisionInputFromArgs(args: Record<string, any>, db: DatabaseSyn
     market_db: market,
     // 私有端点传入的只读账户库：证据校验与真实账户门控都依赖它。
     portfolio_db: db,
+    trusted_evidence_policy: trustedEvidencePolicy(),
     action,
     evidence,
     stock_plan: stockPlan,

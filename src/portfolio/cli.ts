@@ -25,6 +25,7 @@ import { buildBenchmarkComparison } from './benchmarks.js';
 import { runFeeCommand, FEE_USAGE } from './feeCli.js';
 import { parseTradeCsv } from './tradeImport.js';
 import { loadFeeContext } from './fees.js';
+import { trustedEvidencePolicy, verifyTrustedRotation } from './trustedEvidence.js';
 import {
   EVIDENCE_STATUSES, ensureEvidenceSchema, readEvidenceStatusHistory, recordResearchEvidence,
   revokeResearchEvidence, type EvidenceStatus,
@@ -833,7 +834,9 @@ export function runScenario(db: DatabaseSync, action: string, h: PortfolioCliHel
       as_of_trade_date: tradeDate,
       quotes: bundle.quotes,
       action: scenarioAction,
-      evidence,
+      evidence: evidence ? { ...evidence, source: scenarioAction.type === 'SELL_AND_BUY' && evidence.source === 'RESEARCH_VERIFIED'
+        && verifyTrustedRotation(db, { evidence_id: evidence.evidence_id, claim: evidence.basis, buyCode: scenarioAction.buy_code,
+          sellCode: scenarioAction.sell_code, asOf: tradeDate }, trustedEvidencePolicy()).verified ? 'RESEARCH_VERIFIED' : 'UNVERIFIED' } : null,
       resolved: bundle.resolved,
       preconditions: [...bundle.preconditions, ...(!accountGate.ok || accountGate.unreported_trade_risk ? [{ code: 'account_not_current' as const, detail: 'Account ledger completeness or verification is insufficient' }] : [])],
       ...(!h.arg('commission') && !h.arg('slippage') ? { fee_context: loadFeeContext(db, accountId, tradeDate) } : {}),

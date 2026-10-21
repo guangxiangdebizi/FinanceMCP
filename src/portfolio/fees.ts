@@ -131,7 +131,9 @@ export function feeRulesFor(context: FeeContext, code: string, kind: 'ETF' | 'ST
   }
   const billingValue = <K extends 'aggregation' | 'rounding' | 'minimum_billing_unit' | 'regulatory_fees_included'>(key: K) => applied.filter(p => p[key] !== undefined).at(-1)?.[key] ?? 'UNKNOWN';
   values.fee_model = {
-    version: `${FEE_RULE_VERSION}:${createHash('sha256').update(JSON.stringify(applied)).digest('hex').slice(0, 12)}`,
+    version: `${FEE_RULE_VERSION}:${createHash('sha256').update(JSON.stringify({ kind, classification, values, evidence, profiles: applied,
+      aggregation: billingValue('aggregation'), rounding: billingValue('rounding'), minimum_billing_unit: billingValue('minimum_billing_unit'), regulatory_fees_included: billingValue('regulatory_fees_included'),
+    })).digest('hex').slice(0, 12)}`,
     classification, profile_ids: applied.map(p => p.id), evidence,
     estimated: FIELDS.some(f => evidence[f].level === 'ASSUMED' || evidence[f].level === 'UNKNOWN')
       || billingValue('aggregation') === 'UNKNOWN' || billingValue('rounding') === 'UNKNOWN'
