@@ -191,9 +191,11 @@ export type ResearchFee = (order: { ts_code: string; date: string; side: 'BUY' |
  * entitlement cannot be reconstructed stop the run rather than fabricate NAV. */
 export function simulateFunded(db: DatabaseSync, selections: { date: string; codes: string[] }[], options: { asOf: string; initial_cents: number; horizon: number; max_exit_delay: number; slippage_bps: number; fee: ResearchFee }) {
   if (!Number.isSafeInteger(options.initial_cents) || options.initial_cents <= 0 || !Number.isInteger(options.horizon) || options.horizon < 2 || !Number.isInteger(options.max_exit_delay) || options.max_exit_delay < 0 || !finite(options.slippage_bps) || options.slippage_bps < 0 || options.slippage_bps >= 10000) throw new Error('Invalid funded protocol');
+  if (selections.some((s,i)=>s.date>options.asOf || (i>0 && s.date<=selections[i-1].date))) throw new Error('Selection dates must be increasing and no later than asOf');
   const start = selections[0]?.date ?? options.asOf;
   const days = (db.prepare('SELECT cal_date FROM trade_cal WHERE is_open=1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date').all(start, options.asOf) as { cal_date: string }[]).map(r => r.cal_date);
-  const ix = new Map(days.map((d, i) => [d, i]));
+  const exchangeDays = new Set(days);
+  if(selections.some(s=>!exchangeDays.has(s.date))) throw new Error('Selection date outside exchange calendar');
   const bar = db.prepare(`SELECT d.open,d.close,d.vol,a.adj_factor,l.up_limit,l.down_limit,
     EXISTS(SELECT 1 FROM suspend_d s WHERE s.ts_code=d.ts_code AND s.trade_date=d.trade_date) suspended
     FROM daily d LEFT JOIN adj_factor a ON a.ts_code=d.ts_code AND a.trade_date=d.trade_date
@@ -201,7 +203,7 @@ export function simulateFunded(db: DatabaseSync, selections: { date: string; cod
   type Position = { code: string; quantity: number; entered: number; exit: number; factor: number; mark: number };
   const suspended = db.prepare('SELECT 1 FROM suspend_d WHERE ts_code=? AND trade_date=?');
   const positions: Position[] = [], nav: { date: string; cents: number; cash_cents: number; holdings: number }[] = [];
-  const orders: { date: string; side: string; quantity: number; price_cents: number; fees_cents: number; amount_cents: number; fee_version: string | null }[] = [];
+  const orders: { date: string; side: string; quantity: number; price_cents: number; fees_cents: number; amount_cents: number; slippage_cents: number; fee_version: string | null; fee_evidence: unknown }[] = [];
   const skipped: Record<string, number> = {};
   const skip = (reason: string) => { skipped[reason] = (skipped[reason] ?? 0) + 1; };
   let cash = options.initial_cents, fees = 0, turnover = 0, failure: string | null = null, lastSignal = -Infinity;
@@ -235,7 +237,8 @@ export function simulateFunded(db: DatabaseSync, selections: { date: string; cod
           const quote = getFee(code, date, 'BUY', price, quantity), amount = quantity * price;
           cash -= amount + quote.total_cents; fees += quote.total_cents; turnover += amount;
           positions.push({ code, quantity, entered: i, exit: i - 1 + options.horizon, factor: b.adj_factor, mark: b.open });
-          orders.push({ date, side: 'BUY', quantity, price_cents: price, fees_cents: quote.total_cents, amount_cents: amount, fee_version: quote.version ?? null });
+          orders.push({ date, side: 'BUY', quantity, price_cents: price, fees_cents: quote.total_cents, amount_cents: amount,
+            slippage_cents: quantity*(price-Math.round(b.open*100)), fee_version: quote.version ?? null, fee_evidence: quote.evidence ?? null });
         }
       }
     }
@@ -255,7 +258,8 @@ export function simulateFunded(db: DatabaseSync, selections: { date: string; cod
       if (price < Math.round(b.down_limit * 100)) { skip('slippage_exceeds_limit'); continue; }
       const quote = getFee(position.code, date, 'SELL', price, position.quantity), amount = price * position.quantity;
       cash += amount - quote.total_cents; fees += quote.total_cents; turnover += amount;
-      orders.push({ date, side: 'SELL', quantity: position.quantity, price_cents: price, fees_cents: quote.total_cents, amount_cents: amount, fee_version: quote.version ?? null });
+      orders.push({ date, side: 'SELL', quantity: position.quantity, price_cents: price, fees_cents: quote.total_cents, amount_cents: amount,
+        slippage_cents: position.quantity*(Math.round(b.close*100)-price), fee_version: quote.version ?? null, fee_evidence: quote.evidence ?? null });
       positions.splice(p, 1);
     }
     if (failure) break;
@@ -268,7 +272,7 @@ export function simulateFunded(db: DatabaseSync, selections: { date: string; cod
     initial_cents: options.initial_cents, final_nav_cents: failure ? null : nav.at(-1)?.cents ?? options.initial_cents,
     net_return: failure ? null : (nav.at(-1)?.cents ?? options.initial_cents) / options.initial_cents - 1,
     maximum_drawdown: failure ? null : mdd, daily_volatility: failure || returns.length < 2 ? null : Math.sqrt(returns.reduce((s, x) => s + (x - avg!) ** 2, 0) / (returns.length - 1)),
-    fees_cents: fees, turnover_notional_to_initial: turnover / options.initial_cents, order_count: orders.length, skipped, nav, orders,
+    fees_cents: fees, slippage_cents: orders.reduce((s,o)=>s+o.slippage_cents,0), turnover_notional_to_initial: turnover / options.initial_cents, order_count: orders.length, skipped, nav, orders,
     limitations: ['Explicit sampled long-only mainboard cohorts, 100-share lots, cash funded and T+1; not the deployed daily watchlist strategy.', 'Known suspensions retain the last observed mark; unknown marks and corporate actions stop the simulation. No corporate entitlement, queue or intraday liquidity model.', 'Unresolved final holdings are marked, not counted as successful exits. Historical data revisions and current metadata remain limitations.'] };
   return result;
   function skipCount(reason: string, count: number) { if (count) skipped[reason] = (skipped[reason] ?? 0) + count; }

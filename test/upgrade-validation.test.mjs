@@ -81,7 +81,8 @@ test('funded simulation uses cents, lots, actual fees, conservative cash and T+1
   const {db,days,code}=fundedFixture();
   try {const a=simulateFunded(db,[{date:days[0],codes:[code]}],{asOf:days.at(-1),initial_cents:200000,horizon:5,max_exit_delay:0,slippage_bps:0,fee});
     assert.equal(a.order_count,2);assert.equal(a.orders[0].quantity,100);assert.equal(a.orders[0].date,days[1]);assert.equal(a.orders[1].date,days[5]);
-    assert.equal(a.fees_cents,1000);assert.equal(a.final_nav_cents,199000);assert.ok(a.nav.every(n=>n.cash_cents>=0));
+    assert.equal(a.fees_cents,1000);assert.equal(a.slippage_cents,0);assert.equal(a.final_nav_cents,199000);assert.ok(a.nav.every(n=>n.cash_cents>=0));
+    assert.throws(()=>simulateFunded(db,[{date:days[1],codes:[code]},{date:days[0],codes:[code]}],{asOf:days.at(-1),initial_cents:200000,horizon:5,max_exit_delay:0,slippage_bps:0,fee}),/increasing/);
     const poor=simulateFunded(db,[{date:days[0],codes:[code]}],{asOf:days.at(-1),initial_cents:100000,horizon:5,max_exit_delay:0,slippage_bps:0,fee});
     assert.equal(poor.order_count,0);assert.equal(poor.skipped.insufficient_cash_for_lot,1);
   } finally {db.close();}
