@@ -37,6 +37,18 @@ done
 if docker exec "$CONTAINER" node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"; then
   echo "finance-ashare daily ok: $OUT"
   grep -E '"(report_id|status|trade_date|skipped)"' "$OUT" | head -5
+  # Observe frozen research only after the market pipeline finishes. Uses the same
+  # container runtime and a separate registry, never rewriting the live pool.
+  if docker exec "$CONTAINER" test -f /data/research-validation/validation.sqlite; then
+    if docker exec "$CONTAINER" node build/ashare/cli.js research-validation observe \
+      --source /data/ashare.sqlite --research-db /data/research-validation/validation.sqlite \
+      >"$LOG_DIR/validation-$STAMP.json" 2>"$LOG_DIR/validation-$STAMP.log"; then
+      echo "finance-ashare validation observation finished: $LOG_DIR/validation-$STAMP.json"
+    else
+      echo "finance-ashare validation observation FAILED (market report retained); see $LOG_DIR/validation-$STAMP.log" >&2
+      exit 76
+    fi
+  fi
 else
   code=$?
   echo "finance-ashare daily FAILED (exit $code), see $ERR" >&2

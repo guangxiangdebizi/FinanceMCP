@@ -31,6 +31,8 @@ services:
       # Private account ledger: a SEPARATE SQLite file outside the market cache,
       # reachable only through the authenticated /private/mcp endpoint.
       ASHARE_PORTFOLIO_DB_PATH: /private/portfolio.sqlite
+      # Read-only research projection; explicit offline/scheduled commands populate it.
+      ASHARE_VALIDATION_DB_PATH: /data/research-validation/validation.sqlite
       # Empty means the private endpoint is not mounted at all (the path 404s and
       # never advertises itself). Set a strong random value in .env to enable it.
       ASHARE_PRIVATE_PORTFOLIO_TOKEN: ${ASHARE_PRIVATE_PORTFOLIO_TOKEN:-}

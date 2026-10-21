@@ -30,6 +30,8 @@ STATE_DIR="${ASHARE_STATE_DIR:-$HOME/.local/share/ashare-v1}"
 BACKUP_DIR="$STATE_DIR/backups"
 CONTAINER="${ASHARE_CONTAINER:-finance-mcp-ashare}"
 DATA_DIR="${ASHARE_HOST_DATA_DIR:-$HOME/.local/share/finance-mcp-ashare}"
+PRIVATE_DIR="${ASHARE_PRIVATE_HOST_DIR:-$HOME/.local/share/ashare-private}"
+umask 077
 
 echo "== 0. preconditions =="
 echo "repo:     $REPO"
@@ -41,6 +43,18 @@ CLEAN="$(git -C "$REPO" status --porcelain --untracked-files=no | wc -l)"
 [ "$CLEAN" -eq 0 ] || { echo "working tree is dirty ($CLEAN tracked changes); commit first" >&2; exit 3; }
 HEAD="$(git -C "$REPO" rev-parse HEAD)"
 [ "$HEAD" = "$REVISION" ] || { echo "HEAD $HEAD != --revision $REVISION" >&2; exit 3; }
+if [ -n "$BRANCH" ]; then
+  [ "$(git -C "$REPO" branch --show-current)" = "$BRANCH" ] || { echo "checked-out branch does not match --branch" >&2; exit 3; }
+fi
+if [ "$DRY" -eq 1 ]; then
+  echo "dry run: would build candidate, back up market/private/OAuth/research/config, verify restoration, then replace the existing service"
+  exit 0
+fi
+# Build before touching the running service; a build failure leaves production in place.
+export ASHARE_GIT_REVISION="$REVISION"
+export ASHARE_GIT_BRANCH="${BRANCH:-$(git -C "$REPO" branch --show-current)}"
+export ASHARE_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+docker compose -f "$HERE/docker-compose.yml" build
 
 OLD_IMAGE_ID="$(docker inspect "$CONTAINER" --format '{{.Image}}' 2>/dev/null || echo unknown)"
 OLD_REPO_DIGEST="$(docker image inspect finance-mcp-ashare:local --format '{{index .RepoDigests 0}}' 2>/dev/null || echo none)"
@@ -62,6 +76,10 @@ sqlite3 "$DATA_DIR/ashare.sqlite" "VACUUM INTO '$BACKUP_SQLITE';"
 sqlite3 "$BACKUP_SQLITE" "PRAGMA integrity_check;" | grep -qx ok || {
   echo "backup integrity_check failed" >&2; exit 4;
 }
+market_restore="$BACKUP_DIR/market.restore-check.$STAMP.sqlite"
+sqlite3 "$market_restore" ".restore '$BACKUP_SQLITE'"
+[ "$(sqlite3 "$market_restore" 'PRAGMA integrity_check;')" = "ok" ] || { echo "market restore verification failed" >&2; exit 4; }
+rm "$market_restore"
 # Keep the historical pre-V1.0 copy as well; symlink the newest for convenience.
 ln -sfn "$BACKUP_SQLITE" "$BACKUP_DIR/ashare.latest.sqlite"
 
@@ -78,17 +96,30 @@ ln -sfn "$BACKUP_SQLITE" "$BACKUP_DIR/ashare.latest.sqlite"
   echo "db_sha256=$(sha256sum "$BACKUP_SQLITE" | cut -d' ' -f1)"
 } | tee "$BACKUP_DIR/rollback-$STAMP.env"
 
-if [ "$DRY" -eq 1 ]; then
-  echo "dry run: would run 'docker compose up -d --build' in $HERE"
-  exit 0
-fi
-
-echo "== 2. rebuild and replace the same compose service in place =="
+# All databases use SQLite's online backup operation; never copy a live WAL file.
+for spec in "$PRIVATE_DIR/portfolio.sqlite:portfolio" "$PRIVATE_DIR/oauth.sqlite:oauth" "$DATA_DIR/research.sqlite:research" "$DATA_DIR/research-validation/validation.sqlite:validation"; do
+  source_db="${spec%:*}"; label="${spec##*:}"
+  [ -f "$source_db" ] || continue
+  target="$BACKUP_DIR/$label.$STAMP.sqlite"
+  sqlite3 "$source_db" ".backup '$target'"
+  [ "$(sqlite3 "$target" 'PRAGMA integrity_check;')" = "ok" ] || { echo "$label backup invalid" >&2; exit 4; }
+  # Restore into an isolated scratch file and check it before any switch.
+  restore_check="$BACKUP_DIR/$label.restore-check.$STAMP.sqlite"
+  sqlite3 "$restore_check" ".restore '$target'"
+  [ "$(sqlite3 "$restore_check" 'PRAGMA integrity_check;')" = "ok" ] || { echo "$label restore invalid" >&2; exit 4; }
+  rm "$restore_check"
+  printf '%s_backup=%s\n' "$label" "$target" >> "$BACKUP_DIR/rollback-$STAMP.env"
+done
+cp "$HERE/.env" "$BACKUP_DIR/private-config.$STAMP.env"
+chmod 600 "$BACKUP_DIR/private-config.$STAMP.env"
+config_files=("$HERE/docker-compose.yml")
+for config in "$HOME/.config/systemd/user/finance-ashare-daily.service" "$HOME/.config/systemd/user/finance-ashare-daily.timer" "$HOME/.config/systemd/user/finance-ashare-account-daily.service" "$HOME/.config/systemd/user/finance-ashare-account-daily.timer"; do
+  [ ! -f "$config" ] || config_files+=("$config")
+done
+tar -czf "$BACKUP_DIR/deploy-config.$STAMP.tar.gz" "${config_files[@]}"
+echo "== 2. replace the same compose service using the prebuilt candidate =="
 cd "$HERE"
-export ASHARE_GIT_REVISION="$REVISION"
-export ASHARE_GIT_BRANCH="${BRANCH:-$(git -C "$REPO" branch --show-current)}"
-export ASHARE_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-docker compose up -d --build
+docker compose up -d --no-build
 
 echo "== 3. wait for health =="
 for i in $(seq 1 60); do
@@ -97,10 +128,17 @@ for i in $(seq 1 60); do
   sleep 2
 done
 echo "state: $state"
-[ "$state" = "running/healthy" ] || { echo "container did not become healthy" >&2; exit 5; }
+if [ "$state" != "running/healthy" ]; then
+  echo "candidate unhealthy; restoring previous image (database backups retained)" >&2
+  docker tag "$OLD_IMAGE_ID" finance-mcp-ashare:local
+  docker compose up -d --no-build
+  exit 5
+fi
 
 echo "== 4. revision label =="
-docker inspect "$CONTAINER" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+ACTUAL_REVISION="$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+printf '%s\n' "$ACTUAL_REVISION"
+[ "$ACTUAL_REVISION" = "$REVISION" ] || { echo "running image revision mismatch; stop acceptance" >&2; exit 6; }
 
 echo "== 5. health endpoint =="
 curl -fsS -m 10 http://127.0.0.1:8130/health; echo
