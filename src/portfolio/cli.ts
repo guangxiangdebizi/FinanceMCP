@@ -23,6 +23,7 @@ import { buildDailyReport } from './dailyReport.js';
 import { screenEtfCandidates } from '../ashare/etfUniverse.js';
 import { buildBenchmarkComparison } from './benchmarks.js';
 import { runFeeCommand, FEE_USAGE } from './feeCli.js';
+import { runRiskPolicyCommand, RISK_POLICY_USAGE } from './riskPolicyCli.js';
 import { parseTradeCsv } from './tradeImport.js';
 import { loadFeeContext } from './fees.js';
 import { trustedEvidencePolicy, verifyTrustedRotation } from './trustedEvidence.js';
@@ -80,6 +81,7 @@ export const PORTFOLIO_USAGE = `用法: finance-ashare portfolio-<command> [opti
   portfolio-ledger-import --account ID --file PATH [--continue-on-conflict] [--dry-run] [--db PATH]
                                                        批量导入 JSON 或券商 CSV（UTF-8）；默认冲突即整批回滚
 ${FEE_USAGE}
+${RISK_POLICY_USAGE}
   portfolio-ledger-replay --account ID [--as-of YYYYMMDD] [--db PATH]
                                                        重放持仓/现金/成本/已实现盈亏
   portfolio-ledger-nav --account ID --from YYYYMMDD --to YYYYMMDD [--prices FILE] [--db PATH]
@@ -309,6 +311,7 @@ function parseSnapshotFile(path: string): AccountSnapshot {
 
 export function runPortfolioCommand(command: string, h: PortfolioCliHelpers): boolean {
   if (runFeeCommand(command, h)) return true;
+  if (runRiskPolicyCommand(command, h)) return true;
   switch (command) {
     case 'portfolio-import': {
       const file = h.arg('file');

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { buildPortfolioRiskState } from './riskPolicy.js';
 import { createHash } from 'node:crypto';
 import { valueCents, THEME_BY_CODE, type AccountSnapshot } from './account.js';
 import { resolveAccountSnapshot } from './accounts.js';
@@ -380,6 +381,8 @@ export interface DailyReportResult {
     disclosure: string;
   };
   plan_tracking: PlanTracking;
+  /** 已批准组合风险政策与当前风险状态；asOf 早于批准日或未记录政策时省略（旧报告字节不变）。 */
+  portfolio_risk?: any;
   gate: {
     satisfied: boolean;
     is_current: boolean;
@@ -1415,7 +1418,21 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     holdings, market, screening, decision_comparison: decisionComparison, lots,
   })).digest('hex');
 
+  const holdOption = decisionComparison.options.find(option => option.action === 'HOLD');
+  let portfolioRisk: any = null;
+  try {
+    portfolioRisk = buildPortfolioRiskState({
+      portfolioDb, marketDb: marketDb ?? null, accountId, asOf,
+      concentration: { hhi: concentration.hhi ?? null, effective_positions: concentration.effective_positions ?? null,
+        top_position: summary.portfolio?.top_position ?? null },
+      exposure: { equity_weight: equityClass?.weight ?? null, cash_ratio: summary.portfolio?.cash_ratio ?? null,
+        by_asset_class: holdOption?.by_asset_class_after ?? null },
+      stress: holdOption?.stress_after ?? null,
+    });
+  } catch { portfolioRisk = null; }
+
   return {
+    ...(portfolioRisk ? { portfolio_risk: portfolioRisk } : {}),
     schema: DAILY_REPORT_SCHEMA,
     report_id: reportId,
     status,

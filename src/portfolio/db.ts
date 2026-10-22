@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { ashareDataDir, ashareDbPath } from '../ashare/db.js';
+import { PORTFOLIO_RISK_POLICY_DDL } from './riskPolicy.js';
 
 /**
  * 私有账户账本（P2）。与公开市场库物理隔离：默认写入
@@ -230,6 +231,7 @@ export function openPortfolioDb(path = portfolioDbPath(), options: { writable?: 
     db.exec(PORTFOLIO_SCHEMA);
     db.exec(PORTFOLIO_LEDGER_SCHEMA);
     db.exec(PORTFOLIO_COMPLETENESS_SCHEMA);
+    db.exec(PORTFOLIO_RISK_POLICY_DDL);
     return db;
   }
   const db = new DatabaseSync(resolved, { readOnly: true });
