@@ -32,3 +32,10 @@
 ## 未闭环
 - ChatGPT 写回：MCP 无写日志工具，未实现；没有伪造 ChatGPT 记录。
 - 没有任何证据证明策略优于被动基准。
+
+## 收盘后补充验证（2026-10-22 21:15 CST 之后）
+- `finance-ashare-account-daily` 21:15 CST 自动运行成功（exit 0），账户记录与复盘均 ok。这是该单元第一次成功的定时运行。
+- `finance-ashare-daily` 在 18:40、21:10 CST 的行情同步与日报均成功（3 个交易日 READY），但随后的冻结规则观察步骤失败，单元以 exit 76 结束。原因：`run-daily.sh` 调用 `research-validation observe` 时漏了必需的 `--as-of`。这是早已存在的缺陷，此前因 `validation.sqlite` 不存在而被静默跳过，10-22 冻结规则后才暴露。已修复为取日报输出末尾的 `trade_date` 作为 `--as-of`；手动验证返回 `UNAVAILABLE / matching_active_freeze_unavailable`（冻结起点为 20261023，之前无前瞻观察），exit 0。脚本由 systemd 直接从仓库路径执行，无需重新部署；下一次定时运行（10-23 18:40 CST）才是它第一次自动运行的验证。
+- 数据包 `BUNDLE-20261022-10a8a27935d1a234f36d`：as-of 20261022，市场 READY，整体 DEGRADED（仅因 `account_completeness: unreported_trade_risk`），证据状态 UNVERIFIED。
+- `portfolio_risk` 首次出现：政策 `portfolio-drawdown-policy-1.0.0`（批准日 20261022）；回撤基于已核验、出入金调整的账户净值，当前回撤低于一级阈值，预警等级 NONE；净值点仅 5 个（自 20261016 基线起），历史很短；`action_boundary` 为仅研究复核、无卖出数量、无自动交易。
+- 三个基准均 OK；基准版本 `r2-benchmarks-1.1.0` 标记 `approved:20261022:RETROSPECTIVE_COMPARISON`。

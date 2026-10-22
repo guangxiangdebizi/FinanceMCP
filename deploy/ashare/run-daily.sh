@@ -40,8 +40,10 @@ if docker exec "$CONTAINER" node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"
   # Observe frozen research only after the market pipeline finishes. Uses the same
   # container runtime and a separate registry, never rewriting the live pool.
   if docker exec "$CONTAINER" test -f /data/research-validation/validation.sqlite; then
-    if docker exec "$CONTAINER" node build/ashare/cli.js research-validation observe \
-      --source /data/ashare.sqlite --research-db /data/research-validation/validation.sqlite \
+    # observe requires --as-of equal to the cache cutoff; the daily output ends with the top-level trade_date.
+    OBS_DATE=$(grep '"trade_date"' "$OUT" | tail -1 | grep -o '[0-9]\{8\}')
+    if [ -n "$OBS_DATE" ] && docker exec "$CONTAINER" node build/ashare/cli.js research-validation observe \
+      --source /data/ashare.sqlite --research-db /data/research-validation/validation.sqlite --as-of "$OBS_DATE" \
       >"$LOG_DIR/validation-$STAMP.json" 2>"$LOG_DIR/validation-$STAMP.log"; then
       echo "finance-ashare validation observation finished: $LOG_DIR/validation-$STAMP.json"
     else
