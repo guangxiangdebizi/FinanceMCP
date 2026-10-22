@@ -39,3 +39,16 @@
 - 数据包 `BUNDLE-20261022-10a8a27935d1a234f36d`：as-of 20261022，市场 READY，整体 DEGRADED（仅因 `account_completeness: unreported_trade_risk`），证据状态 UNVERIFIED。
 - `portfolio_risk` 首次出现：政策 `portfolio-drawdown-policy-1.0.0`（批准日 20261022）；回撤基于已核验、出入金调整的账户净值，当前回撤低于一级阈值，预警等级 NONE；净值点仅 5 个（自 20261016 基线起），历史很短；`action_boundary` 为仅研究复核、无卖出数量、无自动交易。
 - 三个基准均 OK；基准版本 `r2-benchmarks-1.1.0` 标记 `approved:20261022:RETROSPECTIVE_COMPARISON`。
+
+## 收尾阶段（2026-10-22，revision 79efbb7）
+- **OAuth 私有 MCP**：用户刷新连接器后，服务端日志显示 ChatGPT 在 14:31 UTC 完成 OAuth 握手与 `tools/list`，14:32 UTC 成功调用 `ashare_investment_research_bundle`（`status=ok`）。ChatGPT 看不到新工具的原因是插件端缓存的旧工具清单，服务端与 Caddy 均无问题，Caddy 未修改。
+- **账户完整性**：用户在对话中说明 2026-10-16 收盘基线之后至 2026-10-22 没有买卖、出入金、分红等账本事件；据此写入声明（`recorded_by=user-statement-relayed-via-claude-code`，非用户直接执行 CLI），写入前已对私有库做一致性备份。数据包状态由 DEGRADED 变为 READY；证据状态仍为 UNVERIFIED，交易预案仍为 NOT_EXECUTABLE（缺经验证的优势证据）。
+- **口径统一**（`e7a8fc5`）：风险政策、回撤、预算与费用字段在旧日报与研究包之间统一。
+  - 回撤明确标注为 `OBSERVATION_WINDOW_SINCE_BASELINE`（自 20261016 起 5 个净值点），`full_history=false`，不得当作全历史最大回撤；旧日报 `drawdown` 块继续声明全历史不可得。
+  - 五个情景的 `risk_budget` 状态改为 `PORTFOLIO_RISK_POLICY_APPROVED`，携带政策版本、预警等级与回撤窗口；单笔计划风险预算仍为 0.5%，没有新增仓位上限。
+  - 日报 `assumptions.fees` 新增 `per_code`，列出逐代码的分类、档案 ID、费率、最低佣金与证据等级。逐代码费率核查：159558.SZ、560390.SH 按 SUPER_ETF 档案计费，其余按类别默认；516080.SH 比例佣金 UNKNOWN，回退默认，最低 5 元为 CONFIRMED。
+  - 目标日早于 20261022 的输出与 `report_id` 不变。
+- **ChatGPT 追加式写回**（`0a7d401`）：新增私有工具 `ashare_chatgpt_research_record_append`，仅出现在 OAuth 私有端点。只 INSERT 不可变的 `research_journal`；`source` 固定为 chatgpt，时间戳、`record_id`、哈希由服务器生成；字段严格白名单，多余字段整次拒绝；必须关联已存在的同日 VPS 快照 `report_id`；幂等、同键不同内容拒绝、更正为新版本；有大小与每日条数上限；不触及账本、持仓、完整性、风险、费用、订单。可用 `ASHARE_CHATGPT_INTAKE_DISABLED=1` 关闭。局限：OAuth 仅有一个 `portfolio:read` scope，写入口与读取共用授权；记录无 `observations`，复盘中只留判断痕迹，不产生收益统计。本次未调用该工具，库中没有任何 ChatGPT 记录。
+- **部署**：升级前自动备份；回滚记录 `rollback-20261022T161641Z.env`；镜像 revision `79efbb70f193e9ffff66a93b996ded5d3d1d8f09`，healthy；随后的数据包 `BUNDLE-20261022-4fa601f739be03234525` 状态 READY。
+- **测试**：全量 602/602 通过。
+- **事故记录**：合并前一个 agent 的 worktree 清理误删了主仓库的 `node_modules`，并把 `node_modules` 符号链接误提交；已用 `npm ci` 重建并另提交取消跟踪，未推送过含该符号链接的历史。
