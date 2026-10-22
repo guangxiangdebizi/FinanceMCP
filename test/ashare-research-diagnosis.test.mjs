@@ -151,7 +151,27 @@ test('the control family actually runs, and each cohort uses its own exit date',
       `每个对照的 cohort 数应大于 1（否则 exit 日期没逐 cohort 解析）。实际: ${ran.map(c => c.cohorts).join(',')}`);
     for (const c of ran) {
       assert.ok(c.mean_excess_pct !== null, `${c.model} 有 cohort 就必须有平均超额`);
-      assert.ok(c.status !== 'DATA_INSUFFICIENT', `${c.model} 有 ${c.cohorts} 个 cohort 却报样本不足`);
+      // The status must be what `blockInference` actually returns for that
+      // cohort count, and nothing else.
+      //
+      // This assertion used to demand `status !== 'DATA_INSUFFICIENT'` for any
+      // control with cohorts. That is the *opposite* of what the module must
+      // do: `blockInference`'s floor is `max(20, blockLength * 4)`
+      // (validation.ts:27) = 20 at this fixture's horizon of 5, and this
+      // fixture yields 6 cohorts. So 6 cohorts below the floor is exactly the
+      // case that must report DATA_INSUFFICIENT — asserting otherwise was
+      // demanding that the diagnosis issue a verdict on a sample it has
+      // already declared too small, which is the failure mode the whole
+      // gate exists to prevent.
+      //
+      // What this test can honestly check is the *relationship*: the family
+      // ran, the count is per-cohort (>= 2), and the status agrees with the
+      // floor rather than being chosen by the module. `the sample floor
+      // scales with the horizon, like blockInference does` pins the floor
+      // itself; here we pin that the status follows it.
+      const floor = Math.max(20, HORIZON * 4);
+      assert.strictEqual(c.status, c.cohorts >= floor ? 'DESCRIPTIVE_RESEARCH_ONLY' : 'DATA_INSUFFICIENT',
+        `${c.model} 的 status 必须由其 cohort 数(${c.cohorts})与门槛(${floor})决定`);
     }
   } finally { db.close(); }
 });
