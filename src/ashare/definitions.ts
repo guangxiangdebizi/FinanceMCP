@@ -7,6 +7,7 @@
  * versions without node:sqlite; the implementation is loaded on first call.
  */
 
+const APPEND_ONLY = { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: true };
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const dateProp = { type: 'string', description: '交易日 YYYYMMDD；缺省为上海时区今天（非交易日取最近交易日）' };
 
@@ -190,7 +191,7 @@ export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name))
  */
 const PORTFOLIO_NOTE = '只读账户研究：真实账户由用户确认基线与增量事件重建，演示快照单独标记；私有portfolio.sqlite与公开市场端点隔离。费用逐字段披露CONFIRMED/PUBLIC_REFERENCE/ASSUMED/UNKNOWN，滑点独立估算；交易单位与压力参数按规则披露；不下单、不访问券商。';
 
-export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY }[] = [
+export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY | typeof APPEND_ONLY }[] = [
   {
     name: 'ashare_investment_research_bundle',
     description: '统一投资研究事实包：复用市场日报、股票池增减与历史表现、信号证据、ETF候选、真实账本账户、费用、组合情景及基准。全部子模块对齐同一已收盘交易日；盘前默认最近已收盘日；关键市场缺失时不生成当日判断。结构化JSON含Markdown摘要、版本、证据缺口；仅受认证的/private/mcp提供，不写库、不联网、不下单。',
@@ -321,6 +322,35 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: [],
     },
     annotations: READ_ONLY,
+  },
+  {
+    name: 'ashare_chatgpt_research_record_append',
+    description: '只追加：把 ChatGPT 日报任务**已经产出**的独立研究判断写入不可变研究日志（source 固定为 chatgpt；时间戳、record_id、哈希由服务器生成，调用方无法设置）。必须在日报写完之后调用，且只提交实际产出的内容，不得补写。必须关联已存在的 VPS 研究快照（report_id 与 as_of_trade_date 须与之一致，否则拒绝）。不接受也不会写入任何账本事件、持仓、账户完整性、订单、风险政策或费用。同键同内容幂等；同键不同内容拒绝；更正请用新的 idempotency_key 并填 corrects_record_id。每日有条数上限。仅返回 record_id、content_hash 与证据分类（TRUE_FORWARD 仅当交易日>=20261022 且当天上海时间内写入，否则 RETROSPECTIVE_RECORD）。只在受认证的 /private/mcp 提供。',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        account_id: { type: 'string', description: '账户标识；省略使用本部署唯一真实账户' },
+        report_id: { type: 'string', maxLength: 200, description: '所关联的 VPS 研究快照 bundle 的 report_id（来自 ashare_investment_research_bundle）' },
+        as_of_trade_date: { type: 'string', description: 'YYYYMMDD，须与该 report_id 的交易日一致，不得晚于今天' },
+        idempotency_key: { type: 'string', maxLength: 64, description: '可选；字母数字及 . _ : -。省略则按内容哈希幂等' },
+        corrects_record_id: { type: 'string', description: '可选；更正此前自己提交的 ChatGPT 记录（作为新记录追加，不修改原记录）' },
+        independent_judgement: { type: 'string', maxLength: 4000, description: 'ChatGPT 独立判断（实际产出）' },
+        additional_evidence: { type: 'array', maxItems: 20, description: '额外宏观/行业证据；每条必须有 source_url 与 published_at', items: { type: 'object', additionalProperties: false, required: ['claim'], properties: {
+      claim: { type: 'string', maxLength: 1000 },
+      kind: { type: 'string', enum: ['macro', 'industry', 'other'] },
+      source_url: { type: 'string', maxLength: 500, description: 'http(s) 来源链接' },
+      published_at: { type: 'string', description: '来源发布时间：YYYY-MM-DD 或带时区的 ISO 时间；不得晚于当前时间' } } } },
+        counter_evidence: { type: 'array', maxItems: 10, description: '反向证据', items: { type: 'object', additionalProperties: false, required: ['claim'], properties: {
+      claim: { type: 'string', maxLength: 1000 },
+      kind: { type: 'string', enum: ['macro', 'industry', 'other'] },
+      source_url: { type: 'string', maxLength: 500, description: 'http(s) 来源链接' },
+      published_at: { type: 'string', description: '来源发布时间：YYYY-MM-DD 或带时区的 ISO 时间；不得晚于当前时间' } } } },
+        final_conclusion: { type: 'string', maxLength: 4000, description: '最终结论（实际产出）' },
+      },
+      required: ['report_id', 'as_of_trade_date', 'independent_judgement', 'final_conclusion'],
+    },
+    annotations: APPEND_ONLY,
   },
 ];
 
