@@ -51,4 +51,4 @@
 - **ChatGPT 追加式写回**（`0a7d401`）：新增私有工具 `ashare_chatgpt_research_record_append`，仅出现在 OAuth 私有端点。只 INSERT 不可变的 `research_journal`；`source` 固定为 chatgpt，时间戳、`record_id`、哈希由服务器生成；字段严格白名单，多余字段整次拒绝；必须关联已存在的同日 VPS 快照 `report_id`；幂等、同键不同内容拒绝、更正为新版本；有大小与每日条数上限；不触及账本、持仓、完整性、风险、费用、订单。可用 `ASHARE_CHATGPT_INTAKE_DISABLED=1` 关闭。局限：OAuth 仅有一个 `portfolio:read` scope，写入口与读取共用授权；记录无 `observations`，复盘中只留判断痕迹，不产生收益统计。本次未调用该工具，库中没有任何 ChatGPT 记录。
 - **部署**：升级前自动备份；回滚记录 `rollback-20261022T161641Z.env`；镜像 revision `79efbb70f193e9ffff66a93b996ded5d3d1d8f09`，healthy；随后的数据包 `BUNDLE-20261022-4fa601f739be03234525` 状态 READY。
 - **测试**：全量 602/602 通过。
-- **事故记录**：合并前一个 agent 的 worktree 清理误删了主仓库的 `node_modules`，并把 `node_modules` 符号链接误提交；已用 `npm ci` 重建并另提交取消跟踪，未推送过含该符号链接的历史。
+- **事故记录**：合并前一个 agent 的 worktree 清理误删了主仓库的 `node_modules`，并把 `node_modules` 符号链接误提交；已用 `npm ci` 重建，并在 `79efbb7` 取消跟踪。该符号链接曾存在于已推送的提交 `e7a8fc5` 中（内容仅为一个本机路径，无敏感数据），未改写远端历史。
