@@ -9,13 +9,15 @@ import { screenEtfCandidates } from '../ashare/etfUniverse.js';
 import { resolveResearchDate } from '../ashare/researchDate.js';
 import { buildInvestmentResearchBundle } from './researchBundle.js';
 import { loadFeeContext } from './fees.js';
+import { appendChatgptResearchRecord, CHATGPT_INTAKE_TOOL } from './chatgptIntake.js';
 
 /**
  * 私有账户端点的"研究/日报"工具实现（V1.0 C2/C6/D1）。
  *
  * 与 `portfolio/tools.ts`、`decisionTool.ts` 一致的边界：
  * - 账户库只读；市场库只读；不写任何数据库，不访问网络。
- * - 不暴露写路径：成交录入、证据写入、完整性声明只能走本地 CLI。
+ * - 唯一的写路径是 ashare_chatgpt_research_record_append（只追加、白名单入参、source 固定为 chatgpt，见
+ *   chatgptIntake.ts）；成交录入、证据写入、完整性声明、风险配置、费用只能走本地 CLI。
  * - 市场缓存缺失时返回结构化的 DATA_INSUFFICIENT，不抛异常给客户端。
  */
 
@@ -151,6 +153,20 @@ export function runPortfolioResearchTool(name: string, args: Record<string, any>
       } finally { db.close(); }
     }
 
+    case CHATGPT_INTAKE_TOOL: {
+      if ((process.env.ASHARE_CHATGPT_INTAKE_DISABLED ?? '').trim() === '1') throw new Error('chatgpt_intake_disabled: ASHARE_CHATGPT_INTAKE_DISABLED=1');
+      if (!portfolioEnabled()) throw new Error(DISABLED.message);
+      const path = portfolioDbPath();
+      if (!existsSync(path)) throw new Error(`账户数据库不存在（${path}）`);
+      const limit = Number(process.env.ASHARE_CHATGPT_INTAKE_DAILY_LIMIT);
+      // 注意：不是 openReadOnly；只此一处以可写方式打开，且只调用只追加函数。
+      const db = openPortfolioDb(path, { writable: true });
+      try {
+        const account = resolveAccountId(db, (args ?? {}).account_id);
+        return json(appendChatgptResearchRecord(db, account.account_id, args ?? {}, Date.now(), Number.isInteger(limit) && limit > 0 ? limit : undefined));
+      } finally { db.close(); }
+    }
+
     default:
       throw new Error(`Unknown research tool: ${name}`);
   }
@@ -162,4 +178,5 @@ export const RESEARCH_PRIVATE_TOOLS = new Set([
   'ashare_portfolio_daily_report',
   'ashare_etf_candidates',
   'ashare_portfolio_benchmarks',
+  CHATGPT_INTAKE_TOOL,
 ]);

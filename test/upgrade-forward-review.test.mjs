@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 const { openAshareDb, upsertRows } = await import('../build/ashare/db.js');
@@ -133,9 +134,13 @@ test('ChatGPT records stay a separate source and need real provenance; no MCP to
     assert.deepEqual(Object.keys(r.by_source), ['chatgpt']);
     assert.equal(r.records.by_source.vps, undefined);
   } finally { p.close(); m.close(); }
-  for (const file of ['src/portfolio/researchTools.ts', 'src/portfolio/tools.ts', 'src/oauth/router.ts']) {
-    assert.doesNotMatch(readFileSync(file, 'utf8'), /recordResearchJournal|research_journal/, `${file} must not expose a journal write`);
+  // Exactly one MCP-reachable journal writer exists (chatgptIntake.ts); the tool dispatcher only imports it.
+  for (const file of ['src/portfolio/researchTools.ts', 'src/portfolio/tools.ts', 'src/oauth/router.ts', 'src/privateServer.ts', 'src/httpServer.ts', 'src/dispatch.ts']) {
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /recordResearchJournal|research_journal/, `${file} must not call a journal write directly`);
   }
+  assert.match(readFileSync('src/portfolio/researchTools.ts', 'utf8'), /appendChatgptResearchRecord/);
+  const writers = execFileSync('grep', ['-rlE', 'recordResearchJournal|recordJournalEvaluations', 'src'], { encoding: 'utf8' }).trim().split('\n').sort();
+  assert.deepEqual(writers, ['src/portfolio/bundleRecordCli.ts', 'src/portfolio/chatgptIntake.ts', 'src/portfolio/journalCli.ts', 'src/portfolio/researchJournal.ts', 'src/portfolio/researchRecord.ts']);
 });
 
 test('the scheduled account service records, reviews and reports failure of either step', () => {

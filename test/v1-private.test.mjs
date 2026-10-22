@@ -113,10 +113,15 @@ test('V1-P1 the private endpoint advertises the three V1.0 research tools', asyn
     assert.equal(list.status, 200);
     const names = list.body.result.tools.map(t => t.name);
     for (const name of V1_TOOLS) assert.ok(names.includes(name), `缺少 ${name}`);
-    // Every private tool is read-only and account-side.
+    // Every private tool is read-only, except exactly the one append-only ChatGPT intake tool.
     for (const tool of list.body.result.tools) {
+      if (tool.name === 'ashare_chatgpt_research_record_append') {
+        assert.deepEqual(tool.annotations, { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: true });
+        continue;
+      }
       assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} 必须是只读`);
     }
+    assert.equal(list.body.result.tools.filter(t => t.annotations?.readOnlyHint !== true).length, 1, 'exactly one non-read-only private tool');
   } finally { await server.stop(); }
 });
 

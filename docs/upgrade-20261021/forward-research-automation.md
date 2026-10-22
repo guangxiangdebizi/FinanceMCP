@@ -12,7 +12,7 @@
 | 5/10/20/60 日到期评价 | 此前**无定时入口**（`portfolio-journal-evaluate` 只能手工运行）；本次接入 |
 | 相对沪深300 / 多资产篮子 / 初始五只 ETF 的扣费后超额、波动、回撤、失效统计 | 此前不存在；本次新增 `portfolio-journal-review` |
 | 无显著改善如实报告 | 本次新增，结论枚举固定，不改历史规则 |
-| ChatGPT 写回 | **未闭环**（见 §5） |
+| ChatGPT 写回 | **代码已实现，待批准部署**（见 §5）；部署并在提示词接入前仍未闭环 |
 
 ## 2. 主机实际状态（只读核对）
 
@@ -49,18 +49,36 @@
 2. 启动冻结规则的前瞻记录：`research-validation freeze` 要求 `--start` 晚于当天，且会写生产的 `/data/research-validation`，属于生产状态变更，未执行。建议在 10-22 收盘后执行并取 `--start 20261023`，此后 `run-daily.sh` 自动 observe。10-22 当天因此不会出现在冻结规则的前瞻序列中（VPS 日志快照仍从 10-22 起算）。
 3. 多资产篮子权重目前在代码里为 `provisional_pending_user_approval`；复盘报告原样带出该状态，批准后随基准版本更新。
 
-## 5. ChatGPT 研究判断写回：未闭环
+## 5. ChatGPT 研究判断写回
 
-已核对：
+### 5.1 已核对的既有事实
+
 - 日志 schema 支持 `source: chatgpt | combined`，且强制真实 `provenance`（作者、来源引用、取得时间），拒绝无来源的 ChatGPT 结论；`combined` 必须有真实 VPS 与 ChatGPT 父记录。
-- 唯一写入口是 CLI `portfolio-journal-import --file PATH --confirm`（需要宿主机/容器内操作，追加式，同 ID 同内容幂等，冲突拒绝，表有 UPDATE/DELETE/REPLACE 触发器保护）。
-- MCP 与 OAuth 路由**没有任何**写日志的工具（测试断言 `researchTools.ts`、`tools.ts`、`oauth/router.ts` 不引用 journal 写函数）。ChatGPT 定时任务因此没有写回能力，库里也没有任何 ChatGPT 记录，也不会被伪造。
+- 表有 UPDATE/DELETE/REPLACE 触发器保护；同 ID 同内容幂等，冲突拒绝。
+- 此前 MCP 与 OAuth 路由没有任何写日志的工具，库里也没有任何 ChatGPT 记录，更不会被伪造。
 
-最小授权方案（待批准后再做，不在本次实现）：
-- 新增只追加的 MCP 工具 `append_chatgpt_research_record`，使用独立 scope（如 `research:append`），与读取、账本、风险配置、下单 scope 完全分离；服务端固定 `source='chatgpt'`，拒绝 `vps/combined`。
-- 服务端自行写 `provenance.obtained_at`/`recorded_at`（不信任调用方时间），只接受 judgement/candidates/observations/evidence 的 JSON，带大小上限与每日条数限额；不接受任何数量以外的账户字段，不接受 `correction_of` 以外的改历史方式。
-- 不返回账户明细，只返回 `record_id` 与 `content_hash`。
-- 在此之前，如需录入：由用户把 ChatGPT 实际输出保存为 JSON，通过 `portfolio-journal-import` 导入；review 将其作为独立来源统计。
+### 5.2 本次实现：`ashare_chatgpt_research_record_append`（`src/portfolio/chatgptIntake.ts`）
+
+唯一的 MCP 写入口，只在已认证的 `/private/mcp` 出现（公网 `/mcp` 的列表与调用都拒绝，`private_endpoint_required`）。
+
+- **认证**：与其它私有工具相同，OAuth 访问令牌（或显式允许的静态令牌）在 HTTP 中间件层先验证，再限流（`ASHARE_PRIVATE_RATE_LIMIT`，默认 10/分钟/IP）。OAuth 目前只有一个 scope（`portfolio:read`），因此该写入口与读取工具**共用同一授权**；独立 scope 是后续加固项，见下。
+- **入参白名单**（`additionalProperties:false`，任何其它字段整次拒绝，而不是悄悄忽略）：`report_id`、`as_of_trade_date`、`independent_judgement`、`final_conclusion`、`additional_evidence[]`、`counter_evidence[]`，可选 `account_id`、`idempotency_key`、`corrects_record_id`。
+- **边界**：文本各 ≤4000 字符；额外证据 ≤20 条、反向证据 ≤10 条，每条 claim ≤1000 字符、URL ≤500 字符；整体规范化 JSON ≤32 KB；额外证据必须带 http(s) `source_url` 与不晚于当前的 `published_at`。
+- **服务端固定**：`source='chatgpt'`；`generated_at`、`provenance.obtained_at`、`recorded_at` 取服务器时钟；`record_id`（`CHATGPT-<日期>-<哈希>`）与内容哈希由服务器计算；调用方无法设置任何一项。
+- **关联校验**：同账户内必须已有 `source='vps'`、`bundle_id=report_id`、`as_of_trade_date` 一致的快照，否则 `bundle_not_found`；这些 VPS 记录写入 `parent_record_ids`。`as_of_trade_date` 不得晚于上海今天。账户缺省解析为 `real-main`（见 `resolveAccountId`）。
+- **追加与幂等**：record_id 由 账户+交易日+report_id+(`idempotency_key` 或内容哈希) 派生。同键同内容 → `created:false`，返回原 record_id/哈希；同键不同内容 → `journal_id_conflict`；更正 = 新键 + `corrects_record_id`（必须是本账户已有的 ChatGPT 记录），原记录不变。
+- **不接受/不写**：账本事件、持仓、数量（`observations` 恒为空）、账户完整性、订单、风险政策、费用；只 INSERT `research_journal` 一张不可变表。
+- **分类**：返回 `evidence_class`，沿用 `classifyRecord`：`as_of_trade_date >= 20261022` 且生成/取得/写入均在该交易日当天（上海时间）→ `TRUE_FORWARD`，否则 `RETROSPECTIVE_RECORD`（之前的交易日为 `PRE_FORWARD_HISTORICAL`）。
+- **限额**：每个上海日最多 20 条新记录（`ASHARE_CHATGPT_INTAKE_DAILY_LIMIT`），重放不占额度；`ASHARE_CHATGPT_INTAKE_DISABLED=1` 立即停用。
+- **返回**：只有 `record_id`、`content_hash`、`created`、`evidence_class`。
+- **复盘消费**：`buildForwardReview` 按 `source` 分组统计，`by_source.chatgpt` 与 `vps` 分开；非 `TRUE_FORWARD` 只计数并列入 `pre_forward_excluded`。由于该工具写入的 `observations` 为空，这些记录的价格窗口评价为 `no_observations`（UNAVAILABLE），**不产生收益统计**——它们是可追溯的判断留痕与分歧记录，不是可回测的持仓观察。要对 ChatGPT 判断做前瞻收益评价，需要另行批准一个不含数量的候选观察结构，本次不做。
+- **提示词用法**：见 `daily-report-integration.md`「写回研究日志」。
+
+### 5.3 部署前须知（交接项，未执行）
+
+- 容器进程需要对 `portfolio.sqlite` 的写权限；当前若以只读挂载，调用会失败（不会静默成功）。
+- 写入口默认启用（可由环境变量停用）；如希望默认关闭，需要加开关，请告知。
+- 后续加固：为 OAuth 增加独立的 `research:append` scope，使读取令牌无法写入。
 
 ## 6. 诚实边界
 

@@ -55,6 +55,24 @@ SUPER_ETF只来自本账户明确标记，不能推断同公司其他基金也�
 2. 仅在需要时深入：公共`ashare_watchlist`/`ashare_stock_analysis`/`ashare_sector_rank`/`ashare_etf_quotes`/`ashare_etf_candidates`，私有`ashare_portfolio_daily_report`/`ashare_portfolio_decision`/`ashare_portfolio_benchmarks`。
 3. 所有深入调用须使用与步骤1相同的as_of_trade_date；日期不一致的结果不得合并为同日结论。
 4. 第二层外部研究，再做账户综合判断。
+5. **日报全部写完之后**（最后一步，且只此一次）：调用私有`ashare_chatgpt_research_record_append`，把本次日报里实际产出的独立判断写入不可变研究日志。见下节。
+
+## 写回研究日志（仅在日报完成后）
+
+把下面这段**原样**追加到ChatGPT每日任务提示词末尾：
+
+```text
+日报全部写完并已发送后，最后一步：调用私有工具ashare_chatgpt_research_record_append，把你刚才实际产出的内容写回研究日志。规则：
+1. 只提交日报里你真正写出的内容：independent_judgement（你的独立判断）、final_conclusion（最终结论）、additional_evidence（你实际引用的额外宏观/行业证据，每条必须带真实source_url与published_at）、counter_evidence（你实际考虑过的反向证据）。不得补写、润色成更肯定的口吻、或事后改写结论。没有的项留空数组；没有独立判断就不要调用。
+2. report_id与as_of_trade_date必须逐字取自本次ashare_investment_research_bundle返回值，不得自己编；工具会校验，不一致即拒绝。
+3. 不要传source、时间戳、record_id、哈希、持仓、数量、订单、费用、账户完整性或风险参数：工具不接受这些字段，传了会被整次拒绝。
+4. 每次日报只调用一次。传入idempotency_key=日报日期加"-daily"（如20261022-daily）。如果调用报错，不要改写内容重试成别的结论；把错误原文放在日报末尾告诉我，由我处理。
+5. 需要更正此前的提交时，用新的idempotency_key并设置corrects_record_id为原record_id；原记录永远保留。
+6. 返回值只有record_id、content_hash、created、evidence_class（TRUE_FORWARD或RETROSPECTIVE_RECORD）。把它们原样写在日报末尾，不要解释成收益或胜率。
+这一步只是留痕，不是下单，不改变账户，也不构成对未来表现的证明。
+```
+
+服务器侧保证：`source`固定为`chatgpt`、全部时间由服务器写入；记录必须关联同账户、同report_id、同交易日的已存在VPS快照；追加不可变，同键同内容幂等，同键不同内容拒绝；不写observations/账本/持仓/完整性/风险/费用/订单；每日最多20条新记录（`ASHARE_CHATGPT_INTAKE_DAILY_LIMIT`可调）；`ASHARE_CHATGPT_INTAKE_DISABLED=1`可立即停用。
 
 ## 停用重复任务的安全步骤与回退
 

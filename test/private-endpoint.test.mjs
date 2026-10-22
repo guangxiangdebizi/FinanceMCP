@@ -24,6 +24,8 @@ const ACCOUNT_TOOLS = [
   'ashare_etf_candidates',
   'ashare_portfolio_benchmarks',
   'ashare_investment_research_bundle',
+  // 唯一的写入口：只追加的 ChatGPT 研究记录（见 test/upgrade-chatgpt-intake.test.mjs）。
+  'ashare_chatgpt_research_record_append',
 ];
 
 // 先准备好合成账户库（CLI 导入，幂等）。

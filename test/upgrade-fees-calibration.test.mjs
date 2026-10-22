@@ -127,6 +127,8 @@ test('priority: code rule > broker category rule > category rule > default', () 
 
 test('fee administration is a local confirmed CLI; no public or private MCP tool can write it', () => {
   for (const tool of [...portfolioToolDefinitions, ...ashareToolDefinitions]) {
+    // The single permitted exception is the append-only ChatGPT research-record intake (research_journal only).
+    if (tool.name === 'ashare_chatgpt_research_record_append') { assert.equal(tool.annotations.readOnlyHint, false); continue; }
     assert.doesNotMatch(tool.name, /fee|ledger|import|record|completeness|confirm|profile/, tool.name);
     assert.equal(tool.annotations.readOnlyHint, true, tool.name);
   }

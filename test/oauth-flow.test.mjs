@@ -25,7 +25,7 @@ const RESOURCE_PATH = '/private/mcp';
 const ACCOUNT_TOOLS = [
   'ashare_portfolio_summary', 'ashare_portfolio_scenario', 'ashare_portfolio_decision',
   'ashare_portfolio_daily_report', 'ashare_etf_candidates', 'ashare_portfolio_benchmarks',
-  'ashare_investment_research_bundle',
+  'ashare_investment_research_bundle', 'ashare_chatgpt_research_record_append',
 ];
 
 // 合成账户库（演示快照，不是用户真实账户）。
