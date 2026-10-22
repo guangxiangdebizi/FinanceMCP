@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { buildPortfolioRiskState } from './riskPolicy.js';
+import { buildPortfolioRiskState, loadActiveRiskPolicy } from './riskPolicy.js';
 import { createHash } from 'node:crypto';
 import { valueCents, THEME_BY_CODE, type AccountSnapshot } from './account.js';
 import { resolveAccountSnapshot } from './accounts.js';
@@ -244,7 +244,16 @@ export interface DecisionComparison {
     exposure_after: { equity_weight: number | null };
     stress_after: { equity_shock_pct: number; loss_cents: number | null; note: string } | null;
     /** 压力损失占该情景总资产比例；没有用户确认的组合级风险预算时不判断是否超限。 */
-    risk_budget: { status: 'NO_USER_CONFIRMED_PORTFOLIO_BUDGET'; stress_loss_pct_of_total_assets: number | null; per_stock_plan_risk_limit_pct: 0.5; note: string };
+    risk_budget: {
+      status: 'NO_USER_CONFIRMED_PORTFOLIO_BUDGET' | 'PORTFOLIO_RISK_POLICY_APPROVED';
+      stress_loss_pct_of_total_assets: number | null; per_stock_plan_risk_limit_pct: 0.5; note: string;
+      /** 已批准政策存在时（asOf ≥ 批准日）逐情景给出同一份政策与回撤状态，与 portfolio_risk 一致。 */
+      policy?: {
+        rule_version: string; approved_on: string; per_trade_risk_budget_pct: number; position_cap: null;
+        warning_level: string; warning_triggered: boolean;
+        drawdown: { scope: string; full_history: false; window: { start: string; end: string } | null; points_used: number; current_drawdown_pct: number | null };
+      };
+    };
     /** 主动轮动需要相对优势证据；风险控制依据用户确认的风险约束，但仍受账户状态、交易规则与成本检查。 */
     decision_basis: 'ACTIVE_ROTATION' | 'RISK_CONTROL' | 'NO_TRADE';
     opportunity_cost: string;
@@ -376,9 +385,16 @@ export interface DailyReportResult {
     disclosure: string[];
   };
   drawdown: {
+    /** 账户全历史最大回撤是否可得；有已批准政策时仍为 false，观察窗口回撤另见 observation_window。 */
     available: false;
     reason: 'no_history';
     disclosure: string;
+    scope?: 'FULL_HISTORY';
+    observation_window?: {
+      available: boolean; scope: 'OBSERVATION_WINDOW_SINCE_BASELINE'; full_history: false;
+      window: { start: string; end: string } | null; points_used: number;
+      current_drawdown_pct: number | null; max_drawdown_pct_in_window: number | null; source: 'portfolio_risk.drawdown';
+    };
   };
   plan_tracking: PlanTracking;
   /** 已批准组合风险政策与当前风险状态；asOf 早于批准日或未记录政策时省略（旧报告字节不变）。 */
@@ -399,7 +415,13 @@ export interface DailyReportResult {
   };
   fact_register: { id: string; value: string | number | boolean | null; as_of: string | null; source: string; quality: string; claim_status: 'FACT' | 'UNVERIFIED' }[];
   assumptions: {
-    fees: { assumed: true; values: FeeRules };
+    fees: {
+      assumed: true; values: FeeRules;
+      /** 已批准政策日及之后：values 只是品类默认；逐代码费用档案（若有）见 per_code，优先于默认。 */
+      scope?: 'CATEGORY_DEFAULT';
+      per_code?: { ts_code: string; classification: string; profile_ids: string[]; commission_rate: number; commission_min_cents: number;
+        commission_rate_evidence: string; commission_min_evidence: string }[];
+    };
     lots: { assumed: true; values: LotRules };
     note: string;
   };
@@ -1421,15 +1443,38 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
   const holdOption = decisionComparison.options.find(option => option.action === 'HOLD');
   let portfolioRisk: any = null;
   try {
-    portfolioRisk = buildPortfolioRiskState({
+    const policy = loadActiveRiskPolicy(portfolioDb, accountId, asOf);
+    portfolioRisk = policy ? buildPortfolioRiskState({
       portfolioDb, marketDb: marketDb ?? null, accountId, asOf,
       concentration: { hhi: concentration.hhi ?? null, effective_positions: concentration.effective_positions ?? null,
         top_position: summary.portfolio?.top_position ?? null },
       exposure: { equity_weight: equityClass?.weight ?? null, cash_ratio: summary.portfolio?.cash_ratio ?? null,
         by_asset_class: holdOption?.by_asset_class_after ?? null },
       stress: holdOption?.stress_after ?? null,
-    });
+    }) : null;
   } catch { portfolioRisk = null; }
+
+  // 已批准政策存在时，各情景/回撤/假设字段统一引用同一份政策状态；report_id 在此之前已定，故不受影响。
+  if (portfolioRisk) {
+    const dd = portfolioRisk.drawdown;
+    const policyView = {
+      rule_version: portfolioRisk.policy.rule_version, approved_on: portfolioRisk.policy.approved_on,
+      per_trade_risk_budget_pct: portfolioRisk.policy.per_trade_risk_budget_pct, position_cap: null as null,
+      warning_level: portfolioRisk.warning.level as string, warning_triggered: Boolean(portfolioRisk.warning.triggered),
+      drawdown: { scope: dd.scope as string, full_history: false as const, window: dd.window, points_used: dd.points_used as number,
+        current_drawdown_pct: dd.current_drawdown_pct as number | null },
+    };
+    for (const option of decisionComparison.options) {
+      option.risk_budget = {
+        ...option.risk_budget,
+        status: 'PORTFOLIO_RISK_POLICY_APPROVED',
+        policy: policyView,
+        note: `已批准组合回撤政策 ${policyView.rule_version}：L1/L2/L3 回撤预警只触发研究复核，不设仓位上限，不自动减仓；`
+          + `单笔计划风险预算保持净资产 ${policyView.per_trade_risk_budget_pct}%（只适用于新建主板个股）。`
+          + `回撤口径为基线以来观察窗口（${dd.points_used} 个净值点），不是全历史最大回撤；情景压力损失为声明式压力，不是回撤。`,
+      };
+    }
+  }
 
   return {
     ...(portfolioRisk ? { portfolio_risk: portfolioRisk } : {}),
@@ -1532,6 +1577,16 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
       available: false,
       reason: 'no_history',
       disclosure: '没有真实账户的历史净值与出入金流水，无法计算历史最大回撤；持仓浮亏不是历史最大回撤（PRD §8）。',
+      ...(portfolioRisk ? {
+        scope: 'FULL_HISTORY' as const,
+        disclosure: '账户全历史最大回撤不可得（没有基线之前的净值与出入金流水）；基线以来的观察窗口回撤见 observation_window / portfolio_risk.drawdown，点数有限，不得当作全历史回撤；持仓浮亏不是历史最大回撤（PRD §8）。',
+        observation_window: {
+          available: portfolioRisk.drawdown.status === 'AVAILABLE', scope: portfolioRisk.drawdown.scope, full_history: false as const,
+          window: portfolioRisk.drawdown.window, points_used: portfolioRisk.drawdown.points_used,
+          current_drawdown_pct: portfolioRisk.drawdown.current_drawdown_pct, max_drawdown_pct_in_window: portfolioRisk.drawdown.max_drawdown_pct,
+          source: 'portfolio_risk.drawdown' as const,
+        },
+      } : {}),
     },
     plan_tracking: loadPlanTracking(portfolioDb, accountId, asOf),
     gate: {
@@ -1551,13 +1606,29 @@ export function buildDailyReport(input: DailyReportInput): DailyReportResult {
     },
     fact_register: factRegister,
     assumptions: {
-      fees: { assumed: true, values: { ...fees } },
+      fees: {
+        assumed: true, values: { ...fees },
+        ...(portfolioRisk ? {
+          scope: 'CATEGORY_DEFAULT' as const,
+          per_code: holdings.flatMap(h => {
+            const kind = marketDb && resolveInstrument(marketDb, h.ts_code).kind === 'STOCK' ? 'STOCK' : 'ETF';
+            const rules = input.fees ?? resolveFeeRules({ db: portfolioDb, accountId, code: h.ts_code, kind, asOf });
+            const model = rules.fee_model;
+            if (!model?.profile_ids.length) return [];
+            return [{ ts_code: h.ts_code, classification: model.classification, profile_ids: model.profile_ids,
+              commission_rate: rules.commission_rate, commission_min_cents: rules.commission_min_cents,
+              commission_rate_evidence: model.evidence.commission_rate.level, commission_min_evidence: model.evidence.commission_min_cents.level }];
+          }),
+        } : {}),
+      },
       lots: { assumed: true, values: { ...lots } },
-      note: '费率、最低佣金、滑点与交易单位均为假设值，未与券商核对；输出中的费用不是真实成交成本。',
+      note: '费率、最低佣金、滑点与交易单位均为假设值，未与券商核对；输出中的费用不是真实成交成本。'
+        + (portfolioRisk ? '（有逐代码费用档案的标的按档案及其证据等级计费，见 fees.per_code；其余按品类默认。）' : ''),
     },
     not_covered: [
       '盘中实时价格与可成交性：只有日线缓存收盘价',
-      '真实账户历史收益与最大回撤：缺少完整出入金/成交流水',
+      portfolioRisk ? '账户全历史收益与最大回撤：缺少基线之前的净值与出入金流水（基线以来观察窗口回撤见 portfolio_risk）'
+        : '真实账户历史收益与最大回撤：缺少完整出入金/成交流水',
       '候选池的前瞻有效性：筛选分数是启发式排序，未经检验',
       '历史预案的触发/失效结果：plan_tracking 只读，未与后续行情核对',
       '沪深主板个股的新增机会比较：本轮候选池只覆盖 ETF',

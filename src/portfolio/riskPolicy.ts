@@ -157,6 +157,11 @@ export interface DrawdownAssessment {
   max_drawdown_pct: number | null;
   valuation_quality: 'exact' | 'incomplete' | null;
   points_used: number;
+  /** 回撤只覆盖基线以来的观察窗口（净值点），不是账户全历史；点数少时不得当作历史最大回撤。 */
+  scope: 'OBSERVATION_WINDOW_SINCE_BASELINE';
+  full_history: false;
+  window: { start: string; end: string } | null;
+  max_drawdown_scope: 'OBSERVATION_WINDOW';
   excluded_bases: string[];
 }
 
@@ -165,7 +170,8 @@ const EXCLUDED = ['cumulative_unrealized_loss', 'etf_own_max_drawdown', 'single_
 function unavailable(reason: string, pointsUsed = 0): DrawdownAssessment {
   return { status: HISTORICAL_DRAWDOWN_UNAVAILABLE, reason, basis: 'verified_cashflow_adjusted_account_nav',
     current_drawdown_bps: null, current_drawdown_pct: null, peak_nav: null, peak_date: null, current_nav: null, current_date: null,
-    max_drawdown_pct: null, valuation_quality: null, points_used: pointsUsed, excluded_bases: EXCLUDED };
+    max_drawdown_pct: null, valuation_quality: null, points_used: pointsUsed,
+    scope: 'OBSERVATION_WINDOW_SINCE_BASELINE', full_history: false, window: null, max_drawdown_scope: 'OBSERVATION_WINDOW', excluded_bases: EXCLUDED };
 }
 
 /**
@@ -197,7 +203,9 @@ export function assessAccountDrawdown(db: DatabaseSync, marketDb: DatabaseSync |
     peak_nav: peak.nav_per_unit, peak_date: peak.date, current_nav: last.nav_per_unit, current_date: last.date,
     max_drawdown_pct: md.available ? Math.round(-md.value * 1e6) / 1e4 : null,
     valuation_quality: series.points.every(p => p.confidence === 'exact') ? 'exact' : 'incomplete',
-    points_used: usable.length, excluded_bases: EXCLUDED,
+    points_used: usable.length,
+    scope: 'OBSERVATION_WINDOW_SINCE_BASELINE', full_history: false,
+    window: { start: usable[0].date, end: last.date }, max_drawdown_scope: 'OBSERVATION_WINDOW', excluded_bases: EXCLUDED,
   };
 }
 
@@ -218,13 +226,15 @@ export interface RiskStateInput {
   concentration?: unknown;
   exposure?: unknown;
   stress?: unknown;
+  /** 调用方已算好的回撤评估（避免重复计算净值序列）。 */
+  drawdown?: DrawdownAssessment;
 }
 
 /** 返回 null 表示 asOf 日尚无已批准政策（保持旧报告字节不变）。 */
 export function buildPortfolioRiskState(input: RiskStateInput): any | null {
   const policy = loadActiveRiskPolicy(input.portfolioDb, input.accountId, input.asOf);
   if (!policy) return null;
-  const dd = assessAccountDrawdown(input.portfolioDb, input.marketDb, input.accountId, input.asOf);
+  const dd = input.drawdown ?? assessAccountDrawdown(input.portfolioDb, input.marketDb, input.accountId, input.asOf);
   let level: DrawdownTier | null = null;
   if (dd.status === 'AVAILABLE' && dd.peak_nav !== null && dd.current_nav !== null) {
     level = levelFor(Math.round(dd.peak_nav * 1e6), Math.round(dd.current_nav * 1e6), policy.tiers);
@@ -236,8 +246,11 @@ export function buildPortfolioRiskState(input: RiskStateInput): any | null {
       per_trade_risk_budget_pct: policy.per_trade_risk_budget_bps / 100,
       auto_reduce: false, auto_liquidate: false, position_cap: null, execution: 'manual_only' },
     drawdown: dd,
+    drawdown_note: dd.status === 'AVAILABLE'
+      ? `回撤口径：${dd.window?.start}–${dd.window?.end} 观察窗口（${dd.points_used} 个净值点），不是账户全历史最大回撤。`
+      : '回撤不可用；不以持仓浮亏、ETF 自身回撤或压力损失替代。',
     warning: dd.status === 'AVAILABLE'
-      ? { level: level?.level ?? 'NONE', triggered: Boolean(level), required_review: level?.review ?? null }
+      ? { level: level?.level ?? 'NONE', triggered: Boolean(level), required_review: level?.review ?? null, scope: dd.scope }
       : { level: 'UNKNOWN', triggered: false, required_review: null, reason: HISTORICAL_DRAWDOWN_UNAVAILABLE },
     concentration: input.concentration ?? null,
     exposure: input.exposure ?? null,

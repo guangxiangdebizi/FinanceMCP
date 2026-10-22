@@ -179,7 +179,10 @@ test('daily report: legacy output unchanged without policy; policy adds portfoli
     assert.equal(after.portfolio_risk.concentration.hhi !== undefined, true);
     assert.ok(after.portfolio_risk.stress);
     assert.equal(after.portfolio_risk.action_boundary.sell_quantity, null);
-    assert.deepEqual({ ...after, portfolio_risk: undefined }, { ...before, portfolio_risk: undefined });
+    // Policy-gated enrichment only touches these blocks (see upgrade-risk-fee-consistency.test.mjs); everything else is identical.
+    const strip = r => ({ ...r, portfolio_risk: undefined, drawdown: undefined, not_covered: undefined, assumptions: undefined,
+      decision_comparison: { ...r.decision_comparison, options: r.decision_comparison.options.map(o => ({ ...o, risk_budget: undefined })) } });
+    assert.deepEqual(strip(after), strip(before));
   } finally { f.market.close(); f.portfolio.close(); }
 });
 

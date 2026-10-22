@@ -43,3 +43,12 @@ portfolio-risk-policy-show --account real-main [--date YYYYMMDD]
 ## 测试
 
 `test/upgrade-risk-policy.test.mjs`：10/15/20% 边界与低于阈值、缺历史、未核验账户、出入金、峰值回撤（非成本）、政策幂等/不覆盖/批准日门控、集中度在缺历史时保留、无自动交易、日报加性且 `report_id` 不变、端到端 L3。
+
+## 日报与研究包口径统一（2026-10-22 一致性修订）
+
+仅在目标日 ≥ 批准日且已记录政策时生效；此前的日报输出与 `report_id` 不变（`report_id` 仍在富化前计算，记录政策不改变既有 ID）。
+
+- **回撤范围显式化**：`portfolio_risk.drawdown` 增加 `scope = OBSERVATION_WINDOW_SINCE_BASELINE`、`full_history = false`、`window{start,end}`、`max_drawdown_scope = OBSERVATION_WINDOW`；`points_used` 即窗口内净值点数。少量净值点的回撤/最大回撤只代表基线以来的观察窗口，不得当作账户全历史最大回撤。`drawdown_note` 给出文字说明，研究包 `markdown_summary` 同步一行。
+- **日报旧 `drawdown` 块**：`available:false / reason:no_history` 仍表示"全历史最大回撤不可得"，并新增 `scope:'FULL_HISTORY'` 与 `observation_window`（与 `portfolio_risk.drawdown` 同源同数），避免与风险状态相互矛盾；`not_covered` 同步改写。
+- **逐情景政策状态**：HOLD/REDUCE/ROTATE/DEFENSIVE/NO_ACTION 的 `risk_budget.status` 由 `NO_USER_CONFIRMED_PORTFOLIO_BUDGET` 变为 `PORTFOLIO_RISK_POLICY_APPROVED`，并带 `policy{rule_version, per_trade_risk_budget_pct:0.5, position_cap:null, warning_level, warning_triggered, drawdown{scope,window,points_used,current_drawdown_pct}}`；`per_stock_plan_risk_limit_pct` 仍为 0.5，不新增仓位上限。压力损失仍是声明式压力，不是回撤。
+- 测试：`test/upgrade-risk-fee-consistency.test.mjs`。
