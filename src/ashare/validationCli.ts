@@ -12,6 +12,7 @@ import { SIGNAL_DEFINITIONS } from './signals.js';
 import { shanghaiToday } from './ingest.js';
 import { assertSeparateFromLive } from './snapshot.js';
 import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, loadActiveValidationFreeze, VALIDATION_VERSION, type ResearchFee } from './validation.js';
+import { diagnoseWatchlist, renderDiagnosisMarkdown } from './researchDiagnosis.js';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -25,6 +26,7 @@ const registryStore = (db: DatabaseSync, value: unknown) => {
 
 /** Lead CLI dispatch may await this helper and print its return value. No market writes.
  * audit --source PATH --as-of YYYYMMDD --output DIR
+ * diagnose --source PATH --as-of YYYYMMDD [--horizon 5] [--observation-dates 60] [--output DIR]
  * study --source PATH --as-of YYYYMMDD --output DIR [--stride 5] [--max-dates N]
  * freeze --source PATH --research-db PATH --start YYYYMMDD
  * observe --source PATH --research-db PATH --freeze-id ID --as-of YYYYMMDD
@@ -34,6 +36,29 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
   const arg = (key: string, fallback?: string) => { const i = args.indexOf(`--${key}`); if (i < 0) return fallback; if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`Missing --${key} value`); return args[i + 1]; };
   const required = (key: string) => { const value = arg(key); if (!value) throw new Error(`--${key} required`); return value; };
   const source = resolve(required('source'));
+  // `diagnose` runs before the registry is opened: it is a pure read of the
+  // market cache and must not create or append to the research registry. Every
+  // other command records something, so the ordering here is deliberate.
+  if (command === 'diagnose') {
+    const ro = new DatabaseSync(source, { readOnly: true });
+    ro.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=15000; BEGIN;');
+    try {
+      const asOf = required('as-of');
+      if (!/^\d{8}$/.test(asOf)) throw new Error('Invalid as-of; expected YYYYMMDD');
+      const report = diagnoseWatchlist(ro, { asOf, horizon: Number(arg('horizon', '5')), observationDates: Number(arg('observation-dates', '60')) });
+      const output = resolve(arg('output', 'data/ashare/diagnosis')!);
+      mkdirSync(output, { recursive: true });
+      const jsonPath = join(output, `diagnosis-${asOf}.json`);
+      const mdPath = join(output, `diagnosis-${asOf}.md`);
+      if (resolve(jsonPath) === source || resolve(mdPath) === source) throw new Error('Output aliases source');
+      writeFileSync(jsonPath, JSON.stringify(report, null, 2));
+      writeFileSync(mdPath, renderDiagnosisMarkdown(report));
+      return { status: report.verdict === 'INSUFFICIENT_DATA' || report.verdict === 'DATA_QUALITY_BLOCKED' ? 'DATA_INSUFFICIENT' : 'RESEARCH_ONLY',
+        as_of: asOf, verdict: report.verdict, verdict_reason: report.verdict_reason,
+        should_create_candidate: report.candidate_recommendation.should_create, target_dimension: report.candidate_recommendation.target_dimension,
+        claims: report.claims.length, json_path: jsonPath, markdown_path: mdPath };
+    } finally { ro.close(); }
+  }
   const db = new DatabaseSync(source, { readOnly: true });
   db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=15000; BEGIN;');
   try {

@@ -67,3 +67,46 @@ export function seedMarket(db, dates) {
   upsertRows(db, 'stock_basic', ['ts_code', 'symbol', 'name', 'industry', 'list_date', 'list_status'], STOCKS);
   addMarketDays(db, dates);
 }
+
+/** A synthetic universe large enough to satisfy the production reference-universe
+ * guard (`priced.length >= 1000` in `auditWatchlist`). Without this, every
+ * cohort's excess is null and the diagnosis can only ever report
+ * INSUFFICIENT_DATA — which is correct behaviour, not a defect, but it leaves
+ * the excess-dependent paths untested. `drift` is applied per industry so that
+ * a planted mechanism is attributable rather than incidental. */
+export function seedReferenceUniverse(db, dates, { stocks = 1100, industries = 15, driftByIndustry = null, adjFactorRamp = null } = {}) {
+  const universe = Array.from({ length: stocks }, (_, i) => ({
+    ts_code: `${600000 + i}.SH`,
+    symbol: String(600000 + i),
+    name: `测试${i}`,
+    industry: `行业${i % industries}`,
+    list_date: '20180101',
+    list_status: 'L',
+  }));
+  upsertRows(db, 'stock_basic', ['ts_code', 'symbol', 'name', 'industry', 'list_date', 'list_status'], universe);
+  upsertRows(db, 'trade_cal', ['cal_date', 'is_open', 'pretrade_date'],
+    dates.map((d, i) => ({ cal_date: d, is_open: 1, pretrade_date: dates[i - 1] ?? null })));
+  dates.forEach((date, k) => {
+    const daily = universe.map((s, i) => {
+      const base = 10 + (i % 40);
+      const drift = driftByIndustry ? (driftByIndustry[s.industry] ?? 0) * k : 0;
+      const close = Math.round(base * (1 + drift) * (1 + noise(k * 100 + i) * 0.02) * 100) / 100;
+      const open = Math.round(close * (1 + noise(k * 50 + i) * 0.005) * 100) / 100;
+      return { ts_code: s.ts_code, trade_date: date, open, close, pre_close: close,
+        high: close * 1.01, low: close * 0.99, pct_chg: 0, vol: 1e5, amount: 2e5 + i * 1000 };
+    });
+    upsertRows(db, 'daily', ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'pre_close', 'pct_chg', 'vol', 'amount'], daily);
+    // `adjFactorRamp` makes the factor a function of the date so that an
+    // entry-date factor and an exit-date factor are *different numbers*. A
+    // constant factor of 1 makes the two indistinguishable, and any join that
+    // confuses the entry date with the exit date returns the same value as the
+    // correct one — the bug becomes invisible to the test. Default stays 1 so
+    // existing fixtures are unaffected.
+    const adj_factor = adjFactorRamp === null ? 1 : 1 + adjFactorRamp * k;
+    upsertRows(db, 'adj_factor', ['ts_code', 'trade_date', 'adj_factor'], daily.map(r => ({ ...r, adj_factor })));
+    upsertRows(db, 'stk_limit', ['ts_code', 'trade_date', 'up_limit', 'down_limit'], daily.map(r => ({ ...r, up_limit: r.pre_close * 1.1, down_limit: r.pre_close * 0.9 })));
+    upsertRows(db, 'daily_basic', ['ts_code', 'trade_date', 'turnover_rate', 'pe_ttm', 'pb', 'circ_mv', 'total_mv'],
+      daily.map((r, i) => ({ ...r, turnover_rate: 1, pe_ttm: 10 + (i % 30), pb: 1.5, circ_mv: 1e6, total_mv: 2e6 })));
+  });
+  return universe;
+}
