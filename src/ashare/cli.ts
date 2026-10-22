@@ -24,6 +24,8 @@ const USAGE = `用法: finance-ashare <command> [options]
   research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
                                                                  用已保存的快照评价持有期收益；未到期保持 PENDING
   research-seed --date YYYYMMDD [--db PATH]                      以该日正式 V1 股票池写入一次性 V1/V2 共同起点（只读正式库）
+  research-export [--date YYYYMMDD] --output DIR [--datasets a,b] [--allow-missing-bars]
+                                                                 只读研究数据冻结快照导出（生产库只读，as-of 之后的数据拒绝导出）
   investment-research-bundle [--account ID] [--date YYYYMMDD] [--db PATH] [--market-db PATH]
                                                                  私有统一研究事实包；默认最近已收盘日，读取路径不写库
   migrate                                                        将旧版缓存主键布局迁移为按股票连续存储
@@ -79,6 +81,14 @@ async function main() {
   if (command === 'research-snapshot' || command === 'research-evaluate' || command === 'research-seed') {
     const { runCommand } = await import('./commands.js');
     if (!(await runCommand(undefined as any, command, { arg, flag, ymd, print }))) process.exitCode = 2;
+    return;
+  }
+  // The research export also opens the live cache read-only itself (it needs its
+  // own as-of cutoff check before any file is written), so it is handled here
+  // too rather than falling through to openAshareDb().
+  if (command === 'research-export') {
+    const { runResearchExportCommand } = await import('./researchExport.js');
+    print(await runResearchExportCommand(process.argv.slice(3)));
     return;
   }
   // Account commands only touch the separate portfolio database. They must not
