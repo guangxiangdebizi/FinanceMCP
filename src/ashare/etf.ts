@@ -4,6 +4,7 @@ import { upsertRows } from './db.js';
 import { addDays, isTradeDay, latestTradeDay, previousTradeDay, shanghaiToday, syncTradeCal, tradeDaysBetween } from './ingest.js';
 import { adjustmentRatio, AdjustMode, DataQueryError, parseYmd } from './data.js';
 import { ETF_CANDIDATE_DECLARATIONS } from './etfDeclarations.js';
+import { BASKET_CODES } from '../portfolio/benchmarkDefinitions.js';
 import { discoverEtfUniverse, ETF_DYNAMIC_SYNC_LIMIT } from './etfResearch.js';
 
 /**
@@ -350,8 +351,16 @@ export async function syncEtf(db: DatabaseSync, start: string, end: string, opts
   if (basic.error) errors.push(`fund_basic: ${basic.error}`);
   const daily = await syncFundDaily(db, start, end, opts);
   for (const [date, r] of Object.entries(daily)) if (r.error) errors.push(`fund_daily ${date}: ${r.error}`);
-  const adj = await syncFundAdj(db, start, end);
-  const share = await syncFundShare(db, start, end);
+  // The approved multi-asset benchmark components are backfilled through the same authorised path; a
+  // gap in the full-market answer is filled per code and per date (idempotent, existing bars untouched).
+  for (const date of tradeDaysBetween(db, start, end)) {
+    try {
+      for (const fetched of await syncFundDailyCodes(db, date, BASKET_CODES)) if (fetched.error) errors.push(`fund_daily ${fetched.ts_code} ${date}: ${fetched.error}`);
+    } catch (e: any) { errors.push(`fund_daily benchmark ${date}: ${String(e?.message ?? e)}`); }
+  }
+  const benchmarkCodes = [...new Set([...ETF_UNIVERSE, ...BASKET_CODES])];
+  const adj = await syncFundAdj(db, start, end, { codes: benchmarkCodes });
+  const share = await syncFundShare(db, start, end, { codes: benchmarkCodes });
   for (const [code, n] of Object.entries(adj)) if (!n) errors.push(`fund_adj ${code}: 无数据或请求失败`);
   for (const [code, n] of Object.entries(share)) if (!n) errors.push(`fund_share ${code}: 无数据或请求失败`);
   return {

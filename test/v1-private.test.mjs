@@ -198,7 +198,9 @@ test('V1-P5 benchmarks are UNAVAILABLE rather than fabricated when data is missi
     // The multi-asset weights are declared provisional, never silently "final".
     const basket = cmp.benchmarks.find(b => b.id === 'frozen_multi_asset_basket');
     assert.ok(basket, JSON.stringify(cmp.benchmarks.map(b => b.id)));
-    assert.equal(basket.weights_status, 'provisional_pending_user_approval');
+    assert.equal(basket.weights_status, 'approved');
+    assert.equal(cmp.definition_version, 'r2-benchmarks-1.1.0');
+    assert.equal(cmp.basket_definition.approved_on, '20261022');
     // The definitions are frozen in advance, not chosen after seeing results.
     assert.equal(cmp.definition_frozen, true);
   } finally { await server.stop(); }

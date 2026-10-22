@@ -2,13 +2,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { ETF_UNIVERSE } from '../ashare/etf.js';
 import { DEFAULT_FEE_RULES, FEE_RULE_VERSION, type FeeRules } from './rules.js';
 import { calculateFees, feeRulesFor, type FeeContext } from './fees.js';
+import { basketDefinition, CURRENT_BASKET_VERSION, type BasketApprovalStatus, type BasketDefinition } from './benchmarkDefinitions.js';
 
 /**
  * C6 冻结对照基准（只读、确定性）。
  *
  * PRD §11 要求至少与两种**提前冻结**的对照比较，另加初始五只 ETF 的静态基线：
  * 1. `csi300_etf_buy_hold`：510300.SH 买入持有；
- * 2. `frozen_multi_asset_basket`：按**常量权重**的多资产 ETF 篮子（权重待用户批准）；
+ * 2. `frozen_multi_asset_basket`：按**常量权重**的多资产 ETF 篮子（权重已于 2026-10-22 获用户批准，见 benchmarkDefinitions.ts 的不可变版本表）；
  * 3. `initial_five_etf_basket`：初始五只 ETF 按固定起始数量持有、不交易。
  *
  * 口径统一（三个基准完全一致，避免事后挑选口径）：
@@ -27,33 +28,21 @@ import { calculateFees, feeRulesFor, type FeeContext } from './fees.js';
 // ---------------------------------------------------------------- 冻结定义
 
 export const BENCHMARK_SCHEMA = 'ashare-benchmark-comparison/1.0';
-export const BENCHMARK_DEFINITION_VERSION = 'r2-benchmarks-1.0.0';
+/** 当前生效的定义版本；旧版本保留在 benchmarkDefinitions.ts，可按版本号复现。 */
+export const BENCHMARK_DEFINITION_VERSION = CURRENT_BASKET_VERSION;
 
 /** 沪深300 ETF 基准。 */
 export const CSI300_ETF_CODE = '510300.SH';
 
 /**
- * 多资产篮子的**常量权重**（合计 1.0）。
- *
- * 状态：`provisional_pending_user_approval` —— PRD §11 要求"具体比例研究后预先固定"，
- * 用户尚未批准这组比例。它们在此冻结，不能因为回测结果不好看而改动；要改必须
- * 升版本号并记录原因。
+ * 多资产篮子的**常量权重**（合计 1.0）：取自当前已批准的不可变版本。
+ * 要改权重必须新增版本并重新获得批准；旧版本不覆盖。
  */
-export const FROZEN_BASKET_WEIGHTS: Readonly<Record<string, number>> = Object.freeze({
-  '510300.SH': 0.40, // 权益（沪深300）
-  '511010.SH': 0.25, // 债券（国债）
-  '518880.SH': 0.15, // 黄金
-  '513100.SH': 0.20, // 跨境（纳指）
-});
+export const FROZEN_BASKET_WEIGHTS: Readonly<Record<string, number>> = basketDefinition().weights;
 
-export const FROZEN_BASKET_WEIGHTS_STATUS = 'provisional_pending_user_approval' as const;
+export const FROZEN_BASKET_WEIGHTS_STATUS: BasketApprovalStatus = basketDefinition().status;
 
-export const FROZEN_BASKET_ASSET_CLASS: Readonly<Record<string, 'equity' | 'bond' | 'gold' | 'cross_border'>> = Object.freeze({
-  '510300.SH': 'equity',
-  '511010.SH': 'bond',
-  '518880.SH': 'gold',
-  '513100.SH': 'cross_border',
-});
+export const FROZEN_BASKET_ASSET_CLASS: Readonly<Record<string, 'equity' | 'bond' | 'gold' | 'cross_border'>> = basketDefinition().asset_class;
 
 /** 初始五只 ETF 的固定起始数量（与 PRD §3 演示快照一致，之后不交易）。 */
 export const FROZEN_FIVE_QUANTITIES: Readonly<Record<string, number>> = Object.freeze({
@@ -85,7 +74,8 @@ export const BENCHMARK_DISCLAIMER =
 export const BENCHMARK_NOTES = [
   '三个基准共用同一时间窗口、同一费用假设（rules.ts 的 DEFAULT_FEE_RULES）与同一现金约定（期初买入后现金为 0，期间不再投入）。',
   '定义在实现时写死：标的、权重、数量、费用与复权口径都是常量；结果不参与定义选择。',
-  '多资产权重状态为 provisional_pending_user_approval：PRD §11 要求预先固定，用户尚未批准。',
+  '多资产权重已获用户批准（2026-10-22，版本 r2-benchmarks-1.1.0，取代暂定的 r2-benchmarks-1.0.0）；批准日之前开始的窗口只是回顾性对照，不是事先获批的前瞻策略。',
+  '513100.SH（纳指 ETF）是跨境品种：溢折价需要净值/IOPV，缓存未提供时标 UNAVAILABLE；其价格缺口与沿用上一已知价的日期单独披露。',
 ] as const;
 
 // ---------------------------------------------------------------- 类型
@@ -105,6 +95,25 @@ export interface BenchmarkLeg {
   total_return_pct: number | null;
   bars_used: number;
   price_basis: 'qfq_adjusted' | 'raw_close_no_adj_factor';
+}
+
+export interface BasketDefinitionView {
+  version: string;
+  status: BasketApprovalStatus;
+  approved_on: string | null;
+  approval_source: string | null;
+  supersedes: string | null;
+  conventions: BasketDefinition['conventions'];
+  /** 窗口起点早于批准日 → RETROSPECTIVE_COMPARISON；否则 PROSPECTIVE_ELIGIBLE；窗口不可用 → null。 */
+  comparison_basis: 'RETROSPECTIVE_COMPARISON' | 'PROSPECTIVE_ELIGIBLE' | 'NOT_APPROVED' | null;
+  comparison_label: string;
+}
+
+export interface CrossBorderDisclosure {
+  ts_code: string;
+  premium_discount: { status: 'UNAVAILABLE'; reason: string; value_pct: null };
+  price_gaps: { carried_forward_dates: string[]; missing_dates: string[] };
+  note: string;
 }
 
 export interface BenchmarkResult {
@@ -137,7 +146,14 @@ export interface BenchmarkResult {
   /** 五只静态基准的账户现金（分）；其它基准为 0。 */
   cash_cents: number;
   weights: Record<string, number> | null;
-  weights_status: typeof FROZEN_BASKET_WEIGHTS_STATUS | null;
+  weights_status: BasketApprovalStatus | null;
+  /** 多资产篮子：定义版本、批准状态与回顾性标签；其它基准为 null。 */
+  definition?: BasketDefinitionView | null;
+  /** 披露事项（跨境溢折价、价格缺口等）；其它基准为空。 */
+  disclosures?: string[];
+  cross_border?: CrossBorderDisclosure[];
+  /** 缺行情时的补数据方式（只描述既有授权同步路径，不自动执行）。 */
+  backfill?: { command: string; note: string } | null;
   /** 明确的缺失代码，便于复核为什么 unavailable。 */
   missing_codes: string[];
   /** 区间内（未年化）的风险调整指标；unavailable 或分母为 0 时为 null，不外推。 */
@@ -167,6 +183,8 @@ export interface BenchmarkComparisonInput {
   /** 费用假设；缺省 DEFAULT_FEE_RULES（标记 assumed）。 */
   fees?: FeeRules;
   fee_context?: FeeContext;
+  /** 多资产篮子定义版本；缺省为当前已批准版本。旧版本仅用于复现。 */
+  definition_version?: string;
 }
 
 export interface BenchmarkComparisonResult {
@@ -190,6 +208,10 @@ export interface BenchmarkComparisonResult {
     return_formula: string;
   };
   benchmarks: BenchmarkResult[];
+  /** 已批准多资产篮子的定义与回顾性标签（与篮子结果中的 definition 一致）。 */
+  basket_definition: BasketDefinitionView;
+  /** 共同起止日期检查：每个基准实际使用的窗口；窗口不同者不互相比较。 */
+  window_alignment: { common_window: { start: string; end: string; trading_days: number } | null; all_aligned: boolean; windows: Record<string, { start: string; end: string; trading_days: number } | null>; note: string };
   /** 每个基准相对沪深300 ETF 的超额；不同观察区间不比较。 */
   relative: BenchmarkRelative[];
   notes: readonly string[];
@@ -298,14 +320,19 @@ function annualizedVolPct(values: number[]): number | null {
 const unavailableBenchmark = (
   id: BenchmarkResult['id'], label: string, reason: string, detail: string,
   missingCodes: string[] = [], weights: Record<string, number> | null = null,
+  extra: Partial<BenchmarkResult> = {},
 ): BenchmarkResult => ({
   id, label, status: 'UNAVAILABLE', reason, detail,
   total_return_pct: null, max_drawdown_pct: null, annualized_vol_pct: null,
   end_value_cents: null, start_value_cents: null, entry_fee_cents: null,
   window: null, legs: [], price_basis: 'raw_close_no_adj_factor',
   valuation_quality: 'exact', carried_forward_dates: [], cash_cents: 0,
-  weights, weights_status: weights ? FROZEN_BASKET_WEIGHTS_STATUS : null,
+  weights, weights_status: null,
   missing_codes: missingCodes,
+  backfill: missingCodes.length > 0
+    ? { command: 'finance-ashare etf-sync --start <START> --end <END>', note: '通过既有授权 Tushare 同步路径补齐缺失行情；补齐前保持 UNAVAILABLE，不缩短窗口、不替换成分。' }
+    : null,
+  ...extra,
 });
 
 /**
@@ -368,6 +395,7 @@ function portfolioSeries(
 export function buildBenchmarkComparison(input: BenchmarkComparisonInput): BenchmarkComparisonResult {
   const db = input.marketDb ?? null;
   const fees = input.fees ?? DEFAULT_FEE_RULES;
+  const definition = basketDefinition(input.definition_version);
   const startRaw = input.start === undefined ? undefined : String(input.start).trim();
   const endRaw = input.end === undefined ? undefined : String(input.end).trim();
   if (startRaw !== undefined && !YMD.test(startRaw)) throw new Error('start 需要 YYYYMMDD 格式');
@@ -436,7 +464,7 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
   }, input.fee_context));
 
   // ---------------------------------------------------------------- 2. 多资产常量权重篮子
-  benchmarks.push(benchmarkWeightBasket(db, tables, dates, window, fees, input.fee_context));
+  benchmarks.push(benchmarkWeightBasket(db, tables, dates, window, fees, definition, input.fee_context));
 
   // ---------------------------------------------------------------- 3. 初始五只静态基线
   benchmarks.push(benchmarkFiveStatic(db, tables, dates, window));
@@ -467,13 +495,23 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
     };
   }
 
+  const windows = Object.fromEntries(benchmarks.map(benchmark => [benchmark.id, benchmark.window ? { ...benchmark.window } : null]));
+  const sameAsWindow = (candidate: { start: string; end: string; trading_days: number } | null) => !!candidate && !!window
+    && candidate.start === window.start && candidate.end === window.end && candidate.trading_days === window.trading_days;
+  const alignment = {
+    common_window: window ? { ...window } : null,
+    all_aligned: !!window && Object.values(windows).every(sameAsWindow),
+    windows,
+    note: '只有起止日期与交易日数完全一致的基准才互相比较；初始五只 ETF 锚定在 2026-10-16 实际基线，窗口不同时其超额收益为 UNAVAILABLE，不裁剪任何一方。',
+  };
+
   const status: 'OK' | 'DEGRADED' | 'UNAVAILABLE' = !db || !tables.fund_daily || !window
     ? 'UNAVAILABLE'
     : benchmarks.some(benchmark => benchmark.status !== 'OK') ? 'DEGRADED' : 'OK';
 
   return {
     schema: BENCHMARK_SCHEMA,
-    definition_version: BENCHMARK_DEFINITION_VERSION,
+    definition_version: definition.version,
     definition_frozen: true,
     as_of_trade_date: window?.end ?? null,
     requested_window: requested,
@@ -489,6 +527,8 @@ export function buildBenchmarkComparison(input: BenchmarkComparisonInput): Bench
       return_formula: '总收益 =（期末价值 − 期初含费投入）/ 期初含费投入；最大回撤与年化波动基于逐日组合价值序列（252 个交易日）。',
     },
     benchmarks,
+    basket_definition: definitionView(definition, window?.start ?? null),
+    window_alignment: alignment,
     relative,
     notes: BENCHMARK_NOTES,
     disclaimer: BENCHMARK_DISCLAIMER,
@@ -569,28 +609,76 @@ function benchmarkSingle(
 
 // ---------------------------------------------------------------- 多资产篮子
 
+function definitionView(definition: BasketDefinition, windowStart: string | null): BasketDefinitionView {
+  const basis: BasketDefinitionView['comparison_basis'] = definition.status !== 'approved' || !definition.approved_on ? 'NOT_APPROVED'
+    : windowStart === null ? null
+      : windowStart < definition.approved_on ? 'RETROSPECTIVE_COMPARISON' : 'PROSPECTIVE_ELIGIBLE';
+  const label = basis === 'RETROSPECTIVE_COMPARISON'
+    ? `回顾性对照：窗口起点 ${windowStart} 早于批准日 ${definition.approved_on}，不是事先获得批准的前瞻策略`
+    : basis === 'PROSPECTIVE_ELIGIBLE' ? `窗口起点 ${windowStart} 不早于批准日 ${definition.approved_on}，可作为批准后的前瞻对照`
+      : basis === 'NOT_APPROVED' ? '该版本尚未获得用户批准，仅用于复现旧结果'
+        : '窗口不可用，无法判定回顾性或前瞻性';
+  return {
+    version: definition.version, status: definition.status, approved_on: definition.approved_on,
+    approval_source: definition.approval_source, supersedes: definition.supersedes,
+    conventions: definition.conventions, comparison_basis: basis, comparison_label: label,
+  };
+}
+
+function basketDisclosures(definition: BasketDefinition, view: BasketDefinitionView): string[] {
+  const out = ['研究绩效对照基准，不是账户目标配置，也不是买入指令。', view.comparison_label];
+  const cross = Object.entries(definition.asset_class).filter(([, kind]) => kind === 'cross_border').map(([code]) => code);
+  for (const code of cross) {
+    out.push(`${code} 为跨境 ETF：收盘价可能偏离净值，溢折价需要净值/IOPV，缓存未提供时为 UNAVAILABLE；海外休市日的价格缺口按上一已知价沿用并披露，不当作零价。`);
+  }
+  return out;
+}
+
+function crossBorderDisclosures(
+  seriesByCode: Map<string, PriceSeries> | null, dates: string[] | null, missing: string[], definition: BasketDefinition,
+): CrossBorderDisclosure[] {
+  return Object.entries(definition.asset_class).filter(([, kind]) => kind === 'cross_border').map(([code]) => {
+    const series = seriesByCode?.get(code);
+    const carried = series && dates ? fillPrices(series, dates).carried : [];
+    const absent = missing.filter(item => item.startsWith(`${code}@`) || item.startsWith(`${code}:`));
+    return {
+      ts_code: code,
+      premium_discount: { status: 'UNAVAILABLE' as const, reason: 'nav_iopv_not_cached', value_pct: null },
+      price_gaps: { carried_forward_dates: carried, missing_dates: absent },
+      note: '跨境溢折价未计入基准收益；收盘价相对净值的偏离是未量化的额外风险。',
+    };
+  });
+}
+
 function benchmarkWeightBasket(
   db: DatabaseSync | null,
   tables: { fund_basic: boolean; fund_daily: boolean; fund_adj: boolean },
   dates: string[],
   window: { start: string; end: string; trading_days: number } | null,
   fees: FeeRules,
+  definition: BasketDefinition,
   context?: FeeContext,
 ): BenchmarkResult {
   const id: BenchmarkResult['id'] = 'frozen_multi_asset_basket';
-  const label = '冻结多资产 ETF 篮子（40% 权益 / 25% 债券 / 15% 黄金 / 20% 跨境）';
-  const weights = { ...FROZEN_BASKET_WEIGHTS };
+  const label = definition.status === 'approved'
+    ? '已批准多资产 ETF 篮子（40% 权益 / 25% 债券 / 15% 黄金 / 20% 跨境）'
+    : '暂定多资产 ETF 篮子（尚未获批，仅复现旧版本）';
+  const weights = { ...definition.weights };
+  const view = definitionView(definition, window?.start ?? null);
+  const common = { weights_status: definition.status, definition: view, disclosures: basketDisclosures(definition, view) };
   if (!db || !window) {
-    return unavailableBenchmark(id, label, 'window_unavailable', '没有可用的市场缓存或交易日窗口', Object.keys(weights), weights);
+    return unavailableBenchmark(id, label, 'window_unavailable', '没有可用的市场缓存或交易日窗口', Object.keys(weights), weights, { ...common, cross_border: crossBorderDisclosures(null, null, [], definition) });
   }
-  const notionalCents = 1_000_000;
+  const notionalCents = definition.conventions.initial_capital_cents;
   const legs: { series: PriceSeries; quantity: number }[] = [];
   const legViews: BenchmarkLeg[] = [];
   const missing: string[] = [];
   let feeTotal = 0;
   let grossTotal = 0;
+  const seriesByCode = new Map<string, PriceSeries>();
   for (const [code, weight] of Object.entries(weights)) {
     const series = loadSeries(db, code, window.start, window.end, tables);
+    seriesByCode.set(code, series);
     const startPrice = series.byDate.get(window.start);
     const endPrice = series.byDate.get(window.end);
     if (startPrice === undefined || endPrice === undefined) {
@@ -616,9 +704,10 @@ function benchmarkWeightBasket(
       price_basis: series.basis,
     });
   }
+  const crossBorder = crossBorderDisclosures(seriesByCode, dates, missing, definition);
   if (missing.length > 0) {
     return unavailableBenchmark(id, label, 'leg_not_cached',
-      `篮子成分在窗口两端缺行情：${missing.join(', ')}；不缩短窗口、不用替代标的`, missing, weights);
+      `篮子成分在窗口两端缺行情：${missing.join(', ')}；不缩短窗口、不用替代标的`, missing, weights, { ...common, cross_border: crossBorder });
   }
   const { values, carried } = portfolioSeries(legs, dates);
   const invested = grossTotal + feeTotal;
@@ -644,7 +733,11 @@ function benchmarkWeightBasket(
     carried_forward_dates: carried,
     cash_cents: 0,
     weights,
-    weights_status: FROZEN_BASKET_WEIGHTS_STATUS,
+    weights_status: definition.status,
+    definition: view,
+    disclosures: common.disclosures,
+    cross_border: crossBorder,
+    backfill: null,
     missing_codes: [],
   };
 }

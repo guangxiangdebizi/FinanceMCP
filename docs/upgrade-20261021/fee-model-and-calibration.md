@@ -22,7 +22,7 @@
 
 `aggregation`（按订单还是成交明细）、`rounding`（券商实际舍入）、`minimum_billing_unit`（隐藏最低计费单位）及 `regulatory_fees_included` 默认保持 `UNKNOWN`。引擎采用的分位四舍五入只描述估计算法，不构成对券商实际规则的确认。无证据时不能自动合并成交明细后声称最低佣金已准确复现。
 
-`SUPER_ETF` 只能由账户配置中的具体代码标记获得。被标记的代码即使没有显式费率字段，也使用观察到的优惠档：佣金万 0.5、无普通 ETF 的 5 元最低门槛，两个字段均为 `ASSUMED`（`fee_model.estimated` 为真），不扩展到其他 ETF。代码或类别规则中显式写入的字段值与证据优先于该档位。12 笔历史成交样本由 `test/upgrade-fees-calibration.test.mjs` 逐笔复现；516080.SH 的比例佣金保持 `UNKNOWN`，159241.SZ、159278.SZ 未标记，按普通 ETF 默认估算。
+`SUPER_ETF` 只能由账户配置中的具体代码标记获得。被标记的代码即使没有显式费率字段，也使用观察到的优惠档：佣金万 0.5、无普通 ETF 的 5 元最低门槛，两个字段均为 `ASSUMED`（`fee_model.estimated` 为真），不扩展到其他 ETF。代码或类别规则中显式写入的字段值与证据优先于该档位。公开测试用 12 笔合成样本（不含任何真实金额）复现同样的计费边界；真实 12 笔样本只保存在操作者私有校准目录；516080.SH 的比例佣金保持 `UNKNOWN`，159241.SZ、159278.SZ 未标记，按普通 ETF 默认估算。
 
 ## 私有持久配置与 API
 
@@ -53,8 +53,21 @@ finance-ashare portfolio-benchmarks --account ACCOUNT --start YYYYMMDD --end YYY
 
 ## 校准与验证
 
-公开测试使用 12 笔泛化合成样例，覆盖优惠佣金、普通最低收费、字段级未知、规则优先级、生效日期、持久化幂等、股票/ETF 税费差异、零名义金额和精确半分舍入。
+公开测试使用 12 笔**合成**样本（`test/upgrade-fees-calibration.test.mjs`），不复用任何真实成交金额。它们覆盖与真实样本相同的计费边界：万 0.5 档的整分、恰好半分（四舍五入进位）、略高于/略低于半分、低于 5 元且无最低门槛的佣金；以及 516080 型“仅观察到最低 5 元、比例佣金 UNKNOWN”。另覆盖规则优先级、生效日期不回溯、按精确代码标记（邻近代码不受影响）、持久化幂等、股票/ETF 税费差异、零名义金额和精确半分舍入。
 
-任务提供的真实观察样本及待导入规则仅写入操作者私有目录。真实观察校准状态由私有结果文件记录；生产账户规则尚需在备份后由部署操作者导入。观察拟合通过不意味着订单聚合、券商舍入、隐藏最低计费单位或未知比例费率已被确认，也不证明历史任意时点采用同一规则。
+### 真实样本（私有）与校准状态
+
+用户于 2026-10-22 批准把 12 笔东方财富 ETF 历史成交样本**仅**用于 Oracle VPS 私有费率校准：只用于校准和验证佣金模型；不得作为 2026-10-16 基线之后的新成交写入账户账本；不得进入公开 Git；不公开账户身份与完整交割记录。
+
+- 位置：`~/.local/share/ashare-private/fee-calibration-20261022/`（容器内 `/private/fee-calibration-20261022/`），目录 700、文件 600，位于已纳入私有备份的私有目录内。内容为每个代码的 `samples-<code>.json` 与 `profile-<code>.json`，以及默认只做 dry-run 的 `apply.sh`。
+- 生效日期：三条 profile 的 `effective_from` 均为 `20261016`（账户基线日）。样本逐笔日期未记录，因此不向更早日期回溯；`20261015` 及之前仍按普通 ETF 默认（ASSUMED）。
+- 159558.SZ、560390.SH：`SUPER_ETF`，`commission_rate=0.00005`、`commission_min_cents=0`，两字段均有成交观察证据（`CONFIRMED`，4/4 笔逐分复现）。标记只对这两个精确代码生效。
+- 516080.SH：`OTHER_ETF`，`commission_min_cents=500` 为 `CONFIRMED`（4/4 笔收最低 5 元）；`commission_rate=null`，证据 `UNKNOWN`（计算时用保守默认并保持 `estimated=true`）。
+- `aggregation`、`rounding`、`minimum_billing_unit`、`regulatory_fees_included` 仍为 `UNKNOWN`；12/12 拟合通过**不**表示已确认全部券商舍入、订单/成交分笔和隐藏计费规则。
+- 私有账户库在生产容器内的 `/private/portfolio.sqlite`（`account_meta` 键 `fee_profiles:real-main`）。本次未改动生产库；`apply.sh` 先 dry-run，经备份后由负责人带 `--confirm` 执行。校准在临时库上已验证：三条 profile 的 dry-run、写入、重复写入幂等及 `portfolio-fees-calibrate` 均通过。
+
+### 同一费用引擎
+
+情景（`scenario.ts`）、组合决策（`decision.ts`）、收盘日报（`dailyReport.ts`）、被动基准（`benchmarks.ts`）、研究日志评价（`researchJournal.ts`）、研究数据包的逐标的费用摘要全部通过 `fees.ts` 的 `feeRulesFor`/`resolveFeeRules` 与 `calculateFees`；`test/upgrade-benchmark-approval.test.mjs` 扫描这些模块并验证基准入场费随账户 profile 及其生效日期变化。
 
 定向兼容验证 66/66 通过，包含私有情景与决策的真实函数调用。独立复核的费用/日报专项 22/22 通过，确认股票与 ETF 模型版本已区分且金额保持一致。最终全仓测试计数以集中验收报告为准。

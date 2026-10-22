@@ -57,6 +57,14 @@ test('bundle uses latest closed session pre-open, preserves negative watchlist e
   const result=build(f);
   assert.equal(result.as_of_trade_date,'20261020');
   assert.equal(result.data_quality.market.status,'READY');
+  // The bundle carries the approved benchmark version and status even when component prices are missing.
+  assert.equal(result.rules.benchmark,'r2-benchmarks-1.1.0');
+  assert.equal(result.benchmarks.basket_definition.status,'approved');
+  assert.equal(result.benchmarks.basket_definition.approved_on,'20261022');
+  assert.equal(result.benchmarks.basket_definition.comparison_basis,'RETROSPECTIVE_COMPARISON');
+  assert.match(result.rules.benchmark_status,/^approved:20261022:RETROSPECTIVE_COMPARISON$/);
+  assert.equal(result.benchmarks.benchmarks.find(b=>b.id==='frozen_multi_asset_basket').status,'UNAVAILABLE');
+  assert.match(result.markdown_summary,/基准: r2-benchmarks-1\.1\.0 approved/);
   assert.equal(result.watchlist.historical_effectiveness.mean_excess_pct,-1.68);
   assert.equal(result.evidence_status,'UNVERIFIED');
   assert.equal(result.account_status,'REAL_ACCOUNT_VERIFIED');

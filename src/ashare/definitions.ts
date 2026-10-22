@@ -310,7 +310,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
   },
   {
     name: 'ashare_portfolio_benchmarks',
-    description: `事先固定的对照基准比较（C6，只读）：沪深300 ETF（510300.SH）被动持有、固定权重的多资产 ETF 篮子（权重为暂定值，状态 provisional_pending_user_approval，待用户批准）、以及原五只 ETF 按起始数量不交易。统一时间窗、费用与现金流口径，给出总收益、最大回撤与波动率。任一所需 ETF 无缓存数据时该基准标 UNAVAILABLE 并说明原因，绝不缩短窗口或用代理替代。基准在观察结果之前固定，不得事后挑选。${PORTFOLIO_NOTE} 只在 /private/mcp 提供。`,
+    description: `事先固定的对照基准比较（C6，只读）：沪深300 ETF（510300.SH）被动持有、固定权重的多资产 ETF 篮子（510300.SH 40% / 511010.SH 25% / 518880.SH 15% / 513100.SH 20%，版本 r2-benchmarks-1.1.0，用户已于 2026-10-22 批准，状态 approved；批准日之前开始的窗口标注为回顾性对照；513100 跨境溢折价与价格缺口单独披露）、以及原五只 ETF 按起始数量不交易。统一时间窗、费用与现金流口径，给出总收益、最大回撤与波动率。任一所需 ETF 无缓存数据时该基准标 UNAVAILABLE 并说明原因，绝不缩短窗口或用代理替代。基准在观察结果之前固定，不得事后挑选。${PORTFOLIO_NOTE} 只在 /private/mcp 提供。`,
     inputSchema: {
       type: 'object',
       properties: {

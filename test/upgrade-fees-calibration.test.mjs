@@ -20,18 +20,21 @@ const run = args => {
   return { code: r.status, stderr: r.stderr, json };
 };
 const ev = (level, source = 'historical fills') => ({ level, source });
-const special = (code, id) => ({ id, code, classification: 'SUPER_ETF', effective_from: '20200101',
+const special = (code, id) => ({ id, code, classification: 'SUPER_ETF', effective_from: '20261016',
   values: { commission_rate: 0.00005, commission_min_cents: 0 },
   evidence: { commission_rate: ev('CONFIRMED'), commission_min_cents: ev('CONFIRMED') } });
-const minOnly = (code, id) => ({ id, code, classification: 'OTHER_ETF', effective_from: '20200101',
+const minOnly = (code, id) => ({ id, code, classification: 'OTHER_ETF', effective_from: '20261016',
   values: { commission_rate: null, commission_min_cents: 500 },
   evidence: { commission_rate: ev('UNKNOWN', 'proportional rate never observed'), commission_min_cents: ev('CONFIRMED') } });
 
-// The 12 historical observations from the goal specification (gross yuan, commission yuan) -> cents.
+// Synthetic billing-boundary observations (gross yuan, commission yuan). None is a real fill: the real
+// samples live only in the operator's private calibration directory. Boundaries covered for the 0.00005
+// tier: exact cent, exactly half a cent (half-up), just above and just below half, sub-5-yuan commissions
+// with no minimum floor; for the minimum-only code: every fill billed at the 5-yuan minimum.
 const SAMPLES = {
-  '159558.SZ': [[9990.00, 0.50], [9149.20, 0.46], [19901.70, 1.00], [3330.00, 0.17]],
-  '560390.SH': [[3980.00, 0.20], [2511.00, 0.13], [1674.00, 0.08], [4295.00, 0.21]],
-  '516080.SH': [[3485.00, 5.00], [7540.00, 5.00], [6970.00, 5.00], [3465.00, 5.00]],
+  '159558.SZ': [[4300.00, 0.22], [5299.00, 0.26], [3501.00, 0.18], [15150.40, 0.76]],
+  '560390.SH': [[7600.00, 0.38], [6850.50, 0.34], [100.00, 0.01], [1111.00, 0.06]],
+  '516080.SH': [[3210.00, 5.00], [7125.50, 5.00], [6800.00, 5.00], [3595.00, 5.00]],
 };
 const cents = yuan => Math.round(yuan * 100);
 const ctx = {
@@ -39,7 +42,7 @@ const ctx = {
   profiles: [special('159558.SZ', 'p1'), special('560390.SH', 'p2'), minOnly('516080.SH', 'p3')],
 };
 
-test('the twelve historical fills reproduce the actual commission one by one', () => {
+test('twelve synthetic billing-boundary fills reproduce the commission one by one', () => {
   let count = 0;
   for (const [code, rows] of Object.entries(SAMPLES)) {
     const rules = feeRulesFor(ctx, code, 'ETF');
@@ -54,13 +57,34 @@ test('the twelve historical fills reproduce the actual commission one by one', (
   assert.equal(count, 12);
 });
 
+test('calibration profiles are effective-dated and never reach back before their evidence date', () => {
+  const before = { ...ctx, asOf: '20261015' };
+  for (const code of ['159558.SZ', '560390.SH', '516080.SH']) {
+    const rules = feeRulesFor(before, code, 'ETF');
+    assert.equal(rules.fee_model.classification, 'NORMAL_ETF', code);
+    assert.equal(rules.commission_rate, 0.00025);
+    assert.equal(rules.fee_model.evidence.commission_rate.level, 'ASSUMED');
+  }
+  const rules = feeRulesFor(ctx, '159558.SZ', 'ETF');
+  assert.equal(rules.fee_model.estimated, true, 'fitting samples does not confirm rounding, aggregation or hidden billing units');
+  assert.equal(rules.fee_model.rounding, 'UNKNOWN');
+  assert.equal(rules.fee_model.aggregation, 'UNKNOWN');
+  assert.equal(rules.fee_model.minimum_billing_unit, 'UNKNOWN');
+});
+
+test('super-ETF tagging is per exact code: a neighbouring code of the same family is not tagged', () => {
+  for (const code of ['159559.SZ', '560391.SH', '516081.SH']) {
+    assert.equal(feeRulesFor(ctx, code, 'ETF').fee_model.classification, 'NORMAL_ETF', code);
+  }
+});
+
 test('per-field evidence: min-fee observed does not confirm the 516080 proportional rate', () => {
   const rules = feeRulesFor(ctx, '516080.SH', 'ETF');
   assert.equal(rules.fee_model.evidence.commission_min_cents.level, 'CONFIRMED');
   assert.equal(rules.fee_model.evidence.commission_rate.level, 'UNKNOWN');
   assert.equal(rules.fee_model.estimated, true);
   assert.notEqual(rules.fee_model.classification, 'SUPER_ETF');
-  const fee = calculateFees(cents(3485), 'buy', rules);
+  const fee = calculateFees(cents(3210), 'buy', rules);
   assert.equal(fee.assumed, true);
   assert.equal(rules.commission_rate, 0.00025, 'unknown rate falls back to the conservative default, still flagged');
 });

@@ -261,7 +261,7 @@ test('C2-4b 类别过滤不影响五只持仓出现，limit 只截断 OK 的非�
 
 // ---------------------------------------------------------------- C6
 
-test('C6-1 冻结基准：三个基准可用，权重状态为 provisional_pending_user_approval', () => {
+test('C6-1 冻结基准：三个基准可用，权重状态为 approved', () => {
   const comparison = buildBenchmarkComparison({ marketDb: marketFull });
   assert.equal(comparison.schema, BENCHMARK_SCHEMA);
   assert.equal(comparison.definition_frozen, true);

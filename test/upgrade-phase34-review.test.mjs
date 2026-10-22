@@ -131,6 +131,6 @@ test('missing 510300.SH start keeps the benchmark UNAVAILABLE without shortening
   const basket = result.benchmarks.find(b => b.id === 'frozen_multi_asset_basket');
   assert.equal(basket.status, 'UNAVAILABLE');
   assert.equal(result.relative.find(r => r.id === 'frozen_multi_asset_basket').excess_return_pct_points, null);
-  assert.equal(basket.weights_status, 'provisional_pending_user_approval');
+  assert.equal(basket.weights_status, 'approved');
   db.close();
 });

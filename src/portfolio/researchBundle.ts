@@ -92,6 +92,7 @@ export function buildInvestmentResearchBundle(input: ResearchBundleInput): any {
   const versions = {
     bundle: RESEARCH_BUNDLE_SCHEMA, market: targetReport?.versions ?? null,
     etf_universe: ETF_UNIVERSE_VERSION, benchmark: BENCHMARK_DEFINITION_VERSION,
+    benchmark_status: benchmarks?.basket_definition ? `${benchmarks.basket_definition.status}:${benchmarks.basket_definition.approved_on}:${benchmarks.basket_definition.comparison_basis}` : null,
     portfolio: portfolio?.schema ?? null,
   };
   const sync = market && asOf ? safe('sync_times', () => market.prepare(
@@ -121,6 +122,7 @@ export function buildInvestmentResearchBundle(input: ResearchBundleInput): any {
     schema: RESEARCH_BUNDLE_SCHEMA, as_of_trade_date: asOf, account_id: account.account_id,
     market_report_id: targetReport?.report_id ?? null, market: targetReport,
     portfolio, benchmarks, validation, gaps,
+    ...(portfolio?.portfolio_risk ? { portfolio_risk: portfolio.portfolio_risk } : {}),
     versions, quality: quality?.status ?? 'NOT_READY', fees: feeSummary,
     candidates: [...held, ...other], account_snapshot_id: snapshot.snapshot_id,
   };
@@ -161,6 +163,7 @@ export function buildInvestmentResearchBundle(input: ResearchBundleInput): any {
     portfolio,
     transaction_fees: { as_of_trade_date: asOf, securities: feeSummary, accounting: 'actual booked fees remain immutable; slippage estimates are separate' },
     benchmarks,
+    ...(portfolio?.portfolio_risk ? { portfolio_risk: portfolio.portfolio_risk } : {}),
     research_tracking: historical,
     evidence_gaps: gaps,
     rules: versions,
@@ -169,6 +172,7 @@ export function buildInvestmentResearchBundle(input: ResearchBundleInput): any {
       `报告 ID: ${reportId}`,
       `市场: ${quality?.status ?? 'NOT_READY'}；账户身份: ${portfolio?.account_status ?? 'UNKNOWN'}；研究优势: UNVERIFIED`,
       `决策: ${portfolio?.status ?? 'DATA_INSUFFICIENT'}；股票池: ${targetReport?.watchlist?.count ?? '不可用'}；ETF持仓报价缺口: ${etfNotReady.join('、') || '无/未评估'}`,
+      `基准: ${BENCHMARK_DEFINITION_VERSION} ${benchmarks?.basket_definition?.status ?? 'UNAVAILABLE'}；${benchmarks?.basket_definition?.comparison_label ?? '基准窗口不可用'}`,
       ...gaps.map(gap => `- ${gap.module}: ${gap.reason}`),
     ].join('\n'),
     boundaries: { read_only: true, execution: 'manual_only', private_endpoint_required: true, external_research: 'NOT_ACQUIRED',
