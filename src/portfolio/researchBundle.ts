@@ -173,6 +173,7 @@ export function buildInvestmentResearchBundle(input: ResearchBundleInput): any {
       `市场: ${quality?.status ?? 'NOT_READY'}；账户身份: ${portfolio?.account_status ?? 'UNKNOWN'}；研究优势: UNVERIFIED`,
       `决策: ${portfolio?.status ?? 'DATA_INSUFFICIENT'}；股票池: ${targetReport?.watchlist?.count ?? '不可用'}；ETF持仓报价缺口: ${etfNotReady.join('、') || '无/未评估'}`,
       `基准: ${BENCHMARK_DEFINITION_VERSION} ${benchmarks?.basket_definition?.status ?? 'UNAVAILABLE'}；${benchmarks?.basket_definition?.comparison_label ?? '基准窗口不可用'}`,
+      ...(portfolio?.portfolio_risk ? [`组合风险政策 ${portfolio.portfolio_risk.policy.rule_version}：预警 ${portfolio.portfolio_risk.warning.level}；${portfolio.portfolio_risk.drawdown_note}`] : []),
       ...gaps.map(gap => `- ${gap.module}: ${gap.reason}`),
     ].join('\n'),
     boundaries: { read_only: true, execution: 'manual_only', private_endpoint_required: true, external_research: 'NOT_ACQUIRED',

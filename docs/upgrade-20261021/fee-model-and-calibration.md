@@ -71,3 +71,9 @@ finance-ashare portfolio-benchmarks --account ACCOUNT --start YYYYMMDD --end YYY
 情景（`scenario.ts`）、组合决策（`decision.ts`）、收盘日报（`dailyReport.ts`）、被动基准（`benchmarks.ts`）、研究日志评价（`researchJournal.ts`）、研究数据包的逐标的费用摘要全部通过 `fees.ts` 的 `feeRulesFor`/`resolveFeeRules` 与 `calculateFees`；`test/upgrade-benchmark-approval.test.mjs` 扫描这些模块并验证基准入场费随账户 profile 及其生效日期变化。
 
 定向兼容验证 66/66 通过，包含私有情景与决策的真实函数调用。独立复核的费用/日报专项 22/22 通过，确认股票与 ETF 模型版本已区分且金额保持一致。最终全仓测试计数以集中验收报告为准。
+
+## 逐代码费用的调用点核查（2026-10-22）
+
+核查结论：情景（`scenario.ts` 经 `fee_context`）、轮动/决策（`decision.ts` 的 `feeFor`）、日报（`dailyReport.ts` 的 `feeFor` 与候选 vs 现金）、研究日志评估（`journalFeeEstimator`）与基准（`benchmarks.ts`，按窗口起点生效日）均走 `feeRulesFor`/`resolveFeeRules` 的"代码 > 品类 > 默认"优先级，没有绕过点。唯一与此不符的是日报 `assumptions.fees` 只展示品类默认值，易被误读；已政策日及之后（与风险政策同一门控）加入 `scope:'CATEGORY_DEFAULT'` 与 `per_code`（有档案的代码、分类、档案 ID、佣金率/最低佣金及证据等级），旧日期输出不变。
+
+测试（合成金额）：`test/upgrade-risk-fee-consistency.test.mjs` 验证有档案代码与品类默认的佣金不同、证据等级（CONFIRMED / 费率 UNKNOWN 回退默认费率但保留已确认最低佣金）、以及档案生效日之前使用默认值。
