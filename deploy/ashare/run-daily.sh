@@ -48,6 +48,9 @@ if docker exec "$CONTAINER" node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"
       echo "finance-ashare validation observation FAILED (market report retained); see $LOG_DIR/validation-$STAMP.log" >&2
       exit 76
     fi
+  else
+    # Not an error, but never silent: without a frozen protocol nothing counts as forward observation.
+    echo "finance-ashare validation observation SKIPPED: no frozen protocol (/data/research-validation/validation.sqlite missing); run 'research-validation freeze' to start the forward record" >&2
   fi
 else
   code=$?

@@ -262,7 +262,7 @@ export function evaluateResearchJournal(input: { portfolioDb: DatabaseSync; mark
       };
       const cost = fees(observation.ts_code, start, end);
       if (!cost) return fail('fee_rules_unavailable');
-      result.fees_cents = cost.total; result.net_return_pct = cost.net; result.fees_estimated = cost.estimated; result.fee_versions = cost.versions;
+      result.invested_cents = cost.invested; result.fees_cents = cost.total; result.net_return_pct = cost.net; result.fees_estimated = cost.estimated; result.fee_versions = cost.versions;
       const benchmarkCode = observation.benchmark_code ?? '510300.SH';
       const benchmark = allDates.map(date => price(db, benchmarkCode, date));
       result.benchmark_code = benchmarkCode;
