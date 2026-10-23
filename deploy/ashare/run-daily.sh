@@ -40,14 +40,30 @@ if docker exec "$CONTAINER" node build/ashare/cli.js daily "$@" >"$OUT" 2>"$ERR"
   # Observe frozen research only after the market pipeline finishes. Uses the same
   # container runtime and a separate registry, never rewriting the live pool.
   if docker exec "$CONTAINER" test -f /data/research-validation/validation.sqlite; then
-    # observe requires --as-of equal to the cache cutoff; the daily output ends with the top-level trade_date.
-    OBS_DATE=$(grep '"trade_date"' "$OUT" | tail -1 | grep -o '[0-9]\{8\}')
+    # observe requires --as-of equal to the cache cutoff. The date is read from the report object:
+    # the previous `grep trade_date | tail -1` worked only because `report` happens to be the last
+    # top-level key, and silently took the wrong date for any other order.
+    OBS_DATE="$(jq -r '.report.trade_date // empty' "$OUT" 2>/dev/null || true)"
+    case "$OBS_DATE" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) OBS_DATE="" ;; esac
+    VAL_OUT="$LOG_DIR/validation-$STAMP.json"; VAL_ERR="$LOG_DIR/validation-$STAMP.log"
     if [ -n "$OBS_DATE" ] && docker exec "$CONTAINER" node build/ashare/cli.js research-validation observe \
       --source /data/ashare.sqlite --research-db /data/research-validation/validation.sqlite --as-of "$OBS_DATE" \
-      >"$LOG_DIR/validation-$STAMP.json" 2>"$LOG_DIR/validation-$STAMP.log"; then
-      echo "finance-ashare validation observation finished: $LOG_DIR/validation-$STAMP.json"
+      >"$VAL_OUT" 2>"$VAL_ERR"; then
+      if jq -e '.status == "UNAVAILABLE"' "$VAL_OUT" >/dev/null 2>&1; then
+        # Exit 0 from `observe` does NOT mean an observation was recorded: UNAVAILABLE is a normal
+        # return. Say so, name what failed, and fail the unit when waiting cannot fix it.
+        MISMATCHED="$(jq -c '.mismatched // []' "$VAL_OUT" 2>/dev/null || echo '[]')"
+        echo "finance-ashare validation observation NOT RECORDED: reason=$(jq -r '.reason // "unknown"' "$VAL_OUT") mismatched=$MISMATCHED (market report retained); see $VAL_OUT" >&2
+        # start_after_as_of just means the freeze's first day has not arrived; anything else
+        # (implementation_hash, rule_hash, cost_hash, no_freeze_registered ...) will not fix itself.
+        if ! jq -e '(.mismatched // []) == ["start_after_as_of"]' "$VAL_OUT" >/dev/null 2>&1; then
+          exit 79
+        fi
+      else
+        echo "finance-ashare validation observation recorded: $VAL_OUT"
+      fi
     else
-      echo "finance-ashare validation observation FAILED (market report retained); see $LOG_DIR/validation-$STAMP.log" >&2
+      echo "finance-ashare validation observation FAILED (market report retained); see $VAL_ERR" >&2
       exit 76
     fi
   else

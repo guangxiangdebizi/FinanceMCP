@@ -64,9 +64,17 @@ echo "old repo digest: $OLD_REPO_DIGEST"
 mkdir -p "$BACKUP_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # Keep the previous image under its own tag so a rebuild cannot garbage-collect it.
+# This used to be `docker tag ... || true`, which swallowed a failed tag and then printed the tag name
+# anyway: the 2026-10-22 upgrade recorded rollback-20261022T161641Z, and that image never existed.
+# A rollback record that names a missing image is worse than none, so a missing or unverifiable
+# rollback image now stops the upgrade BEFORE the running service is touched.
+if [ "$OLD_IMAGE_ID" = "unknown" ] && [ "${ASHARE_ALLOW_NO_ROLLBACK:-0}" != "1" ]; then
+  echo "cannot identify the running image, so there is nothing to roll back to; set ASHARE_ALLOW_NO_ROLLBACK=1 only for a first install" >&2; exit 4
+fi
 if [ "$OLD_IMAGE_ID" != "unknown" ]; then
-  docker tag "$OLD_IMAGE_ID" "finance-mcp-ashare:rollback-$STAMP" 2>/dev/null || true
-  echo "rollback image tag: finance-mcp-ashare:rollback-$STAMP"
+  docker tag "$OLD_IMAGE_ID" "finance-mcp-ashare:rollback-$STAMP" || { echo "failed to tag the rollback image; stopping before any change" >&2; exit 4; }
+  docker image inspect "finance-mcp-ashare:rollback-$STAMP" >/dev/null 2>&1 || { echo "rollback image tag not present after tagging; stopping before any change" >&2; exit 4; }
+  echo "rollback image tag: finance-mcp-ashare:rollback-$STAMP (verified present)"
 fi
 # A fresh timestamped backup every run; a stale single file would not match the
 # database a rollback would actually start from.
