@@ -117,7 +117,12 @@ export async function runResearchCadence(
     closedSessions(asOf: string): Promise<number | null> | number | null;
     /** Whether any candidate exists to report on. */
     hasCandidates(asOf: string): Promise<boolean> | boolean;
-    /** Produce the report. Returning null means "cannot produce one", and must carry a reason. */
+    /**
+     * Produce the report, or decline with a reason. Returning `{ skip }` means
+     * "I could not produce one, and here is why"; this entry propagates that
+     * reason unchanged rather than inventing one of its own, because the
+     * producer is the only component that knows the real cause.
+     */
     produce(asOf: string): Promise<{ report: unknown } | { skip: CadenceSkipReason; detail?: string }>;
     /** Persist the report. Not called on a dry run. */
     write?(report: unknown): Promise<string | void> | string | void;
