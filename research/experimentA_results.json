@@ -1,0 +1,950 @@
+{
+  "experiment": "A",
+  "name": "stock-pool selection effectiveness",
+  "champion": {
+    "score_version": "score-1.0.0",
+    "weights": {
+      "technical": 35,
+      "liquidity": 15,
+      "fundamental": 30,
+      "valuation": 10,
+      "sector": 10
+    },
+    "tuned_here": false
+  },
+  "pool_size": 30,
+  "costs": {
+    "buyFeeBps": 15,
+    "sellFeeBps": 25,
+    "slippageBps": 10,
+    "maxExitDelay": 5
+  },
+  "scope": "RESEARCH_ONLY_RETURN_OBSERVATIONS",
+  "inputs": {
+    "database": "/home/jcshi/ashare-research/ashare-20261016.sqlite",
+    "database_sha256": "ac31a9eb0b65c756758e2af6bb97ec718775ae030454fbcadfc5a8d19e234dd1",
+    "cutoff": "20261016",
+    "note": "signal dates are strictly earlier than the cutoff; every dated query is bounded by the cutoff, so no forward price can select a signal"
+  },
+  "code": {
+    "code_sha": "75438fd90b890f0840c63596e0d2057cd1bd6448",
+    "source_sha256": "265cfa7b6b57b83f6e5833a4346eb8d6474dc47fe1fc9621dcb7abdf8b953982",
+    "module": "src/ashare/experimentA.ts",
+    "runner": "research/experimentA.mjs"
+  },
+  "hypothesis": "The frozen score-1.0.0 ordering selects a pool whose after-cost forward return beats an equal-weight pool drawn from the same universe on the same date.",
+  "outcome": {
+    "verdict": "DOES_NOT_SUPPORT_HYPOTHESIS",
+    "summary": "On all three signal dates, at the longest matured horizon, the frozen score-1.0.0 pool underperformed the equal-weight pool drawn from the same universe on the same date. The edge over doing nothing is negative on every date (-8.435%, -4.769%, -2.786%).",
+    "edge_over_equal_weight_by_date": {
+      "20260715": -0.08435109364533125,
+      "20260814": -0.047686253606478525,
+      "20260915": -0.027856898999595883
+    },
+    "negative_results": [
+      "The Champion pool lost to equal weight on 3/3 dates. The sample is three signal dates, not a statistical test; no significance is claimed.",
+      "SINGLE_FACTOR_MOMENTUM beat both the Champion and equal weight on 20260915 (+12.231% excess at h=5) and lost badly on 20260715 (-20.445% at h=10). One date winning does not make it a mechanism.",
+      "INDUSTRY_NEUTRAL entered only 29 of 30 members on 20260715 before the round-robin key fix; after the fix it enters 30/30. The earlier 29/30 was caused by a stale pool, not by the limit-up exclusion.",
+      "The 20260915 h=20 horizon never matured (cutoff is 20261016). It is reported as null and is NOT counted as zero."
+    ],
+    "known_module_defects_fixed_before_this_result": [
+      "INDUSTRY_NEUTRAL keyed the round-robin by insertion order, so selectPool took preference ranks 31-60 instead of 1-30. Every INDUSTRY_NEUTRAL number in an earlier run was measuring a pool nobody designed. See test/ashare-experiment-a.test.mjs and the Phase 5 acceptance doc section 1.5."
+    ],
+    "eligibility_for_forward_observation": "NOT ELIGIBLE as a selection mechanism. The hypothesis under test was that the frozen ordering selects; it did not. Registering this as a candidate for shadow observation would spend forward capital on an ordering with no supporting evidence, and the pre-registered criterion is not met.",
+    "decided_by": "edge_over_equal_weight at the longest MATURED horizon on each date. Coverage is partial because the equal-market reference spans the whole listed universe; the arm pool itself is 30/30 priced on every date and every horizon that matured."
+  },
+  "runs": [
+    {
+      "signal_date": "20260715",
+      "cutoff": "20261016",
+      "longest_matured_horizon": 20,
+      "champion_excess": -0.07725177529016516,
+      "equal_weight_excess": 0.007099318355166077,
+      "edge_over_equal_weight": -0.08435109364533125,
+      "champion_priced": "30/30",
+      "equal_weight_priced": "30/30",
+      "unmatured_horizons": [],
+      "arms": [
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 5,
+          "net_return": -0.016615871362006155,
+          "market_return": -0.06217569785810812,
+          "excess": 0.04555982649610196,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 10,
+          "net_return": -0.07132644489864057,
+          "market_return": -0.03653566146880586,
+          "excess": -0.03479078342983471,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 20,
+          "net_return": -0.028117948969362396,
+          "market_return": 0.049133826320802765,
+          "excess": -0.07725177529016516,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 5,
+          "net_return": -0.008028344870062827,
+          "market_return": -0.06217569785810812,
+          "excess": 0.054147352988045294,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 10,
+          "net_return": 0.016125826454042255,
+          "market_return": -0.036535661468805845,
+          "excess": 0.052661487922848096,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 20,
+          "net_return": 0.05623314467596884,
+          "market_return": 0.049133826320802765,
+          "excess": 0.007099318355166077,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 5,
+          "net_return": -0.06131782890792472,
+          "market_return": -0.06160693769253204,
+          "excess": 0.0002891087846073198,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 10,
+          "net_return": -0.08029897730063788,
+          "market_return": -0.03653566146880586,
+          "excess": -0.043763315831832024,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 20,
+          "net_return": 0.03557634660214778,
+          "market_return": 0.049133826320802765,
+          "excess": -0.013557479718654987,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 5,
+          "net_return": -0.14923775941035616,
+          "market_return": -0.06217569785810812,
+          "excess": -0.08706206155224805,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 10,
+          "net_return": -0.2404729962803285,
+          "market_return": -0.036026387810968445,
+          "excess": -0.20444660846936005,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 20,
+          "net_return": -0.047123400720740484,
+          "market_return": 0.049133826320802765,
+          "excess": -0.09625722704154324,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 5,
+          "net_return": -0.04852699088424338,
+          "market_return": -0.06217569785810812,
+          "excess": 0.013648706973864742,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 10,
+          "net_return": -0.10983663282477733,
+          "market_return": -0.03653566146880585,
+          "excess": -0.07330097135597148,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 20,
+          "net_return": -0.04301614876478713,
+          "market_return": 0.049133826320802765,
+          "excess": -0.09214997508558989,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 5,
+          "net_return": -0.0003604704290547526,
+          "market_return": -0.06217569785810812,
+          "excess": 0.06181522742905337,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 10,
+          "net_return": 0.01337717953058717,
+          "market_return": -0.036535661468805845,
+          "excess": 0.04991284099939301,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 20,
+          "net_return": 0.03474826372389506,
+          "market_return": 0.049133826320802765,
+          "excess": -0.014385562596907701,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1945
+        }
+      ]
+    },
+    {
+      "signal_date": "20260814",
+      "cutoff": "20261016",
+      "longest_matured_horizon": 20,
+      "champion_excess": -0.05644637205419299,
+      "equal_weight_excess": -0.008760118447714467,
+      "edge_over_equal_weight": -0.047686253606478525,
+      "champion_priced": "30/30",
+      "equal_weight_priced": "30/30",
+      "unmatured_horizons": [],
+      "arms": [
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 5,
+          "net_return": -0.02276077052443043,
+          "market_return": -0.014045575804368571,
+          "excess": -0.008715194720061858,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 10,
+          "net_return": -0.0160666337796432,
+          "market_return": 0.0050030049975900584,
+          "excess": -0.02106963877723326,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 20,
+          "net_return": -0.07533938985867732,
+          "market_return": -0.018893017804484328,
+          "excess": -0.05644637205419299,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 5,
+          "net_return": -0.014737954418762075,
+          "market_return": -0.014607787471460134,
+          "excess": -0.00013016694730194102,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 10,
+          "net_return": 0.01653040557702607,
+          "market_return": 0.005003004997590058,
+          "excess": 0.011527400579436013,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 20,
+          "net_return": -0.027653136252198795,
+          "market_return": -0.018893017804484328,
+          "excess": -0.008760118447714467,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 5,
+          "net_return": -0.0024882197283797405,
+          "market_return": -0.014607787471460134,
+          "excess": 0.012119567743080394,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 10,
+          "net_return": -0.0006047099520478068,
+          "market_return": 0.00500300499759006,
+          "excess": -0.005607714949637867,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 20,
+          "net_return": -0.06563283654153546,
+          "market_return": -0.018893017804484328,
+          "excess": -0.04673981873705113,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 5,
+          "net_return": -0.03674821656695577,
+          "market_return": -0.014787368587971614,
+          "excess": -0.021960847978984153,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 10,
+          "net_return": -0.060528175982995834,
+          "market_return": 0.005003004997590062,
+          "excess": -0.0655311809805859,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 20,
+          "net_return": -0.1546424862356268,
+          "market_return": -0.018732717652726164,
+          "excess": -0.13590976858290063,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 5,
+          "net_return": -0.014015222184527587,
+          "market_return": -0.014045575804368571,
+          "excess": 3.035361984098442e-05,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 10,
+          "net_return": -0.012141677106505377,
+          "market_return": 0.0050030049975900584,
+          "excess": -0.017144682104095435,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 20,
+          "net_return": -0.07471189599470189,
+          "market_return": -0.018893017804484328,
+          "excess": -0.055818878190217566,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 5,
+          "net_return": -0.005454709063791685,
+          "market_return": -0.014607787471460134,
+          "excess": 0.00915307840766845,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 10,
+          "net_return": 0.002972627071479746,
+          "market_return": 0.0050030049975900584,
+          "excess": -0.0020303779261103124,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 20,
+          "net_return": -0.040868593403830776,
+          "market_return": -0.018893017804484328,
+          "excess": -0.021975575599346448,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1971
+        }
+      ]
+    },
+    {
+      "signal_date": "20260915",
+      "cutoff": "20261016",
+      "longest_matured_horizon": 10,
+      "champion_excess": -0.06581628368030996,
+      "equal_weight_excess": -0.03795938468071408,
+      "edge_over_equal_weight": -0.027856898999595883,
+      "champion_priced": "30/30",
+      "equal_weight_priced": "30/30",
+      "unmatured_horizons": [
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 20,
+          "reasons": {
+            "horizon_after_as_of": 30
+          }
+        }
+      ],
+      "arms": [
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 5,
+          "net_return": 0.0018275135015350052,
+          "market_return": 0.05418922115982443,
+          "excess": -0.05236170765828942,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 10,
+          "net_return": -0.04616426421805332,
+          "market_return": 0.01965201946225664,
+          "excess": -0.06581628368030996,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "CHAMPION_SCORE_1_0_0",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 5,
+          "net_return": 0.021642189863555296,
+          "market_return": 0.05418922115982442,
+          "excess": -0.032547031296269124,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 10,
+          "net_return": -0.01830736521845745,
+          "market_return": 0.019652019462256632,
+          "excess": -0.03795938468071408,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "EQUAL_WEIGHT",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 5,
+          "net_return": 0.044626127122283074,
+          "market_return": 0.05418922115982443,
+          "excess": -0.009563094037541353,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 10,
+          "net_return": -0.03323209584340807,
+          "market_return": 0.019652019462256646,
+          "excess": -0.05288411530566471,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_ROE",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 5,
+          "net_return": 0.17650005165706653,
+          "market_return": 0.05418922115982441,
+          "excess": 0.12231083049724212,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 10,
+          "net_return": 0.10236976827865094,
+          "market_return": 0.01965201946225664,
+          "excess": 0.0827177488163943,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "SINGLE_FACTOR_MOMENTUM",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 5,
+          "net_return": -0.005917669890781667,
+          "market_return": 0.05418922115982443,
+          "excess": -0.06010689105060609,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 10,
+          "net_return": -0.05110287985977468,
+          "market_return": 0.01965201946225664,
+          "excess": -0.07075489932203131,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "DROP_VALUATION",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 5,
+          "net_return": 0.010638087336594378,
+          "market_return": 0.05418922115982443,
+          "excess": -0.043551133823230045,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 10,
+          "net_return": -0.006800034730381917,
+          "market_return": 0.019652019462256632,
+          "excess": -0.02645205419263855,
+          "coverage": "partial",
+          "entered": 30,
+          "completed": 30,
+          "not_entered": 0,
+          "reasons": {
+            "observed_exit": 30
+          },
+          "universe_size": 1887
+        },
+        {
+          "arm": "INDUSTRY_NEUTRAL",
+          "horizon": 20,
+          "net_return": null,
+          "market_return": null,
+          "excess": null,
+          "coverage": "unavailable",
+          "entered": 30,
+          "completed": 0,
+          "not_entered": 0,
+          "reasons": {
+            "horizon_after_as_of": 30
+          },
+          "universe_size": 1887
+        }
+      ]
+    }
+  ]
+}
