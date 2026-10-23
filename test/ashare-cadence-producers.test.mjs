@@ -363,24 +363,63 @@ test('the monthly review is read-only against the account ledger', async (t) => 
 
 test('the weekly diagnosis reads the live market cache without writing it', async (t) => {
   // The market cache is the live production database. A cadence that opened it
-  // writable would be the one failure the task spec most explicitly forbids, and
-  // the bytes alone cannot catch it — the same blind spot as the ledger: a
-  // writable open of a valid cache runs `CREATE TABLE IF NOT EXISTS` against
-  // tables that already exist and changes nothing. The journal mode is the
-  // observable that survives.
+  // writable would be the one failure the task spec most explicitly forbids, so
+  // the assertion has to be on the thing that would actually differ: the handle.
+  //
+  // Neither of the two observables that killed the ledger mutant are available
+  // here, and it is worth being exact about why, because the obvious version of
+  // this test was green against a writable open:
+  //
+  //  - **Bytes.** A writable open of a valid cache runs `CREATE TABLE IF NOT
+  //    EXISTS` against tables that already exist and changes nothing, so a
+  //    byte comparison is vacuous.
+  //  - **Journal mode.** `openPortfolioDb`'s writable path executes
+  //    `PRAGMA journal_mode = WAL`, which is what makes the flip observable.
+  //    `openMarketCache` never sets a journal mode at all — it opens
+  //    `{ readOnly: true }` and sets only `busy_timeout` — so a writable open
+  //    leaves the file's mode untouched and the flip never happens. (Measured:
+  //    forcing `delete` and then opening the cache writable still reads
+  //    `delete` afterwards.)
+  //
+  // What does differ is the capability of the handle the producer is holding.
+  // The producers are returned by `cadenceProducers()`, so the test can open
+  // them itself, take the handle the entry will use, and ask it to write.
   const live = marketFixture(t);
   forceRollbackJournal(live);
   const before = readFileSync(live);
   const modeBefore = journalMode(live);
+
+  const producers = cadenceProducers({ marketDbPath: live, portfolioDbPath: join(dir, 'p-absent.sqlite') });
+  try {
+    assert.ok(producers.market, 'the market cache must be opened for the diagnosis');
+    assert.throws(
+      () => producers.market.prepare("INSERT INTO watchlist(trade_date,ts_code,score,rank,industry,status,reason,entered_on) VALUES(?,?,?,?,?,?,?,?)")
+        .run(AS_OF, '600000.SH', 50, 1, '行业0', 'active', 'test', AS_OF),
+      /readonly database/i,
+      'the market cache must be opened read-only: a handle that can insert into the live cache is a writable open',
+    );
+    // And it can still read, so the assertion above is not passing because the
+    // handle is dead. A broken open and a read-only open both refuse the insert.
+    assert.equal(producers.market.prepare('SELECT COUNT(*) AS n FROM watchlist').get().n, 1,
+      'the same handle must still be able to read the watchlist');
+  } finally {
+    producers.close();
+  }
+
+  // The same producers must actually be able to produce a report, so the test is
+  // not asserting a refusal and calling that a diagnosis.
   const result = await runRealCadence('weekly', {
     asOf: AS_OF, env: ON, dryRun: true, outputDir: join(dir, 'out3'),
     marketDbPath: live, portfolioDbPath: join(dir, 'p-absent.sqlite'),
   });
   assert.equal(result.skip_reason, null, `unexpected skip: ${result.detail ?? ''}`);
   assert.equal(result.report.version, 'diagnosis-1.0.0');
-  assert.equal(journalMode(live), modeBefore,
-    'the live market cache must not be switched into WAL mode by a cadence run');
-  assert.deepEqual(readFileSync(live), before, 'and must not be modified byte-for-byte');
+
+  // The file is unchanged too, which is the guarantee as the operator sees it —
+  // kept because it is cheap and it catches a write that happens through some
+  // other path, not because it is what catches this one.
+  assert.equal(journalMode(live), modeBefore);
+  assert.deepEqual(readFileSync(live), before);
 });
 
 test('a closed run closes the database handles it opened', async (t) => {
