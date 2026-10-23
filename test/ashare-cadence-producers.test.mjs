@@ -68,12 +68,16 @@ const AS_OF = CALENDAR.at(-1);
 function marketFixture(t) {
   const { live } = freshPaths();
   const db = openAshareDb(live);
-  t.after(() => db.close());
   seedReferenceUniverse(db, CALENDAR, { stocks: 3 });
   // A watchlist row is what `hasCandidates` keys on: without one there is
   // nothing to diagnose, and "no pool" must not read as "no findings".
   db.prepare(`INSERT INTO watchlist(trade_date,ts_code,score,rank,industry,status,reason,entered_on)
     VALUES(?,?,?,?,?,?,?,?)`).run(AS_OF, '600000.SH', 50, 1, '行业0', 'active', 'test', AS_OF);
+  // Closed now rather than in `t.after`: several tests need to open the same file
+  // again with a different journal mode or from a different connection, and a
+  // handle still held open makes SQLite report "database is locked" for the
+  // second opener. The fixture's job is to leave a file on disk.
+  db.close();
   return live;
 }
 
@@ -89,13 +93,11 @@ function portfolioFixture(t, marketPath) {
   // fresh from the fixture is already WAL and a writable open during the run
   // would leave it WAL — indistinguishable. Starting from `delete` makes the
   // flip the read-only assertion looks for.
-  const ctl = new DatabaseSync(portfolio);
-  ctl.exec('PRAGMA journal_mode = DELETE');
-  ctl.close();
+  forceRollbackJournal(portfolio);
   return portfolio;
 }
 
-/** The ledger's journal mode, read from a separate read-only connection.
+/** The database's journal mode, read from a throwaway read-only connection.
  *
  * This is the observable that actually distinguishes a read-only open from a
  * writable one. A writable open executes `PRAGMA journal_mode = WAL`, and that
@@ -104,10 +106,25 @@ function portfolioFixture(t, marketPath) {
  * of a valid ledger runs `CREATE TABLE IF NOT EXISTS` against tables that already
  * exist and changes nothing, which is exactly why a `writable: true` mutation
  * survived every byte-comparison assertion in this file. */
-function ledgerJournalMode(path) {
+function journalMode(path) {
   const db = new DatabaseSync(path, { readOnly: true });
   try {
     return db.prepare('PRAGMA journal_mode').get().journal_mode;
+  } finally {
+    db.close();
+  }
+}
+
+/** Put the database into rollback journalling.
+ *
+ * A writable open sets WAL and leaves it set, so a database fresh from a
+ * writable fixture is already WAL — and a writable open during the run would
+ * leave it WAL, indistinguishable from before. Starting from `delete` is what
+ * makes the flip the read-only assertion looks for. */
+function forceRollbackJournal(path) {
+  const db = new DatabaseSync(path);
+  try {
+    db.exec('PRAGMA journal_mode = DELETE');
   } finally {
     db.close();
   }
@@ -279,18 +296,16 @@ test('a monthly review that finds no ledger creates none', async (t) => {
   const { portfolio } = freshPaths();
   const seed = openPortfolioDb(portfolio, { writable: true, marketPath: live });
   seed.close();
-  const ctl = new DatabaseSync(portfolio, { readOnly: false });
-  ctl.exec('PRAGMA journal_mode = DELETE');
-  ctl.close();
+  forceRollbackJournal(portfolio);
   const before = readFileSync(portfolio);
-  const modeBefore = ledgerJournalMode(portfolio);
+  const modeBefore = journalMode(portfolio);
   const ran = await runRealCadence('monthly', {
     asOf: AS_OF, env: ON, accountId: 'real-main', portfolioDbPath: portfolio, marketDbPath: live,
   });
   assert.equal(ran.skip_reason, null, `unexpected skip: ${ran.detail ?? ''}`);
   assert.deepEqual(readFileSync(portfolio), before,
     'an existing ledger must be read, not written, by a cadence run');
-  assert.equal(ledgerJournalMode(portfolio), modeBefore,
+  assert.equal(journalMode(portfolio), modeBefore,
     'and must not be switched into WAL mode by the open');
 
   // A non-database file at the ledger path is opened read-only and then fails
@@ -326,7 +341,7 @@ test('the monthly review is read-only against the account ledger', async (t) => 
   // forced to a non-WAL value first: a freshly created ledger is already WAL, so
   // a writable open would leave it WAL and look identical. This is the assertion
   // that killed the `writable: true` mutation the byte comparison could not.
-  const modeBefore = ledgerJournalMode(portfolio);
+  const modeBefore = journalMode(portfolio);
   assert.equal(modeBefore, 'delete', 'fixture precondition: the ledger starts in rollback mode');
   const result = await runRealCadence('monthly', {
     asOf: AS_OF, env: ON, accountId: 'real-main', portfolioDbPath: portfolio, marketDbPath: live,
@@ -341,9 +356,31 @@ test('the monthly review is read-only against the account ledger', async (t) => 
   assert.ok(result.written_to && existsSync(result.written_to), 'the review reports where it was written');
   assert.equal(readFileSync(result.written_to, 'utf8').includes('review_id'), true,
     'the written review carries its identity');
-  assert.equal(ledgerJournalMode(portfolio), modeBefore,
+  assert.equal(journalMode(portfolio), modeBefore,
     'a read-only open cannot switch the ledger into WAL mode');
   assert.deepEqual(readFileSync(portfolio), before, 'the cadence run must not modify the account ledger');
+});
+
+test('the weekly diagnosis reads the live market cache without writing it', async (t) => {
+  // The market cache is the live production database. A cadence that opened it
+  // writable would be the one failure the task spec most explicitly forbids, and
+  // the bytes alone cannot catch it — the same blind spot as the ledger: a
+  // writable open of a valid cache runs `CREATE TABLE IF NOT EXISTS` against
+  // tables that already exist and changes nothing. The journal mode is the
+  // observable that survives.
+  const live = marketFixture(t);
+  forceRollbackJournal(live);
+  const before = readFileSync(live);
+  const modeBefore = journalMode(live);
+  const result = await runRealCadence('weekly', {
+    asOf: AS_OF, env: ON, dryRun: true, outputDir: join(dir, 'out3'),
+    marketDbPath: live, portfolioDbPath: join(dir, 'p-absent.sqlite'),
+  });
+  assert.equal(result.skip_reason, null, `unexpected skip: ${result.detail ?? ''}`);
+  assert.equal(result.report.version, 'diagnosis-1.0.0');
+  assert.equal(journalMode(live), modeBefore,
+    'the live market cache must not be switched into WAL mode by a cadence run');
+  assert.deepEqual(readFileSync(live), before, 'and must not be modified byte-for-byte');
 });
 
 test('a closed run closes the database handles it opened', async (t) => {
