@@ -27,10 +27,12 @@
     "note": "signal dates are strictly earlier than the cutoff; every dated query is bounded by the cutoff, so no forward price can select a signal"
   },
   "code": {
-    "code_sha": "75438fd90b890f0840c63596e0d2057cd1bd6448",
+    "code_sha": "b94934d6d02092ea3cbac25e09e18deb637b0417",
     "source_sha256": "265cfa7b6b57b83f6e5833a4346eb8d6474dc47fe1fc9621dcb7abdf8b953982",
+    "runner_sha256": "e2e84cdb4d4624026de476795c3aa4154f7256400fdc6fd9c41139fc2451c63a",
     "module": "src/ashare/experimentA.ts",
-    "runner": "research/experimentA.mjs"
+    "runner": "research/experimentA.mjs",
+    "note": "code_sha must resolve to a commit whose blob for `module` hashes to source_sha256. An earlier version of this file recorded 75438fd9, a commit that predates the module and whose blob is the empty-file hash e3b0c442 — an auditor following it would have found nothing to audit. Regenerated on clean code; the three per-date --json runs that were merged here each carried the same source_sha256 and runner_sha256."
   },
   "hypothesis": "The frozen score-1.0.0 ordering selects a pool whose after-cost forward return beats an equal-weight pool drawn from the same universe on the same date.",
   "outcome": {
