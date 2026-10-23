@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadActiveValidationFreeze } from '../build/ashare/validation.js';
+import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadActiveValidationFreeze, explainFreezeMismatch } from '../build/ashare/validation.js';
 import { openAshareDb, upsertRows } from '../build/ashare/db.js';
 import { seedMarket, weekdays } from './ashare-fixture.mjs';
 import { scanMarket } from '../build/ashare/analysis.js';
@@ -140,4 +140,19 @@ test('audit explicitly counts missing members and SQL NULL benchmark returns',()
     assert.equal(a.cohorts[0].selected,2);assert.equal(a.cohorts[0].priced,1);assert.equal(a.cohorts[0].unresolved,1);
     assert.equal(a.cohorts[0].excess,null,'the production minimum reference universe is retained');
   } finally {db.close();}
+});
+
+test('an unmatched freeze names the hash that failed instead of failing silently',t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-21T12:00:00Z')});
+  const dir=mkdtempSync(join(tmpdir(),'validation-mismatch-')),path=join(dir,'research.sqlite'),db=openValidationDb(path,join(dir,'market.sqlite')),h='a'.repeat(64),other='b'.repeat(64);
+  try {
+    registerFreeze(db,{start:'20261022',frozen_at:new Date().toISOString(),rule_hash:h,cost_hash:h,implementation_hash:h,horizons:[5]});
+  } finally {db.close();}
+  const live={dbPath:path,asOf:'20261022',ruleHash:h,costHash:h,implementationHash:h};
+  assert.equal(loadActiveValidationFreeze(live)?.start,'20261022');
+  assert.deepEqual(explainFreezeMismatch(live),[]);
+  assert.deepEqual(explainFreezeMismatch({...live,implementationHash:other}),['implementation_hash']);
+  assert.deepEqual(explainFreezeMismatch({...live,ruleHash:other,costHash:other}),['rule_hash','cost_hash']);
+  assert.deepEqual(explainFreezeMismatch({...live,asOf:'20261021'}),['start_after_as_of']);
+  assert.deepEqual(explainFreezeMismatch({...live,dbPath:join(dir,'missing.sqlite')}),['no_freeze_registered']);
 });

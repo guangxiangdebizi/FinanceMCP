@@ -11,7 +11,7 @@ import { regimeSeries } from './market.js';
 import { SIGNAL_DEFINITIONS } from './signals.js';
 import { shanghaiToday } from './ingest.js';
 import { assertSeparateFromLive } from './snapshot.js';
-import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, loadActiveValidationFreeze, VALIDATION_VERSION, type ResearchFee } from './validation.js';
+import { CONTROL_MODELS, auditWatchlist, blockInference, controlScan, holmAdjust, openValidationDb, registerFreeze, appendObservation, researchIdentity, simulateFunded, splitDates, walkForwardFolds, sampleValidationDates, loadValidationSummary, loadActiveValidationFreeze, explainFreezeMismatch, VALIDATION_VERSION, type ResearchFee } from './validation.js';
 import { diagnoseWatchlist, renderDiagnosisMarkdown } from './researchDiagnosis.js';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -93,8 +93,11 @@ export async function runValidationCommand(args: string[], injectedFee?: Researc
         const scan = scanMarket(db, asOf);
         const models = Object.fromEntries(CONTROL_MODELS.map(model => [model, controlScan(scan, model).rows.filter(r => r.eligible).sort((a,b) => a.rank! - b.rank!).slice(0,40).map(r => ({ ts_code:r.ts_code,score:r.score,rank:r.rank }))]));
         const now = new Date().toISOString();
-        const freezeId=arg('freeze-id') ?? loadActiveValidationFreeze({dbPath:researchPath,asOf,implementationHash:identity.implementation_hash,ruleHash:hash({rules:SCORE_RULES,pool:WATCHLIST_RULES,models:CONTROL_MODELS}),costHash:hash(costs)})?.id;
-        if(!freezeId) return {status:'UNAVAILABLE',reason:'matching_active_freeze_unavailable',evidence_level:'UNVERIFIED',as_of:asOf};
+        const freezeQuery={dbPath:researchPath,asOf,implementationHash:identity.implementation_hash,ruleHash:hash({rules:SCORE_RULES,pool:WATCHLIST_RULES,models:CONTROL_MODELS}),costHash:hash(costs)};
+        const freezeId=arg('freeze-id') ?? loadActiveValidationFreeze(freezeQuery)?.id;
+        // `mismatched` names what failed (e.g. implementation_hash after any build/ashare change);
+        // without it this exits 0 looking identical to a recorded observation.
+        if(!freezeId) return {status:'UNAVAILABLE',reason:'matching_active_freeze_unavailable',mismatched:explainFreezeMismatch(freezeQuery),evidence_level:'UNVERIFIED',as_of:asOf};
         return appendObservation(research, { freeze_id: freezeId, date: asOf, created_at: now, next_open: `${next.slice(0,4)}-${next.slice(4,6)}-${next.slice(6,8)}T09:30:00+08:00`,
           rule_hash: hash({ rules:SCORE_RULES,pool:WATCHLIST_RULES,models:CONTROL_MODELS }), cost_hash: hash(costs), implementation_hash: identity.implementation_hash, original: true,
           content: { source_report: latestReport, models, note: 'Frozen top40 rankings; daily stateful watchlist observations remain in the existing forward snapshot chain. This record makes no performance claim.' } });

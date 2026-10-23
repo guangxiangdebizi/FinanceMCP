@@ -230,6 +230,30 @@ export function loadActiveValidationFreeze(options:{dbPath:string;asOf:string;im
   } finally {db.close();}
 }
 
+/** Why `loadActiveValidationFreeze` found nothing, for the most recent trusted freeze.
+ * Read-only. `[]` means a freeze matches; otherwise the names of what failed, so an
+ * UNAVAILABLE result is distinguishable from success without recomputing hashes by hand. */
+export function explainFreezeMismatch(options:{dbPath:string;asOf:string;implementationHash?:string;ruleHash?:string;costHash?:string}): string[] {
+  if(!existsSync(options.dbPath)) return ['no_freeze_registered'];
+  const db=new DatabaseSync(options.dbPath,{readOnly:true});
+  db.exec('PRAGMA query_only=ON');
+  try {
+    const columns=db.prepare('PRAGMA table_info(validation_freeze)').all() as {name:string}[];
+    if(!columns.some(c=>c.name==='recorded_at')) return ['no_freeze_registered'];
+    const rows=db.prepare('SELECT id,protocol,recorded_at FROM validation_freeze WHERE recorded_at IS NOT NULL ORDER BY recorded_at DESC,id DESC').all() as {id:string;protocol:string;recorded_at:string}[];
+    if(!rows.length) return ['no_freeze_registered'];
+    const row=rows[0],p=JSON.parse(row.protocol) as FreezeProtocol;
+    if(`FRZ-${digest(p).slice(0,24)}`!==row.id) return ['freeze_identity_invalid'];
+    if(p.start>options.asOf) return ['start_after_as_of'];
+    if(Date.parse(row.recorded_at)>=Date.parse(`${p.start.slice(0,4)}-${p.start.slice(4,6)}-${p.start.slice(6,8)}T00:00:00+08:00`)) return ['recorded_too_late'];
+    const failed:string[]=[];
+    if(options.ruleHash && p.rule_hash!==options.ruleHash) failed.push('rule_hash');
+    if(options.costHash && p.cost_hash!==options.costHash) failed.push('cost_hash');
+    if(options.implementationHash && p.implementation_hash!==options.implementationHash) failed.push('implementation_hash');
+    return failed;
+  } finally {db.close();}
+}
+
 export function researchIdentity() {
   const feeImplementation = createHash('sha256').update(readFileSync(fileURLToPath(new URL('../portfolio/fees.js',import.meta.url))))
     .update(readFileSync(fileURLToPath(new URL('../portfolio/rules.js',import.meta.url)))).digest('hex');
