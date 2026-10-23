@@ -45,13 +45,24 @@
  * a guard against an unbounded `asOfTradeDates` or a blocking price source
  * occupying a timer slot, not a performance target.
  *
- * ## What this module still does NOT do
+ * ## Bounded resource use — what is enforced, and what still is not
  *
- * Bounded resource use is **not** implemented: there is no memory or CPU budget,
- * and no per-session cap on the work `candidates()` or `prices.outcome()` may
- * do. Saying so here rather than in a commit message is deliberate — the spec
- * lists it as a separate property, and marking it done would be the same
- * category of claim as the `ms`-without-a-limit one above.
+ * `heapBudgetBytes` (default `DEFAULT_SHADOW_HEAP_BUDGET_BYTES`) is the memory
+ * analogue of the runtime budget, checked at the same place: **before** each
+ * session's work. When the heap has already grown past the budget, the sessions
+ * not yet started are skipped as `heap_budget_exceeded` and the run reports
+ * `heap.exhausted: true`.
+ *
+ * What this does NOT cover, stated here so the property is not oversold:
+ *
+ * - **Within a session.** The check runs between sessions, not inside
+ *   `candidates()` or `prices.outcome()`. A single call that allocates without
+ *   bound is not preempted; only the sessions after it are stopped. The same
+ *   limitation applies to the runtime budget, and for the same reason: this
+ *   module is not in a worker thread and cannot interrupt a synchronous caller.
+ * - **CPU.** There is no CPU-time budget. Wall-clock time (which subsumes a
+ *   hung call) and heap growth (which subsumes an accumulating one) are the
+ *   two failure shapes this entry can actually observe.
  *
  * ## What this module deliberately does NOT do
  *
@@ -97,6 +108,21 @@ export const DEFAULT_SHADOW_HORIZON = 20;
 export const DEFAULT_SHADOW_RUNTIME_BUDGET_MS = 120_000;
 
 /**
+ * Default heap budget for one `runDailyShadow` call, in bytes.
+ *
+ * The runtime budget stops a run that has gone wrong on the *time* axis; this
+ * one stops a run that has gone wrong on the *memory* axis — a caller whose
+ * `candidates()` or `prices.outcome()` accumulates state across sessions.
+ *
+ * 256 MB is generous relative to the real cost (a normal run over a handful of
+ * sessions allocates kilobytes) and deliberately below the 512 MB heap cap the
+ * weekly/monthly systemd units run under: the loop should stop itself and
+ * report `heap_budget_exceeded` before the container's OOM behavior makes the
+ * decision for it.
+ */
+export const DEFAULT_SHADOW_HEAP_BUDGET_BYTES = 256 * 1024 * 1024;
+
+/**
  * Why a session produced no shadow decision. Every skip carries one.
  *
  * `'disabled'` was on this list from the start while nothing could ever produce
@@ -111,7 +137,8 @@ export type SkipReason =
   | 'no_price_cutoff'
   | 'no_candidates'
   | 'disabled'
-  | 'runtime_budget_exceeded';
+  | 'runtime_budget_exceeded'
+  | 'heap_budget_exceeded';
 
 export interface ShadowSessionResult {
   as_of_trade_date: string;
@@ -157,6 +184,13 @@ export interface DailyShadowRun {
    * early for a reason that has nothing to do with the data.
    */
   runtime: { budget_ms: number; exhausted: boolean; ms: number };
+  /**
+   * The heap budget this call ran under, whether it was spent, and the heap
+   * reading at the moment the run ended. Same visibility argument as `runtime`:
+   * a truncated-by-memory run must be distinguishable from a complete one in
+   * the run's own output, not only in a log line someone might not be watching.
+   */
+  heap: { budget_bytes: number; exhausted: boolean; used_bytes: number };
 }
 
 export interface ShadowCandidateSource {
@@ -193,6 +227,21 @@ export interface DailyShadowOptions {
    * started, so an over-budget run is legible in its own output.
    */
   runtimeBudgetMs?: number;
+  /**
+   * Heap budget for the whole call, in bytes. Defaults to
+   * `DEFAULT_SHADOW_HEAP_BUDGET_BYTES`. Sessions still unstarted when the
+   * measured heap is over budget are skipped as `heap_budget_exceeded` rather
+   * than started, so an over-budget run is legible in its own output.
+   */
+  heapBudgetBytes?: number;
+  /**
+   * The heap reading the budget is checked against. Defaults to
+   * `process.memoryUsage().heapUsed`. Injected by tests because a real heap
+   * cannot be driven over a small budget deterministically, and a test that
+   * depends on the runner's actual allocation behavior is a flake, not a
+   * bound.
+   */
+  heapUsage?: () => number;
   /**
    * The clock every duration in this run is measured against. Defaults to
    * `Date.now`. Injected by tests because the budget assertion needs time to
@@ -266,6 +315,8 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
   const horizon = options.horizonDays ?? DEFAULT_SHADOW_HORIZON;
   const dryRun = options.dryRun ?? false;
   const budgetMs = options.runtimeBudgetMs ?? DEFAULT_SHADOW_RUNTIME_BUDGET_MS;
+  const heapBudgetBytes = options.heapBudgetBytes ?? DEFAULT_SHADOW_HEAP_BUDGET_BYTES;
+  const heapUsage = options.heapUsage ?? (() => process.memoryUsage().heapUsed);
   const { sealShadowDecision, appendShadowEvaluation, evaluateSealedDecision } = await import('./shadowSeal.js');
 
   // The switch is checked before anything else, including the calendar lookup.
@@ -287,6 +338,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
       },
       dry_run: dryRun, ms: clock() - started,
       runtime: { budget_ms: budgetMs, exhausted: false, ms: clock() - started },
+      heap: { budget_bytes: heapBudgetBytes, exhausted: false, used_bytes: heapUsage() },
     };
   }
 
@@ -310,6 +362,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
       },
       dry_run: dryRun, ms: clock() - started,
       runtime: { budget_ms: budgetMs, exhausted: false, ms: clock() - started },
+      heap: { budget_bytes: heapBudgetBytes, exhausted: false, used_bytes: heapUsage() },
     };
   }
 
@@ -320,6 +373,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
   let evaluated = 0;
   let pending = 0;
   let budgetExhausted = false;
+  let heapExhausted = false;
 
   for (const asOf of options.asOfTradeDates) {
     // The budget is checked before the session's work, not after it. Checking
@@ -333,6 +387,18 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
       for (const remaining of options.asOfTradeDates.slice(options.asOfTradeDates.indexOf(asOf))) {
         sessions.push(skip(remaining, 'runtime_budget_exceeded', 0));
         bump(skippedByReason, 'runtime_budget_exceeded');
+      }
+      break;
+    }
+    // The heap budget is checked at the same point, for the same reason: a run
+    // whose memory has already gone past the limit must stop itself before the
+    // next session allocates more, and the reason must name memory, not time —
+    // a caller diffing two truncated runs needs to know which axis failed.
+    if (heapUsage() > heapBudgetBytes) {
+      heapExhausted = true;
+      for (const remaining of options.asOfTradeDates.slice(options.asOfTradeDates.indexOf(asOf))) {
+        sessions.push(skip(remaining, 'heap_budget_exceeded', 0));
+        bump(skippedByReason, 'heap_budget_exceeded');
       }
       break;
     }
@@ -443,6 +509,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
     },
     dry_run: dryRun, ms: clock() - started,
     runtime: { budget_ms: budgetMs, exhausted: budgetExhausted, ms: clock() - started },
+    heap: { budget_bytes: heapBudgetBytes, exhausted: heapExhausted, used_bytes: heapUsage() },
   };
 }
 

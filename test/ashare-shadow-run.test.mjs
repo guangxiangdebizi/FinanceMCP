@@ -6,6 +6,7 @@ import { SHADOW_DECISION_SCHEMA } from '../build/ashare/shadowSeal.js';
 import {
   runDailyShadow, exchangeDaysBetween, sessionState, shadowEnabled,
   DEFAULT_SHADOW_HORIZON, SHADOW_ORCHESTRATION_VERSION, DEFAULT_SHADOW_RUNTIME_BUDGET_MS,
+  DEFAULT_SHADOW_HEAP_BUDGET_BYTES,
 } from '../build/ashare/shadowRun.js';
 
 /** Phase 6 — the daily orchestration entry for the shadow loop.
@@ -428,4 +429,111 @@ test('a disabled run does not claim a spent budget', async t => {
   assert.equal(disabled.runtime.exhausted, false,
     'a disabled run never started, so it cannot have run out of time');
   assert.equal(disabled.totals.skipped_by_reason.disabled, 2);
+});
+
+/** Bounded resource use (heap).
+ *
+ * The runtime budget above stops a run that has gone wrong on the time axis.
+ * This one stops a run that has gone wrong on the memory axis: a caller whose
+ * `candidates()` or `prices.outcome()` accumulates state across sessions.
+ *
+ * The heap reading is injected, not measured, for the same reason the clock is:
+ * a real heap cannot be driven over a small budget deterministically, and a
+ * test that depends on the runner's actual allocation behavior is a flake, not
+ * a bound.
+ */
+
+/** Returns `start`, then advances by `step` on every read after the first. */
+const growingHeap = (start, step) => {
+  let current = start;
+  let first = true;
+  return () => {
+    if (first) { first = false; return current; }
+    current += step;
+    return current;
+  };
+};
+
+test('an over-heap-budget run skips the remaining sessions and names memory, not time', async t => {
+  const db = fixture(t);
+  const asked = SESSIONS.slice(0, 4);
+  // The heap check reads once per session BEFORE its work: session 0 sees the
+  // first read (0), session 1 sees 3, session 2 sees 6 (over a 4 byte budget),
+  // session 3 sees 9. Sessions 0-1 run; 2-3 are skipped as heap-limited.
+  const result = await run(db, {
+    asOfTradeDates: asked,
+    heapBudgetBytes: 4,
+    heapUsage: growingHeap(0, 3),
+  });
+
+  assert.equal(result.heap.exhausted, true, 'a memory-truncated run must be visible as truncated');
+  assert.equal(result.heap.budget_bytes, 4);
+  assert.equal(result.sessions.length, asked.length,
+    'every requested session must still be reported — a short list would hide the truncation');
+  const heapLimited = result.sessions.filter(s => s.skip_reason === 'heap_budget_exceeded');
+  assert.ok(heapLimited.length >= 1, 'at least one session must have been stopped by the heap budget');
+  assert.ok(heapLimited.length < asked.length,
+    'the guard must not stop every session, or it is just the disabled switch');
+  for (const session of heapLimited) {
+    assert.equal(session.created, false);
+    assert.equal(session.decision_id, null);
+  }
+  assert.equal(result.totals.skipped_by_reason.heap_budget_exceeded, heapLimited.length);
+  assert.equal(result.totals.skipped_by_reason.runtime_budget_exceeded, undefined,
+    'the reason must be memory, not time — collapsing them hides which axis failed');
+  assert.equal(result.runtime.exhausted, false, 'the time budget was not the one spent');
+});
+
+test('the session that blows the heap budget is not the one reported as heap-limited', async t => {
+  const db = fixture(t);
+  // The heap starts at 0 and grows 6 bytes per read after the first, against a
+  // 5 byte budget. The check runs BEFORE each session's work, so session 0's
+  // check sees 0 (fits), session 1's check sees 6 (does not). Session 0 runs
+  // to completion and is not blamed; sessions 1+ are skipped. If the check ran
+  // after the work instead, the session whose completion grew the heap would
+  // be recorded as heap-limited, blaming it for a run that was already over.
+  const asked = SESSIONS.slice(0, 3);
+  const result = await run(db, {
+    asOfTradeDates: asked,
+    heapBudgetBytes: 5,
+    heapUsage: growingHeap(0, 6),
+  });
+
+  assert.equal(result.sessions[0].skip_reason, null,
+    'the session that ran under the budget completed and is not blamed for the truncation');
+  assert.equal(result.sessions[0].created, true);
+  assert.equal(result.totals.sealed, 1);
+  assert.equal(result.sessions[1].skip_reason, 'heap_budget_exceeded');
+  assert.equal(result.sessions[2].skip_reason, 'heap_budget_exceeded');
+  assert.equal(result.heap.exhausted, true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shadow_decisions').get().n, 1,
+    'exactly one decision — the sessions after the budget was spent wrote nothing');
+});
+
+test('a run that fits its heap budget reports it without claiming exhaustion', async t => {
+  const db = fixture(t);
+  const result = await run(db, {
+    asOfTradeDates: SESSIONS.slice(0, 2),
+    heapBudgetBytes: DEFAULT_SHADOW_HEAP_BUDGET_BYTES,
+    heapUsage: () => 1024,
+  });
+  assert.equal(result.heap.exhausted, false);
+  assert.equal(result.heap.budget_bytes, DEFAULT_SHADOW_HEAP_BUDGET_BYTES,
+    'the default budget is reported so a caller can see what the run ran under');
+  assert.equal(result.heap.used_bytes, 1024);
+  assert.equal(result.totals.skipped_by_reason.heap_budget_exceeded, undefined,
+    'the reason must be absent, not zero-and-implied');
+});
+
+test('a disabled run does not claim a spent heap budget', async t => {
+  const db = fixture(t);
+  const disabled = await run(db, {
+    env: {},
+    asOfTradeDates: SESSIONS.slice(0, 2),
+    heapUsage: () => DEFAULT_SHADOW_HEAP_BUDGET_BYTES * 2,
+  });
+  assert.equal(disabled.heap.exhausted, false,
+    'a disabled run never started, so it cannot have exhausted a heap budget');
+  assert.equal(disabled.totals.skipped_by_reason.disabled, 2);
+  assert.equal(disabled.totals.skipped_by_reason.heap_budget_exceeded, undefined);
 });
