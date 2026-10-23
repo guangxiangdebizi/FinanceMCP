@@ -25,8 +25,15 @@ import {
  * 3. **Re-running a day is idempotent.** Same input, same output, one row.
  * 4. **A dry run writes nothing but still reports the decision ID it would
  *    write**, so the plan can be checked against what is already sealed.
- * 5. **Disabled is the default.** The env switch is unset unless someone sets
- *    it; nothing in this repo sets it.
+ * 5. **Disabled is the default.** The loop itself refuses to run unless
+ *    `RESEARCH_SHADOW_ENABLED=1`, so the default is inert rather than merely
+ *    unchecked.
+ *
+ * The `env` on the helper is not incidental. `runDailyShadow` reads the switch
+ * itself now, so every test here that wants the loop to act has to opt in. That
+ * is deliberate: when the switch was only checked by a helper nobody called, a
+ * production caller would have written decisions while believing the default was
+ * safe. Enforcing it here is what made those eleven tests need an explicit opt-in.
  */
 
 /** Enough history to seal and enough forward sessions to mature h=20. */
@@ -48,6 +55,9 @@ const prices = (returns = {}) => ({
   outcome: ({ decision_id }) => (decision_id in returns ? returns[decision_id] : { net_return: 0.01, excess: -0.02 }),
 });
 
+/** The explicit opt-in. Every test below that expects the loop to act passes it. */
+const ENABLED = { RESEARCH_SHADOW_ENABLED: '1' };
+
 const run = (db, over = {}) => runDailyShadow({
   db,
   accountId: 'real-main',
@@ -55,6 +65,7 @@ const run = (db, over = {}) => runDailyShadow({
   candidates: candidates(),
   prices: prices(),
   cutoff: CUTOFF,
+  env: ENABLED,
   ...over,
 });
 
@@ -192,12 +203,28 @@ test('an empty calendar produces no decisions and says why', async t => {
   db.exec(SHADOW_DECISION_SCHEMA);
   // No trade_cal at all: every session is unmatured and there is no cutoff to
   // evaluate against. The run must report that rather than invent one.
+  //
+  // This one is asked for WITHOUT the switch on, which is the stronger statement:
+  // a disabled run must not even reach the calendar lookup.
   const result = await runDailyShadow({
     db, accountId: 'real-main', asOfTradeDates: ['20240102'], candidates: candidates(), prices: prices(),
+    env: {},
   });
   assert.equal(result.totals.sealed, 0);
   assert.equal(result.totals.skipped, 1);
-  assert.equal(result.sessions[0].skip_reason, 'no_price_cutoff');
+  assert.equal(result.sessions[0].skip_reason, 'disabled',
+    'the switch is off, so the run stops before it ever asks about a calendar');
+
+  // And with it on, the same empty calendar is reported as a missing cutoff
+  // rather than as a refusal — a different reason, because it means something
+  // different: there is nothing to evaluate against, not that we may not run.
+  const enabled = await runDailyShadow({
+    db, accountId: 'real-main', asOfTradeDates: ['20240102'], candidates: candidates(), prices: prices(),
+    env: ENABLED,
+  });
+  assert.equal(enabled.totals.sealed, 0);
+  assert.equal(enabled.totals.skipped, 1);
+  assert.equal(enabled.sessions[0].skip_reason, 'no_price_cutoff');
 });
 
 test('a seal refusal names the session that caused it', async t => {
@@ -251,7 +278,7 @@ test('the maturity boundary is derived from the calendar, not assumed — one da
 
   const atMaturity = await runDailyShadow({
     db, accountId: 'real-main', asOfTradeDates: [SESSIONS[0]], candidates: candidates(),
-    prices: prices(), cutoff: atBoundary,
+    prices: prices(), cutoff: atBoundary, env: ENABLED,
   });
   assert.equal(atMaturity.sessions[0].evaluated, 1,
     'h=20 must evaluate at exactly the 20th open session after the decision date');
@@ -262,7 +289,7 @@ test('the maturity boundary is derived from the calendar, not assumed — one da
   // counts the cutoff day itself, because that mutant would report 20 here.
   const short = await runDailyShadow({
     db, accountId: 'real-main', asOfTradeDates: [SESSIONS[0]], candidates: candidates(),
-    prices: prices(), cutoff: oneShort,
+    prices: prices(), cutoff: oneShort, env: ENABLED,
   });
   assert.equal(short.sessions[0].evaluated, 0, 'h=20 must NOT evaluate one open session early');
   assert.equal(short.sessions[0].pending, 1);

@@ -49,13 +49,20 @@ export const SHADOW_ORCHESTRATION_VERSION = 'shadow-orchestration-1.0.0';
 /** Default horizon in exchange days for a shadow decision. */
 export const DEFAULT_SHADOW_HORIZON = 20;
 
-/** Why a session produced no shadow decision. Every skip carries one. */
+/**
+ * Why a session produced no shadow decision. Every skip carries one.
+ *
+ * `'disabled'` was on this list from the start while nothing could ever produce
+ * it — the loop never consulted `shadowEnabled()`. An unreachable reason is
+ * worse than a missing one: it reads as coverage. A `'below_maturity_floor'`
+ * was declared here too and removed, because no floor is checked here and
+ * inventing one would have meant checking the same maturity twice.
+ */
 export type SkipReason =
   | 'not_a_trading_day'
   | 'session_not_closed'
   | 'no_price_cutoff'
   | 'no_candidates'
-  | 'below_maturity_floor'
   | 'disabled';
 
 export interface ShadowSessionResult {
@@ -122,6 +129,17 @@ export interface DailyShadowOptions {
   dryRun?: boolean;
   /** Injected for tests; the run's own clock is not used for the plan. */
   now?: Date;
+  /**
+   * The environment to read the switch from. Defaults to `process.env`, and is
+   * injected by tests so the default can be proven without a subprocess.
+   *
+   * The switch is read **here**, on every call, rather than by the caller. That
+   * is the whole point: `shadowEnabled()` existed and was unit-tested, but
+   * nothing called it, so a caller who forgot would write decisions while
+   * believing the default was inert. A safety property that lives only in a
+   * helper nobody invokes is documentation, not a guard.
+   */
+  env?: Record<string, string | undefined>;
 }
 
 /** The environment switch. Unset means disabled, and disabled is the default. */
@@ -171,6 +189,27 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
   const horizon = options.horizonDays ?? DEFAULT_SHADOW_HORIZON;
   const dryRun = options.dryRun ?? false;
   const { sealShadowDecision, appendShadowEvaluation, evaluateSealedDecision } = await import('./shadowSeal.js');
+
+  // The switch is checked before anything else, including the calendar lookup.
+  // Checking it late would mean a disabled run still opened the database, still
+  // derived a cutoff, and still did the work it then had to throw away — and
+  // would leave the "disabled" reason reachable only on paths that never write,
+  // which is how the previous version came to declare an unreachable reason.
+  if (!shadowEnabled(options.env ?? process.env)) {
+    return {
+      schema: SHADOW_ORCHESTRATION_VERSION, account_id: options.accountId,
+      as_of_trade_dates: [...options.asOfTradeDates], sessions: options.asOfTradeDates.map(asOf => ({
+        as_of_trade_date: asOf, created: false, decision_id: null, skip_reason: 'disabled',
+        data_cutoff: null, evaluated: 0, pending: 0, ms: 0,
+      })),
+      totals: {
+        requested: options.asOfTradeDates.length, sealed: 0, already_sealed: 0,
+        skipped: options.asOfTradeDates.length, evaluated: 0, pending: 0,
+        skipped_by_reason: { disabled: options.asOfTradeDates.length },
+      },
+      dry_run: dryRun, ms: Date.now() - started,
+    };
+  }
 
   // The evaluation cutoff defaults to the latest closed session in the calendar,
   // so a run asked for "today" evaluates against everything actually closed
