@@ -50,19 +50,16 @@ if [ "$DRY" -eq 1 ]; then
   echo "dry run: would build candidate, back up market/private/OAuth/research/config, verify restoration, then replace the existing service"
   exit 0
 fi
-# Build before touching the running service; a build failure leaves production in place.
-export ASHARE_GIT_REVISION="$REVISION"
-export ASHARE_GIT_BRANCH="${BRANCH:-$(git -C "$REPO" branch --show-current)}"
-export ASHARE_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-docker compose -f "$HERE/docker-compose.yml" build
-
+# The running image must be captured and tagged BEFORE `docker compose build`: the build re-points
+# finance-mcp-ashare:local at the new image, after which the old image id can no longer be tagged
+# ("No such image") even though the container is still running it. That, not `|| true`, is why the
+# 2026-10-22 upgrade never had a rollback image.
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OLD_IMAGE_ID="$(docker inspect "$CONTAINER" --format '{{.Image}}' 2>/dev/null || echo unknown)"
 OLD_REPO_DIGEST="$(docker image inspect finance-mcp-ashare:local --format '{{index .RepoDigests 0}}' 2>/dev/null || echo none)"
 echo "old image id: $OLD_IMAGE_ID"
 echo "old repo digest: $OLD_REPO_DIGEST"
 
-mkdir -p "$BACKUP_DIR"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 # Keep the previous image under its own tag so a rebuild cannot garbage-collect it.
 # This used to be `docker tag ... || true`, which swallowed a failed tag and then printed the tag name
 # anyway: the 2026-10-22 upgrade recorded rollback-20261022T161641Z, and that image never existed.
@@ -72,10 +69,19 @@ if [ "$OLD_IMAGE_ID" = "unknown" ] && [ "${ASHARE_ALLOW_NO_ROLLBACK:-0}" != "1" 
   echo "cannot identify the running image, so there is nothing to roll back to; set ASHARE_ALLOW_NO_ROLLBACK=1 only for a first install" >&2; exit 4
 fi
 if [ "$OLD_IMAGE_ID" != "unknown" ]; then
-  docker tag "$OLD_IMAGE_ID" "finance-mcp-ashare:rollback-$STAMP" || { echo "failed to tag the rollback image; stopping before any change" >&2; exit 4; }
+  # ASHARE_ROLLBACK_SOURCE is for the one case where the running image id is no longer addressable
+  # (a build already re-pointed :local); the operator preserves it first and names it explicitly.
+  docker tag "${ASHARE_ROLLBACK_SOURCE:-$OLD_IMAGE_ID}" "finance-mcp-ashare:rollback-$STAMP" || { echo "failed to tag the rollback image; stopping before any change" >&2; exit 4; }
   docker image inspect "finance-mcp-ashare:rollback-$STAMP" >/dev/null 2>&1 || { echo "rollback image tag not present after tagging; stopping before any change" >&2; exit 4; }
   echo "rollback image tag: finance-mcp-ashare:rollback-$STAMP (verified present)"
 fi
+# Build before touching the running service; a build failure leaves production in place.
+export ASHARE_GIT_REVISION="$REVISION"
+export ASHARE_GIT_BRANCH="${BRANCH:-$(git -C "$REPO" branch --show-current)}"
+export ASHARE_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+docker compose -f "$HERE/docker-compose.yml" build
+
+mkdir -p "$BACKUP_DIR"
 # A fresh timestamped backup every run; a stale single file would not match the
 # database a rollback would actually start from.
 BACKUP_SQLITE="$BACKUP_DIR/ashare.$STAMP.sqlite"
