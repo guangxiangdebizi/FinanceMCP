@@ -65,8 +65,20 @@ export interface CadenceRunResult {
   produced: boolean;
   /** Why no report was produced, when none was. Never null alongside a report. */
   skip_reason: CadenceSkipReason | null;
+  /**
+   * The producer's own words for why it declined, when it declined.
+   *
+   * This is carried through rather than invented here, because the producer is
+   * the only component that knows the real cause. An earlier version dropped it:
+   * the reason enum survived and the explanation did not, so an operator saw
+   * `review_unavailable` and had to go read the source to learn it meant
+   * "no matured forward window".
+   */
+  detail?: string;
   /** The report itself, or null when skipped. Never a synthetic stand-in. */
   report: unknown | null;
+  /** Where the report was persisted, or null on a dry run or a skip. */
+  written_to: string | null;
   /** True when the run was a dry run: the plan is computed, nothing is written. */
   dry_run: boolean;
   /** Wall-clock milliseconds, so a regression is visible. */
@@ -118,6 +130,20 @@ export async function runResearchCadence(
     /** Whether any candidate exists to report on. */
     hasCandidates(asOf: string): Promise<boolean> | boolean;
     /**
+     * An up-front reason this producer cannot run at all, when it knows one
+     * before doing any work.
+     *
+     * This exists because the earlier shape lost the producer's explanation.
+     * A producer that could only decline from inside `produce` had its reason
+     * flattened into `no_candidates` or `not_enough_history` whenever an
+     * earlier step short-circuited first — so an operator saw "no candidates"
+     * for a database that did not exist, which is an outage wearing the
+     * costume of a quiet week. The producer is still the only component that
+     * knows the real cause; this hook is how that knowledge reaches the caller
+     * without being pre-empted by the ordering of the generic checks.
+     */
+    unavailable?(asOf: string): { skip: CadenceSkipReason; detail?: string } | null;
+    /**
      * Produce the report, or decline with a reason. Returning `{ skip }` means
      * "I could not produce one, and here is why"; this entry propagates that
      * reason unchanged rather than inventing one of its own, because the
@@ -130,15 +156,23 @@ export async function runResearchCadence(
 ): Promise<CadenceRunResult> {
   const started = Date.now();
   const dryRun = options.dryRun ?? false;
-  const skip = (reason: CadenceSkipReason): CadenceRunResult => ({
+  const skip = (reason: CadenceSkipReason, detail?: string): CadenceRunResult => ({
     schema: RESEARCH_CADENCE_VERSION, cadence, account_id: options.accountId, as_of: options.asOf,
-    produced: false, skip_reason: reason, report: null, dry_run: dryRun, ms: Date.now() - started,
+    produced: false, skip_reason: reason, ...(detail === undefined ? {} : { detail }), report: null,
+    written_to: null, dry_run: dryRun, ms: Date.now() - started,
   });
 
   // The switch is read here, on every call, before anything else. A cadence that
   // consults its caller for permission is a cadence whose default is whatever
   // the caller forgot.
   if (!cadenceEnabled(options.env ?? process.env)) return skip('disabled');
+
+  // The producer's own "I cannot run" is asked for before the generic checks,
+  // because it is the only answer that distinguishes an outage from a quiet
+  // week. Asking afterwards would mean `hasCandidates` had already answered
+  // "no" for a database that does not exist.
+  const unavailable = await producers.unavailable?.(options.asOf);
+  if (unavailable) return skip(unavailable.skip, unavailable.detail);
 
   // The floor is a minimum, not a setting. `Math.max` means an override can ask
   // for more evidence than the cadence requires, but never less: a monthly report
@@ -150,19 +184,24 @@ export async function runResearchCadence(
   if (!(await producers.hasCandidates(options.asOf))) return skip('no_candidates');
 
   const produced = await producers.produce(options.asOf);
-  if ('skip' in produced) return skip(produced.skip);
+  if ('skip' in produced) return skip(produced.skip, produced.detail);
 
   if (dryRun) {
     // A dry run reports the report it would write, so the plan can be inspected
     // against what already exists before anything is persisted.
     return {
       schema: RESEARCH_CADENCE_VERSION, cadence, account_id: options.accountId, as_of: options.asOf,
-      produced: false, skip_reason: null, report: produced.report, dry_run: true, ms: Date.now() - started,
+      produced: false, skip_reason: null, report: produced.report, written_to: null,
+      dry_run: true, ms: Date.now() - started,
     };
   }
-  await producers.write?.(produced.report);
+  // The write reports where it landed. An entry that persisted a report without
+  // saying where would leave the operator guessing, and "did that actually save"
+  // is exactly the question a cadence report has to answer for itself.
+  const written = await producers.write?.(produced.report);
   return {
     schema: RESEARCH_CADENCE_VERSION, cadence, account_id: options.accountId, as_of: options.asOf,
-    produced: true, skip_reason: null, report: produced.report, dry_run: false, ms: Date.now() - started,
+    produced: true, skip_reason: null, report: produced.report,
+    written_to: typeof written === 'string' ? written : null, dry_run: false, ms: Date.now() - started,
   };
 }

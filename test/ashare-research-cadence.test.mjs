@@ -139,6 +139,11 @@ test('a producer that cannot answer propagates its own reason', async () => {
   }));
   assert.equal(result.produced, false);
   assert.equal(result.skip_reason, 'review_unavailable');
+  // The explanation is asserted, not just the enum. A mutation that dropped
+  // `detail` while keeping the reason left this test green, which is how the
+  // gap was found: the enum survived and the operator-facing words did not.
+  assert.equal(result.detail, 'no matured forward window',
+    'the producer\'s explanation must survive propagation unchanged');
   assert.equal(result.report, null);
 });
 
@@ -200,4 +205,52 @@ test('a producer that throws is not swallowed into a success', async () => {
     /diagnosis_db_locked/,
     'a producer failure must propagate rather than become a quiet skip',
   );
+});
+
+test('a producer that knows it cannot run says so before the generic checks', async () => {
+  // This hook exists because of a real defect the producers exposed. A producer
+  // whose database is absent can only decline from inside `produce`, which runs
+  // *after* `hasCandidates` has already answered "no" — so the operator saw
+  // `no_candidates`, an outage wearing the costume of a quiet week. The
+  // producer's own reason must be asked for first.
+  const unavailable = producers({
+    closedSessions: () => 30,
+    hasCandidates: () => false,
+    unavailable: () => ({ skip: 'review_unavailable', detail: '账户库不存在：/var/lib/portfolio.sqlite' }),
+  });
+  const result = await run('monthly', {}, unavailable);
+  assert.equal(result.skip_reason, 'review_unavailable',
+    'the producer\'s own reason must pre-empt the generic no-candidates answer');
+  assert.equal(result.detail, '账户库不存在：/var/lib/portfolio.sqlite',
+    'and the producer\'s explanation must survive the propagation');
+});
+
+test('a producer with nothing to declare about availability is not second-guessed', async () => {
+  // The hook is optional. A producer that does not implement it must fall
+  // through to the generic checks unchanged, or adding the hook would silently
+  // change the meaning of every existing producer.
+  const none = producers({ hasCandidates: () => false });
+  const result = await run('weekly', {}, none);
+  assert.equal(result.skip_reason, 'no_candidates', 'an undeclared producer still gets the generic answer');
+});
+
+test('a produced record reports where it was written', async () => {
+  // An entry that persisted a report without saying where would leave the
+  // operator asking "did that actually save" — the one question a cadence
+  // report has to answer for itself.
+  const written = await run('monthly', {}, producers({ write: () => '/var/lib/forward-reviews/20240228-FR-abc.json' }));
+  assert.equal(written.produced, true);
+  assert.equal(written.written_to, '/var/lib/forward-reviews/20240228-FR-abc.json');
+
+  // A producer that returns nothing from write still produces a record; the
+  // path is simply unknown rather than invented.
+  const noPath = await run('monthly', {}, producers({ write: () => undefined }));
+  assert.equal(noPath.produced, true);
+  assert.equal(noPath.written_to, null, 'an unknown path is null, not a guess');
+
+  // And a dry run or a skip never claims a path it did not take.
+  const dry = await run('monthly', { dryRun: true }, producers({ write: () => '/should/not/happen.json' }));
+  assert.equal(dry.written_to, null, 'a dry run reports no path');
+  const skipped = await run('monthly', { env: {} });
+  assert.equal(skipped.written_to, null, 'a skip reports no path');
 });
