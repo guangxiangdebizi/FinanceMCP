@@ -307,3 +307,65 @@ test('RE-16 the export refuses to write its snapshot into the live database path
       /separate|same|refus/i, '输出目录不得与生产库同路径');
   } finally { fix.db.close(); fix.dir.cleanup(); }
 });
+
+/** Many audit runs sharing a handful of `end_date` values, inserted in shuffled order.
+ *
+ *  This is the shape that actually breaks: `data_audit` is a rowid table whose only index is
+ *  on `audit_id`, while the export orders by `end_date`. With enough rows sharing an
+ *  `end_date` the planner switches to `USE TEMP B-TREE FOR ORDER BY`, and a sort over ties
+ *  is not ordered by anything the caller chose. Two databases holding identical logical
+ *  content then export different bytes — and the manifest publishes a sha256 of each file,
+ *  so the same snapshot stops being reproducible.
+ *
+ *  Small fixtures do not reproduce it: with a handful of rows SQLite scans the `audit_id`
+ *  index and the order looks stable, which is exactly why this survived. */
+function db_insert_many_audits(db) {
+  const insert = db.prepare('INSERT OR REPLACE INTO data_audit (audit_id,created_at,start_date,end_date,status,summary,path) VALUES (?,?,?,?,?,?,?)');
+  const rows = [];
+  const window = weekdays('20260105', 5);   // entirely at or before the fixture's as-of day
+  for (let i = 0; i < 3000; i += 1) {
+    // 5 distinct end_dates, 600 rows each — enough ties to trigger the temp B-tree.
+    // Dates stay inside the as-of window, because the export filters
+    // `end_date <= as-of` and would otherwise drop rows for a reason unrelated to
+    // what this test is about.
+    const end = window[i % window.length];
+    rows.push([`AUD-${String(i).padStart(6, '0')}`, '2026-01-10T10:00:00Z', window[0], end, 'OK', 's', null]);
+  }
+  for (let i = rows.length - 1; i > 0; i -= 1) {           // deterministic shuffle
+    const j = (i * 7919 + 13) % (i + 1);
+    [rows[i], rows[j]] = [rows[j], rows[i]];
+  }
+  for (const r of rows) insert.run(...r);
+}
+
+test('RE-17 a dataset whose rows tie on the time column still exports in a stated order', () => {
+  const fix = buildDb('audit-order', {});
+  try {
+    db_insert_many_audits(fix.db);
+    const first = tempDir('audit-1'), second = tempDir('audit-2');
+    try {
+      const opts = { asOfTradeDate: fix.asOfDay, now: new Date('2026-01-10T00:00:00Z') };
+      const a = runResearchExport(fix.db, { ...opts, outputDir: first.dir });
+      const b = runResearchExport(fix.db, { ...opts, outputDir: second.dir });
+      const rows = readFileSync(join(first.dir, 'data_audit.csv'), 'utf8').trim().split('\n').slice(1);
+      assert.equal(rows.length, 3000, 'every audit row must be exported');
+      // The manifest publishes a content hash; a hash over an unspecified order is decoration.
+      assert.equal(a.content_hashes['data_audit.csv'], b.content_hashes['data_audit.csv'],
+        '同一数据库两次导出必须逐字节相同，否则 manifest 的 sha256 不可复现');
+      // And the order must be the declared one: time column ascending, then the primary
+      // key, so nothing is left to the sorter.
+      const ids = rows.map(r => r.split(',')[0]);
+      const dates = rows.map(r => r.split(',')[3]);
+      assert.deepEqual(dates, [...dates].sort(), 'end_date 必须升序，as-of 语义不能被打乱');
+      // Within one end_date the tie-break is audit_id; across dates the PK restarts.
+      for (let i = 0; i < rows.length;) {
+        let j = i;
+        while (j < rows.length && dates[j] === dates[i]) j += 1;
+        const group = ids.slice(i, j);
+        assert.deepEqual(group, [...group].sort(),
+          `end_date=${dates[i]} 的 ${group.length} 行必须按 audit_id 排序，不能留给排序器`);
+        i = j;
+      }
+    } finally { first.cleanup(); second.cleanup(); }
+  } finally { fix.db.close(); fix.dir.cleanup(); }
+});

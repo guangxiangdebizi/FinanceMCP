@@ -186,7 +186,23 @@ function writeDatasetCsv(
   // as-of 过滤在 SQL 内完成：晚于 as-of 的行**不被读取**，因此不可能泄漏未来数据。
   const where = timeColumn ? ` WHERE "${timeColumn}" <= ?` : '';
   const params = timeColumn ? [asOf] : [];
-  const order = timeColumn ? ` ORDER BY "${timeColumn}"` : '';
+  // The manifest publishes a sha256 per dataset, so the row order has to be a property of
+  // the query and not of the storage engine. Ordering by the time column alone is not
+  // enough: every table here has many rows per date, and a sort over ties is ordered by
+  // nothing the caller chose. Once the row count is large enough the planner stops using
+  // an index scan and switches to `USE TEMP B-TREE FOR ORDER BY`, at which point two
+  // databases holding identical logical content export different bytes.
+  //
+  // So the tie-break is the table's declared primary key. It is read from the schema
+  // (`PRAGMA table_info`, `pk` > 0) rather than hard-coded per dataset, because a dataset
+  // mapped to a new table must not silently fall back to an unspecified order.
+  const pkColumns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string; pk: number }[])
+    .filter(col => col.pk > 0)
+    .sort((a, b) => a.pk - b.pk)
+    .map(col => `"${col.name}"`);
+  if (pkColumns.length === 0) throw new Error(`Export requires a primary key to fix row order: ${table}`);
+  const orderKeys = timeColumn && !pkColumns.includes(`"${timeColumn}"`) ? [timeColumn, ...pkColumns] : pkColumns;
+  const order = ` ORDER BY ${orderKeys.map(k => (k.startsWith('"') ? k : `"${k}"`)).join(', ')}`;
   const rows = db.prepare(`SELECT ${quoted} FROM "${table}"${where}${order}`).all(...params) as any[];
   const escape = (value: unknown): string => {
     if (value === null || value === undefined) return '';
