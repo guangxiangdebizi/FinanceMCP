@@ -157,6 +157,42 @@ test('the recovered weights come from the implementation, not from the constants
   assert.match(result.checks.weights_are_actually_used.detail, /technical/);
 });
 
+test('a leg the implementation stopped declaring is still compared', () => {
+  // `mapsEqual` unions the keys of both maps, so a leg that disappears from the
+  // declaration is not silently dropped from the comparison. This mutant
+  // survived the first mutation run: iterating only `Object.keys(a)` makes the
+  // missing leg invisible, and every existing test hands in a complete map, so
+  // nothing exercised the asymmetric case.
+  const dropped = { ...FROZEN };
+  delete dropped.valuation;
+  const result = checkChampionConsistency({ ...honest([consistentRow()]), weights: dropped });
+  assert.equal(result.consistent, false,
+    'an implementation that stopped declaring a leg is not the frozen Champion');
+  assert.equal(result.checks.weights_match_frozen_leg_by_leg.ok, false);
+  assert.match(result.checks.weights_match_frozen_leg_by_leg.detail, /valuation/,
+    'the detail must name the leg that went missing, not just say the maps differ');
+});
+
+test('a one-unit substitution is caught, not absorbed by the tolerance', () => {
+  // The arithmetic check inverts `contribution / component` and compares to the
+  // frozen weight with a 1e-9 tolerance. Widening that tolerance to 1 admits
+  // exactly the substitution it exists to stop: 10 -> 11 gives |11 - 10| = 1,
+  // and `> 1` is false. The existing test shifts `technical` by 5, which any
+  // sane tolerance catches, so the boundary was never probed.
+  const row = consistentRow({ contributions: { valuation: 0.3 * 11 } });
+  const result = checkChampionConsistency(honest([row]));
+  assert.equal(result.consistent, false,
+    'valuation used as 11 instead of 10 is a different scorer and must not pass');
+  assert.equal(result.checks.weights_are_actually_used.ok, false);
+  assert.match(result.checks.weights_are_actually_used.detail, /valuation: contribution .* = 11/,
+    'the detail must report the recovered weight 11, not just report a mismatch');
+  // And the boundary is tight in the other direction too: a difference smaller
+  // than any real weight is rounding, not a substitution.
+  const rounded = consistentRow({ contributions: { valuation: 0.3 * (10 + 1e-12) } });
+  assert.equal(checkChampionConsistency(honest([rounded])).consistent, true,
+    'a 1e-12 difference is rounding and must still pass, or the check is unusable');
+});
+
 test('the real breakdown implies exactly the frozen weights, leg by leg', t => {
   // The property the production check rests on, asserted directly against
   // `scoreRows` output so a future change to the breakdown shape breaks here
