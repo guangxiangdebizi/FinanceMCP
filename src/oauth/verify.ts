@@ -54,19 +54,26 @@ export function hasWriteScope(scope: string | undefined, config: OAuthConfig): b
   return scopes.has(config.writeScope) || scopes.has('portfolio:admin');
 }
 
-/** 构造 RFC 6750 / RFC 9728 的 `WWW-Authenticate` 提示。 */
+/**
+ * 构造 RFC 6750 / RFC 9728 的 `WWW-Authenticate` 提示。
+ *
+ * `requiredScopes` 是要求客户端重新授权时**完整**需要的 scope 集合（而不仅是缺的那一个）：
+ * ChatGPT 按 `scope` 参数向用户申请授权，只写 `research:append` 会得到一个不含读权限的
+ * 授权，服务端随即仍会以 `portfolio:read` 拒绝。缺省为只读 scope。
+ */
 export function wwwAuthenticate(
-  config: OAuthConfig | null, failure?: OAuthFailure, scopeFail = false,
+  config: OAuthConfig | null, failure?: OAuthFailure, requiredScopes?: string[],
 ): string {
   // 未启用 OAuth 时保持既有契约：只发 `Bearer`，不泄露失败细节。
   if (!config) return 'Bearer';
   const metadata = `${config.issuer}/.well-known/oauth-protected-resource`;
+  const required = requiredScopes ?? [config.scope];
   const parts: string[] = [];
-  if (failure === 'insufficient_scope' || scopeFail) {
-    parts.push(`error="insufficient_scope"`, `error_description="token lacks ${config.scope}"`);
+  if (failure === 'insufficient_scope' || requiredScopes !== undefined) {
+    parts.push(`error="insufficient_scope"`, `error_description="token lacks ${required.join(' ')}"`);
   } else if (failure) {
     parts.push(`error="invalid_token"`, `error_description="${failure}"`);
   }
-  parts.push(`resource_metadata="${metadata}"`, `scope="${scopeFail && failure === undefined ? config.writeScope : config.scope}"`);
+  parts.push(`resource_metadata="${metadata}"`, `scope="${required.join(' ')}"`);
   return `Bearer ${parts.join(', ')}`;
 }

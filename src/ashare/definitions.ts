@@ -9,6 +9,12 @@
 
 const APPEND_ONLY = { readOnlyHint: false, openWorldHint: false, destructiveHint: false, idempotentHint: true };
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
+
+// 私有（账户）端点的按工具 OAuth 要求。ChatGPT 依据 tools/list 中的 securitySchemes 决定
+// 向用户申请哪些 scope，因此这里必须与服务端门控一致（见 test/oauth-scope-upgrade.test.mjs）。
+// 公网市场工具不声明此字段，保持匿名访问行为不变。
+const PRIVATE_READ_SCHEMES: { type: 'oauth2'; scopes: string[] }[] = [{ type: 'oauth2', scopes: ['portfolio:read'] }];
+const PRIVATE_APPEND_SCHEMES: { type: 'oauth2'; scopes: string[] }[] = [{ type: 'oauth2', scopes: ['portfolio:read', 'research:append'] }];
 const dateProp = { type: 'string', description: '交易日 YYYYMMDD；缺省为上海时区今天（非交易日取最近交易日）' };
 
 export const ashareToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY }[] = [
@@ -191,7 +197,7 @@ export const ASHARE_TOOL_NAMES = new Set(ashareToolDefinitions.map(t => t.name))
  */
 const PORTFOLIO_NOTE = '只读账户研究：真实账户由用户确认基线与增量事件重建，演示快照单独标记；私有portfolio.sqlite与公开市场端点隔离。费用逐字段披露CONFIRMED/PUBLIC_REFERENCE/ASSUMED/UNKNOWN，滑点独立估算；交易单位与压力参数按规则披露；不下单、不访问券商。';
 
-export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY | typeof APPEND_ONLY }[] = [
+export const portfolioToolDefinitions: { name: string; description: string; inputSchema: Record<string, any>; annotations: typeof READ_ONLY | typeof APPEND_ONLY; securitySchemes: { type: 'oauth2'; scopes: string[] }[] }[] = [
   {
     name: 'ashare_investment_research_bundle',
     description: '统一投资研究事实包：复用市场日报、股票池增减与历史表现、信号证据、ETF候选、真实账本账户、费用、组合情景及基准。全部子模块对齐同一已收盘交易日；盘前默认最近已收盘日；关键市场缺失时不生成当日判断。结构化JSON含Markdown摘要、版本、证据缺口；仅受认证的/private/mcp提供，不写库、不联网、不下单。',
@@ -204,6 +210,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       },
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_portfolio_summary',
@@ -218,6 +225,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       },
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_portfolio_scenario',
@@ -251,6 +259,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: ['action'],
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_portfolio_decision',
@@ -278,6 +287,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: ['action'],
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_portfolio_daily_report',
@@ -294,6 +304,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: [],
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_etf_candidates',
@@ -308,6 +319,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: [],
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_portfolio_benchmarks',
@@ -322,6 +334,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: [],
     },
     annotations: READ_ONLY,
+    securitySchemes: PRIVATE_READ_SCHEMES,
   },
   {
     name: 'ashare_chatgpt_research_record_append',
@@ -351,6 +364,7 @@ export const portfolioToolDefinitions: { name: string; description: string; inpu
       required: ['report_id', 'as_of_trade_date', 'independent_judgement', 'final_conclusion'],
     },
     annotations: APPEND_ONLY,
+    securitySchemes: PRIVATE_APPEND_SCHEMES,
   },
 ];
 

@@ -229,8 +229,16 @@ export function createOAuthRuntime(config: OAuthConfig): OAuthRuntime {
     if (!codeChallenge) return { error: 'code_challenge 缺失（必须使用 PKCE S256）' };
     if (method !== 'S256') return { error: 'code_challenge_method 必须是 S256' };
     if (resource !== config.resource) return { error: 'resource 与受保护资源不匹配' };
-    if (scope.split(' ').some(item => item !== config.scope && item !== config.writeScope && item !== 'portfolio:admin')) {
+    // `portfolio:admin` 不是可申请的 scope：同意页只展示读/追加两项，若允许申请它，
+    // 用户看到的"只读"授权会签发出可追加的令牌。它只可能来自服务端直接写入的令牌。
+    if (scope.split(' ').some(item => item !== config.scope && item !== config.writeScope)) {
       return { error: 'scope 不受支持' };
+    }
+    // 私有端点的每一次访问都先要求读 scope，只申请追加的令牌永远进不去任何工具。
+    // 与工具级挑战一致（挑战总是同时要求两者），在授权时就拒绝，而不是签发一个无用的令牌。
+    const requested = scope.split(' ');
+    if (requested.includes(config.writeScope) && !requested.includes(config.scope)) {
+      return { error: `${config.writeScope} 必须与 ${config.scope} 一起申请` };
     }
 
     const client = store.getClient(clientId);

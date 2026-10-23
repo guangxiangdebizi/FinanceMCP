@@ -125,7 +125,7 @@ function trimPrivateSessions(): void {
 
 function unauthorized(res: Response, outcome: AuthOutcome): void {
   const config = oauthRuntime?.config ?? null;
-  const challenge = wwwAuthenticate(config, outcome.failure, outcome.status === 403);
+  const challenge = wwwAuthenticate(config, outcome.failure);
   res.setHeader('WWW-Authenticate', challenge);
   res.setHeader('Cache-Control', 'no-store');
   if (config) {
@@ -201,10 +201,21 @@ async function handlePrivateRpc(req: Request, res: Response): Promise<void> {
     if (tool === CHATGPT_INTAKE_TOOL && oauthRuntime?.config.requireWriteScope && !auth?.viaStatic
         && !hasWriteScope(auth?.scope, oauthRuntime.config)) {
       console.log(`[private] tool=${tool} status=denied reason=insufficient_scope`);
-      const challenge = wwwAuthenticate(oauthRuntime.config, undefined, true);
+      const required = [oauthRuntime.config.scope, oauthRuntime.config.writeScope];
+      const challenge = wwwAuthenticate(oauthRuntime.config, 'insufficient_scope', required);
       res.setHeader('WWW-Authenticate', challenge);
-      res.status(403).json({ jsonrpc: '2.0', error: { code: -32001, message: 'insufficient_scope' }, id: body.id,
-        _meta: { 'mcp/www_authenticate': challenge } });
+      res.setHeader('Cache-Control', 'no-store');
+      // 工具级挑战：OpenAI MCP 文档把 `_meta["mcp/www_authenticate"]` 放在工具结果
+      // （`isError: true`）里，ChatGPT 据此弹出重新授权；协议级 JSON-RPC error 不会触发。
+      // HTTP 403 与 RFC 6750 的 insufficient_scope 保持一致。
+      res.status(403).json({
+        jsonrpc: '2.0', id: body.id,
+        result: {
+          content: [{ type: 'text', text: `insufficient_scope: this tool requires ${required.join(' ')}` }],
+          isError: true,
+          _meta: { 'mcp/www_authenticate': [challenge] },
+        },
+      });
       return;
     }
     try {

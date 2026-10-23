@@ -148,7 +148,7 @@ export function createModel(store: OAuthStore, config: OAuthConfig): any {
 
     async validateScope(_user: User, _client: Client, scope?: string[]): Promise<string[] | false> {
       const requested = scope && scope.length > 0 ? scope : [config.scope];
-      return requested.every(item => item === config.scope || item === config.writeScope || item === 'portfolio:admin') ? requested : false;
+      return requested.every(item => item === config.scope || item === config.writeScope) ? requested : false;
     },
   };
   return model;

@@ -146,7 +146,10 @@ export function getAvailableToolList() {
 export function getPrivateToolList() {
   return portfolioToolDefinitions
     .filter(tool => isPrivateToolExposed(tool.name))
-    .map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations }));
+    .map(tool => ({
+      name: tool.name, description: tool.description, inputSchema: tool.inputSchema,
+      annotations: tool.annotations, securitySchemes: tool.securitySchemes,
+    }));
 }
 
 export function assertToolAvailable(name: string): void {

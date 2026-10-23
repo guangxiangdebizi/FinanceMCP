@@ -80,9 +80,12 @@ test('W1 强制开启时，只有 portfolio:read 的令牌不能调用追加工�
   try {
     const res = await s.call(s.mint('portfolio:read'), APPEND, {});
     assert.equal(res.status, 403, res.text);
-    assert.equal(res.body.error.message, 'insufficient_scope');
+    // 工具级挑战：isError 结果 + _meta["mcp/www_authenticate"]，且与 HTTP 头一致。
+    assert.equal(res.body.result.isError, true, res.text);
+    assert.equal(res.body.error, undefined);
+    assert.deepEqual(res.body.result._meta['mcp/www_authenticate'], [res.headers.get('www-authenticate')]);
     assert.match(res.headers.get('www-authenticate') ?? '', /insufficient_scope/);
-    assert.match(res.headers.get('www-authenticate') ?? '', /research:append/);
+    assert.match(res.headers.get('www-authenticate') ?? '', /scope="portfolio:read research:append"/);
   } finally { await s.stop(); }
 });
 
