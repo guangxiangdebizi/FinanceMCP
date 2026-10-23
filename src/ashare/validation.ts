@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { SCORE_RULES, SCORE_VERSION, scoreRows, type MarketScan } from './analysis.js';
-import { assertSeparateFromLive, buildSha256 } from './snapshot.js';
+import { assertSeparateFromLive } from './snapshot.js';
 
 export const VALIDATION_VERSION = 'validation-1.0.0';
 export const VALIDATION_TYPES = ['RETROSPECTIVE_HOLDOUT', 'WALK_FORWARD_VALIDATION', 'TRUE_FORWARD_OBSERVATION'] as const;
@@ -254,11 +255,32 @@ export function explainFreezeMismatch(options:{dbPath:string;asOf:string;impleme
   } finally {db.close();}
 }
 
+/**
+ * The compiled modules whose bytes decide what an observation contains. Everything else in
+ * build/ashare (shadow/cadence/export/diagnosis/cli ...) cannot change a recorded top-40, so it
+ * must not bind a freeze: the previous definition hashed the whole directory, which meant any new
+ * research module silently made every existing freeze unmatchable (2026-10-23 18:41 CST).
+ *
+ * `validationCli` is listed on purpose: `observe` composes and slices the top-40 there. Moving that
+ * composition into one of the other modules would narrow this further.
+ * test/upgrade-validation.test.mjs asserts this list covers the import closure of
+ * analysis/watchlist/evaluation/validation, so a new scoring dependency cannot be forgotten.
+ */
+export const IMPLEMENTATION_MODULES = ['analysis','bars','data','db','evaluation','fetch','fundamentals','indicators','ingest','signals','validation','validationCli','watchlist'] as const;
+export const IMPLEMENTATION_SCHEME = 'signal-modules-v1';
+
+export function implementationHash(dirs: { ashare?: string; portfolio?: string } = {}): string {
+  const ashare = dirs.ashare ?? fileURLToPath(new URL('./',import.meta.url));
+  const portfolio = dirs.portfolio ?? fileURLToPath(new URL('../portfolio/',import.meta.url));
+  const h = createHash('sha256').update(IMPLEMENTATION_SCHEME).update('\0');
+  for (const name of [...IMPLEMENTATION_MODULES].sort()) h.update(name).update('\0').update(readFileSync(join(ashare,`${name}.js`))).update('\0');
+  const feeImplementation = createHash('sha256').update(readFileSync(join(portfolio,'fees.js'))).update(readFileSync(join(portfolio,'rules.js'))).digest('hex');
+  return digest({scheme:IMPLEMENTATION_SCHEME,signal_build:h.digest('hex'),fee_implementation:feeImplementation});
+}
+
 export function researchIdentity() {
-  const feeImplementation = createHash('sha256').update(readFileSync(fileURLToPath(new URL('../portfolio/fees.js',import.meta.url))))
-    .update(readFileSync(fileURLToPath(new URL('../portfolio/rules.js',import.meta.url)))).digest('hex');
   return { version: VALIDATION_VERSION, score_version: SCORE_VERSION, weights: SCORE_RULES.weights, rule_hash: digest(SCORE_RULES),
-    implementation_hash: digest({ashare_build:buildSha256(),fee_implementation:feeImplementation}) };
+    implementation_hash: implementationHash() };
 }
 
 /** Cheap read-only bundle projection. Validates content-addressed identity and

@@ -1,10 +1,12 @@
 import test from 'node:test';
+import { cpSync, readFileSync as readFileSyncImpl, writeFileSync as writeFileSyncImpl, existsSync as existsSyncImpl, readdirSync as readdirSyncImpl } from 'node:fs';
+import { fileURLToPath as fileURLToPathImpl } from 'node:url';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadActiveValidationFreeze, explainFreezeMismatch } from '../build/ashare/validation.js';
+import { blockInference, holmAdjust, splitDates, walkForwardFolds, controlScan, openValidationDb, registerFreeze, appendObservation, simulateFunded, auditWatchlist, sampleValidationDates, loadActiveValidationFreeze, explainFreezeMismatch, implementationHash, IMPLEMENTATION_MODULES, researchIdentity } from '../build/ashare/validation.js';
 import { openAshareDb, upsertRows } from '../build/ashare/db.js';
 import { seedMarket, weekdays } from './ashare-fixture.mjs';
 import { scanMarket } from '../build/ashare/analysis.js';
@@ -155,4 +157,46 @@ test('an unmatched freeze names the hash that failed instead of failing silently
   assert.deepEqual(explainFreezeMismatch({...live,ruleHash:other,costHash:other}),['rule_hash','cost_hash']);
   assert.deepEqual(explainFreezeMismatch({...live,asOf:'20261021'}),['start_after_as_of']);
   assert.deepEqual(explainFreezeMismatch({...live,dbPath:join(dir,'missing.sqlite')}),['no_freeze_registered']);
+});
+
+// ---- implementation_hash covers signal-affecting code only --------------------
+const BUILD_ASHARE=fileURLToPathImpl(new URL('../build/ashare/',import.meta.url));
+const BUILD_PORTFOLIO=fileURLToPathImpl(new URL('../build/portfolio/',import.meta.url));
+function scratchBuild(){
+  const dir=mkdtempSync(join(tmpdir(),'impl-hash-'));
+  cpSync(BUILD_ASHARE,join(dir,'ashare'),{recursive:true});cpSync(BUILD_PORTFOLIO,join(dir,'portfolio'),{recursive:true});
+  return {ashare:join(dir,'ashare'),portfolio:join(dir,'portfolio')};
+}
+
+test('implementation_hash ignores modules that cannot change an observation, but not ones that can',()=>{
+  const d=scratchBuild(),base=implementationHash(d);
+  assert.equal(base,researchIdentity().implementation_hash,'scratch copy of build must reproduce the live identity');
+  // A module outside the signal path (the shadow/cadence/export code added after the freeze).
+  writeFileSyncImpl(join(d.ashare,'shadowRun.js'),readFileSyncImpl(join(d.ashare,'shadowRun.js'),'utf8')+'\n// unrelated edit\n');
+  writeFileSyncImpl(join(d.ashare,'brand-new-module.js'),'export const x = 1;\n');
+  assert.equal(implementationHash(d),base,'unrelated and brand-new modules must not invalidate a freeze');
+  // Each listed module and each fee file must still bind the hash.
+  const bound=[...IMPLEMENTATION_MODULES.map(m=>join(d.ashare,`${m}.js`)),join(d.portfolio,'fees.js'),join(d.portfolio,'rules.js')];
+  for(const file of bound){
+    const original=readFileSyncImpl(file,'utf8');
+    writeFileSyncImpl(file,original+'\n// signal-affecting edit\n');
+    assert.notEqual(implementationHash(d),base,`editing ${file} must change the hash`);
+    writeFileSyncImpl(file,original);
+  }
+  assert.equal(implementationHash(d),base);
+});
+
+test('IMPLEMENTATION_MODULES covers the import closure of the signal entry points',()=>{
+  const imports=file=>[...readFileSyncImpl(file,'utf8').matchAll(/(?:from|import)\s*\(?\s*['"](\.\/[^'"/]+\.js)['"]/g)].map(m=>m[1].slice(2,-3));
+  const seen=new Set(),stack=['analysis','watchlist','evaluation','validation'];
+  while(stack.length){const m=stack.pop();if(seen.has(m))continue;seen.add(m);
+    const f=join(BUILD_ASHARE,`${m}.js`);if(existsSyncImpl(f))stack.push(...imports(f));}
+  // snapshot/engine are reached only through validation's identity helpers, never through scoring.
+  const reachedOnlyForIdentity=new Set(['snapshot','engine']);
+  const missing=[...seen].filter(m=>existsSyncImpl(join(BUILD_ASHARE,`${m}.js`))&&!reachedOnlyForIdentity.has(m)&&!IMPLEMENTATION_MODULES.includes(m));
+  assert.deepEqual(missing,[],'a signal dependency is not covered by implementation_hash; add it to IMPLEMENTATION_MODULES');
+  assert.ok(IMPLEMENTATION_MODULES.includes('validationCli'),'observe() composes the top-40 content in validationCli');
+  for(const m of IMPLEMENTATION_MODULES)assert.ok(existsSyncImpl(join(BUILD_ASHARE,`${m}.js`)),`listed module ${m} does not exist`);
+  for(const research of ['shadowRun','shadowSeal','researchCadence','cadenceProducers','championCheck','researchDiagnosis','experimentA','researchExport','cli'])
+    assert.ok(!IMPLEMENTATION_MODULES.includes(research),`${research} cannot affect an observation and must not bind the freeze`);
 });
