@@ -225,6 +225,15 @@ export function cadenceProducers(options: CadenceProducersOptions = {}) {
           writeFileSync(path, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
           return path;
         },
+        // No explicit mode, unlike `monthly`'s 0700/0600. That asymmetry is
+        // deliberate and worth stating so nobody "fixes" it: the weekly
+        // diagnosis is derived only from the public market cache — watchlist,
+        // prices, calendar — and carries no account figure anywhere in
+        // `DiagnosisReport`, so the default umask is appropriate. The monthly
+        // review reads the account ledger, so it is private at the directory and
+        // the file. Tightening the weekly file to 0600 would be harmless but
+        // would also hide the reason the two differ, which is the kind of
+        // unexplained asymmetry that gets copied into the next file.
       };
     },
     monthly() {
