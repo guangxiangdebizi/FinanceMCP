@@ -4,7 +4,7 @@
 #
 # The activation switch is set HERE (docker exec -e), not in the container's environment, so
 # "is this cadence live" is answered by whether a reviewed unit file calls this script.
-# Bounds: `timeout -s KILL` caps wall-clock and --max-old-space-size caps the Node heap, which
+# Bounds (weekly diagnosis measured 555s on the production cache on 2026-10-23, so 1500s leaves ~2.7x headroom): `timeout -s KILL` caps wall-clock and --max-old-space-size caps the Node heap, which
 # is the resource bound the in-process modules do not have.
 # A skip (disabled / not_enough_history / no_candidates / ...) is a legitimate outcome and exits 0,
 # but it is printed as SKIPPED(<reason>) so it cannot be mistaken for a produced report.
@@ -14,7 +14,7 @@ CADENCE="${1:?usage: run-research-cadence.sh weekly|monthly}"
 case "$CADENCE" in weekly|monthly) ;; *) echo "unknown cadence: $CADENCE" >&2; exit 2 ;; esac
 CONTAINER="${ASHARE_CONTAINER:-finance-mcp-ashare}"
 ACCOUNT="${ASHARE_CADENCE_ACCOUNT:-real-main}"
-BUDGET_SECONDS="${ASHARE_CADENCE_TIMEOUT:-600}"
+BUDGET_SECONDS="${ASHARE_CADENCE_TIMEOUT:-1500}"
 HEAP_MB="${ASHARE_CADENCE_HEAP_MB:-512}"
 PRIVATE_DIR="${ASHARE_PRIVATE_HOST_DIR:-$HOME/.local/share/ashare-private}"
 LOG_DIR="$PRIVATE_DIR/logs"

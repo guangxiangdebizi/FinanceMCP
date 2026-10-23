@@ -7,6 +7,6 @@ Type=oneshot
 # Runs after the 21:10 / 21:15 jobs and the 21:40 ChatGPT deadline, never before them.
 # ExecStart sets RESEARCH_CADENCE_ENABLED=1 inside run-research-cadence.sh; delete this unit to deactivate.
 ExecStart=%h/workspace/FinanceMCP/deploy/ashare/run-research-cadence.sh monthly
-TimeoutStartSec=900
+TimeoutStartSec=1800
 Nice=10
 IOSchedulingClass=idle
