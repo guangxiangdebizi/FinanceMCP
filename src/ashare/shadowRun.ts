@@ -24,6 +24,35 @@
  * runs of the same day and get the same answer — that is the idempotency
  * property, stated so it can be tested rather than hoped for.
  *
+ * ## Bounded runtime, and why it was only half-true before
+ *
+ * Reporting `ms` on every session is not a bound. For a long time that was all
+ * this module had: the spec asked for bounded runtime, the code measured
+ * duration, and nothing ever compared the measurement to a limit. A duration
+ * nobody checks against a ceiling is instrumentation.
+ *
+ * `runtimeBudgetMs` (default `DEFAULT_SHADOW_RUNTIME_BUDGET_MS`) is now that
+ * ceiling, and it is enforced **before** each session rather than after: when
+ * the budget is spent, the sessions not yet started are skipped as
+ * `runtime_budget_exceeded` and the run reports `runtime.exhausted: true`.
+ * Checking afterwards would let the session that blew the budget finish and
+ * then be blamed for it in its own record.
+ *
+ * The budget is set where a *broken* run gets stopped, not where a normal one
+ * gets trimmed. One call over a handful of sessions costs single-digit
+ * milliseconds; the only thing here that can realistically consume minutes is
+ * the caller's `prices.outcome`, which this module does not control. So this is
+ * a guard against an unbounded `asOfTradeDates` or a blocking price source
+ * occupying a timer slot, not a performance target.
+ *
+ * ## What this module still does NOT do
+ *
+ * Bounded resource use is **not** implemented: there is no memory or CPU budget,
+ * and no per-session cap on the work `candidates()` or `prices.outcome()` may
+ * do. Saying so here rather than in a commit message is deliberate — the spec
+ * lists it as a separate property, and marking it done would be the same
+ * category of claim as the `ms`-without-a-limit one above.
+ *
  * ## What this module deliberately does NOT do
  *
  * It does not read prices. The maturity question is answered from the caller's
@@ -50,6 +79,24 @@ export const SHADOW_ORCHESTRATION_VERSION = 'shadow-orchestration-1.0.0';
 export const DEFAULT_SHADOW_HORIZON = 20;
 
 /**
+ * Default wall-clock budget for one `runDailyShadow` call, in milliseconds.
+ *
+ * The task spec asks for bounded runtime as a property of this entry, and until
+ * now the only thing present was a report: every session and the run itself
+ * carried `ms`, and nothing ever looked at it. A number nobody compares against
+ * a limit is instrumentation, not a bound. This is the limit.
+ *
+ * It is deliberately generous relative to the real cost — one full-suite run of
+ * this loop over a handful of sessions is single-digit milliseconds, and the
+ * expensive part is the caller's `prices.outcome`, which this module does not
+ * control. So the budget is not tuned to keep a normal run inside it; it is set
+ * where a run that has gone wrong (an unbounded `asOfTradeDates` from a caller
+ * looping over a whole calendar, a `prices.outcome` that blocks) gets stopped
+ * instead of being allowed to occupy a timer slot indefinitely.
+ */
+export const DEFAULT_SHADOW_RUNTIME_BUDGET_MS = 120_000;
+
+/**
  * Why a session produced no shadow decision. Every skip carries one.
  *
  * `'disabled'` was on this list from the start while nothing could ever produce
@@ -63,7 +110,8 @@ export type SkipReason =
   | 'session_not_closed'
   | 'no_price_cutoff'
   | 'no_candidates'
-  | 'disabled';
+  | 'disabled'
+  | 'runtime_budget_exceeded';
 
 export interface ShadowSessionResult {
   as_of_trade_date: string;
@@ -100,6 +148,15 @@ export interface DailyShadowRun {
   /** True when the run was a dry run: the plan is computed, nothing is written. */
   dry_run: boolean;
   ms: number;
+  /**
+   * The budget this call ran under, and whether it was spent.
+   *
+   * `exhausted` is what makes a truncated run visible: `totals.skipped` alone
+   * cannot distinguish "nothing to do" from "we ran out of time". A caller
+   * diffing two runs of the same day needs to know that the second one stopped
+   * early for a reason that has nothing to do with the data.
+   */
+  runtime: { budget_ms: number; exhausted: boolean; ms: number };
 }
 
 export interface ShadowCandidateSource {
@@ -129,6 +186,22 @@ export interface DailyShadowOptions {
   dryRun?: boolean;
   /** Injected for tests; the run's own clock is not used for the plan. */
   now?: Date;
+  /**
+   * Wall-clock budget for the whole call, in milliseconds. Defaults to
+   * `DEFAULT_SHADOW_RUNTIME_BUDGET_MS`. Sessions still unstarted when the
+   * budget is spent are skipped as `runtime_budget_exceeded` rather than
+   * started, so an over-budget run is legible in its own output.
+   */
+  runtimeBudgetMs?: number;
+  /**
+   * The clock every duration in this run is measured against. Defaults to
+   * `Date.now`. Injected by tests because the budget assertion needs time to
+   * actually pass: with a millisecond clock, "elapsed > 0" is false when the
+   * run starts and the first budget check land in the same millisecond, which
+   * is the normal case here. A test that passes only when a millisecond
+   * boundary happens to fall in the right place is not a test of the bound.
+   */
+  clock?: () => number;
   /**
    * The environment to read the switch from. Defaults to `process.env`, and is
    * injected by tests so the default can be proven without a subprocess.
@@ -185,9 +258,14 @@ export function sessionState(db: any, asOf: string, cutoff: string): { is_tradin
  * reported as pending with a null return, never as a zero return.
  */
 export async function runDailyShadow(options: DailyShadowOptions): Promise<DailyShadowRun> {
-  const started = Date.now();
+  // Every duration in this module comes from this one clock, so a test can make
+  // time pass deterministically instead of hoping a millisecond boundary falls
+  // the right way. See the note where the budget is checked.
+  const clock = options.clock ?? (() => Date.now());
+  const started = clock();
   const horizon = options.horizonDays ?? DEFAULT_SHADOW_HORIZON;
   const dryRun = options.dryRun ?? false;
+  const budgetMs = options.runtimeBudgetMs ?? DEFAULT_SHADOW_RUNTIME_BUDGET_MS;
   const { sealShadowDecision, appendShadowEvaluation, evaluateSealedDecision } = await import('./shadowSeal.js');
 
   // The switch is checked before anything else, including the calendar lookup.
@@ -207,7 +285,8 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
         skipped: options.asOfTradeDates.length, evaluated: 0, pending: 0,
         skipped_by_reason: { disabled: options.asOfTradeDates.length },
       },
-      dry_run: dryRun, ms: Date.now() - started,
+      dry_run: dryRun, ms: clock() - started,
+      runtime: { budget_ms: budgetMs, exhausted: false, ms: clock() - started },
     };
   }
 
@@ -229,7 +308,8 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
         skipped: options.asOfTradeDates.length, evaluated: 0, pending: 0,
         skipped_by_reason: { no_price_cutoff: options.asOfTradeDates.length },
       },
-      dry_run: dryRun, ms: Date.now() - started,
+      dry_run: dryRun, ms: clock() - started,
+      runtime: { budget_ms: budgetMs, exhausted: false, ms: clock() - started },
     };
   }
 
@@ -239,17 +319,32 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
   let alreadySealed = 0;
   let evaluated = 0;
   let pending = 0;
+  let budgetExhausted = false;
 
   for (const asOf of options.asOfTradeDates) {
-    const t0 = Date.now();
+    // The budget is checked before the session's work, not after it. Checking
+    // after would let the one session that blew the budget complete and then
+    // report itself as budget-limited, which reads as "this session was the
+    // problem" when the run was already over before it started. Everything
+    // still requested after this point is skipped with the reason attached, so
+    // the run never silently returns fewer sessions than it was asked for.
+    if (clock() - started > budgetMs) {
+      budgetExhausted = true;
+      for (const remaining of options.asOfTradeDates.slice(options.asOfTradeDates.indexOf(asOf))) {
+        sessions.push(skip(remaining, 'runtime_budget_exceeded', 0));
+        bump(skippedByReason, 'runtime_budget_exceeded');
+      }
+      break;
+    }
+    const t0 = clock();
     const state = sessionState(options.db, asOf, cutoff);
     if (!state.is_trading_day) {
-      sessions.push(skip(asOf, 'not_a_trading_day', Date.now() - t0));
+      sessions.push(skip(asOf, 'not_a_trading_day', clock() - t0));
       bump(skippedByReason, 'not_a_trading_day');
       continue;
     }
     if (!state.closed) {
-      sessions.push(skip(asOf, 'session_not_closed', Date.now() - t0));
+      sessions.push(skip(asOf, 'session_not_closed', clock() - t0));
       bump(skippedByReason, 'session_not_closed');
       continue;
     }
@@ -261,7 +356,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
 
     const candidateIds = await options.candidates.candidates(asOf);
     if (!candidateIds.length) {
-      sessions.push(skip(asOf, 'no_candidates', Date.now() - t0));
+      sessions.push(skip(asOf, 'no_candidates', clock() - t0));
       bump(skippedByReason, 'no_candidates');
       continue;
     }
@@ -273,7 +368,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
       sessions.push({
         as_of_trade_date: asOf, created: false, decision_id: decisionId,
         skip_reason: null, data_cutoff: dataCutoff, evaluated: 0, pending: 0,
-        ms: Date.now() - t0,
+        ms: clock() - t0,
       });
       continue;
     }
@@ -334,7 +429,7 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
     sessions.push({
       as_of_trade_date: asOf, created, decision_id: decisionId, skip_reason: null,
       data_cutoff: dataCutoff, evaluated: sessionEvaluated, pending: sessionPending,
-      ms: Date.now() - t0,
+      ms: clock() - t0,
     });
   }
 
@@ -346,7 +441,8 @@ export async function runDailyShadow(options: DailyShadowOptions): Promise<Daily
       skipped: sessions.filter(s => s.skip_reason !== null).length, evaluated, pending,
       skipped_by_reason: skippedByReason,
     },
-    dry_run: dryRun, ms: Date.now() - started,
+    dry_run: dryRun, ms: clock() - started,
+    runtime: { budget_ms: budgetMs, exhausted: budgetExhausted, ms: clock() - started },
   };
 }
 

@@ -5,7 +5,7 @@ import { weekdays, seedReferenceUniverse } from './ashare-fixture.mjs';
 import { SHADOW_DECISION_SCHEMA } from '../build/ashare/shadowSeal.js';
 import {
   runDailyShadow, exchangeDaysBetween, sessionState, shadowEnabled,
-  DEFAULT_SHADOW_HORIZON, SHADOW_ORCHESTRATION_VERSION,
+  DEFAULT_SHADOW_HORIZON, SHADOW_ORCHESTRATION_VERSION, DEFAULT_SHADOW_RUNTIME_BUDGET_MS,
 } from '../build/ashare/shadowRun.js';
 
 /** Phase 6 — the daily orchestration entry for the shadow loop.
@@ -331,4 +331,101 @@ test('sessionState separates "not a trading day" from "not closed yet"', t => {
   assert.equal(future.closed, false, 'a session after the cutoff has not closed');
   const saturday = sessionState(db, '20240106', CUTOFF);
   assert.equal(saturday.is_trading_day, false);
+});
+
+/** Bounded runtime.
+ *
+ * This module long reported `ms` on every session and the run itself while
+ * nothing ever compared those numbers to a limit. The spec asks for bounded
+ * runtime as a property, and a duration nobody checks is instrumentation.
+ * These tests assert the enforcement.
+ *
+ * The timing is injected, not slept on. A first version asserted that a 0 ms
+ * budget means no candidate lookups, and it failed at 2 of 20 on roughly one
+ * run in three: `Date.now()` has millisecond resolution and the work before
+ * the first check is sub-millisecond, so "elapsed > 0" was false whenever both
+ * reads landed in the same millisecond. An intermittently-passing assertion
+ * is worse than a failing one, because it reads as a real bound. Advancing a
+ * clock the run itself reads makes the assertion exact.
+ */
+const steppingClock = (steps = []) => {
+  let now = 1_000_000;
+  let i = 0;
+  return () => {
+    const value = now;
+    now += steps[i] ?? 0;
+    i += 1;
+    return value;
+  };
+};
+
+test('an over-budget run skips the remaining sessions and never hides the truncation', async t => {
+  const db = fixture(t);
+  const asked = SESSIONS.slice(0, 4);
+  // The clock advances 1 ms on every read, so by the third session's check the
+  // 2 ms budget is definitively spent. Sessions 0 and 1 are allowed to run:
+  // the guard is a ceiling on the run, not a cap on how many sessions it may
+  // attempt, and a budget that stops the very first session would make the
+  // guard indistinguishable from "disabled".
+  const result = await run(db, {
+    asOfTradeDates: asked,
+    runtimeBudgetMs: 2,
+    clock: steppingClock(Array(96).fill(1)),
+  });
+
+  assert.equal(result.runtime.exhausted, true, 'a truncated run must be visible as truncated');
+  assert.equal(result.runtime.budget_ms, 2);
+  assert.equal(result.sessions.length, asked.length,
+    'every requested session must still be reported — a short list would hide the truncation');
+  const budgetLimited = result.sessions.filter(s => s.skip_reason === 'runtime_budget_exceeded');
+  assert.ok(budgetLimited.length >= 1, 'at least one session must have been stopped by the budget');
+  assert.ok(budgetLimited.length < asked.length,
+    'the guard must not stop every session, or it is just the disabled switch');
+  for (const session of budgetLimited) {
+    assert.equal(session.created, false);
+    assert.equal(session.decision_id, null);
+  }
+  assert.equal(result.totals.skipped_by_reason.runtime_budget_exceeded, budgetLimited.length);
+  assert.equal(result.totals.sealed, asked.length - budgetLimited.length);
+});
+
+test('the session that spends the budget is not the one reported as budget-limited', async t => {
+  const db = fixture(t);
+  // The first candidate lookup advances the clock by 60 ms against a 30 ms
+  // budget. The check runs BEFORE each session's work, so session 1 starts,
+  // completes and seals — it is the NEXT session that is skipped. If the check
+  // ran after the work instead, session 1 would be recorded as budget-limited,
+  // blaming the session for a run that was already over before it began.
+  const clock = steppingClock([0, 0, 60, 60, 60, 60, 60, 60, 60, 60, 60, 60]);
+  const asked = SESSIONS.slice(0, 3);
+  const result = await run(db, { asOfTradeDates: asked, runtimeBudgetMs: 30, clock });
+
+  assert.equal(result.sessions[0].skip_reason, null,
+    'the session that spent the budget ran to completion and is not blamed for it');
+  assert.equal(result.sessions[0].created, true);
+  assert.equal(result.totals.sealed, 1);
+  assert.equal(result.sessions[1].skip_reason, 'runtime_budget_exceeded');
+  assert.equal(result.sessions[2].skip_reason, 'runtime_budget_exceeded');
+  assert.equal(result.runtime.exhausted, true);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shadow_decisions').get().n, 1,
+    'exactly one decision — the sessions after the budget was spent wrote nothing');
+});
+
+test('a run that fits its budget reports it without claiming exhaustion', async t => {
+  const db = fixture(t);
+  const result = await run(db, { asOfTradeDates: SESSIONS.slice(0, 2) });
+  assert.equal(result.runtime.exhausted, false);
+  assert.equal(result.runtime.budget_ms, DEFAULT_SHADOW_RUNTIME_BUDGET_MS,
+    'the default budget is reported so a caller can see what the run ran under');
+  assert.ok(result.runtime.ms >= 0);
+  assert.equal(result.totals.skipped_by_reason.runtime_budget_exceeded ?? 0, 0,
+    'the reason must be absent, not zero-and-implied');
+});
+
+test('a disabled run does not claim a spent budget', async t => {
+  const db = fixture(t);
+  const disabled = await run(db, { env: {}, asOfTradeDates: SESSIONS.slice(0, 2) });
+  assert.equal(disabled.runtime.exhausted, false,
+    'a disabled run never started, so it cannot have run out of time');
+  assert.equal(disabled.totals.skipped_by_reason.disabled, 2);
 });

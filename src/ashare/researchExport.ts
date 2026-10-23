@@ -201,8 +201,13 @@ function writeDatasetCsv(
     .sort((a, b) => a.pk - b.pk)
     .map(col => `"${col.name}"`);
   if (pkColumns.length === 0) throw new Error(`Export requires a primary key to fix row order: ${table}`);
-  const orderKeys = timeColumn && !pkColumns.includes(`"${timeColumn}"`) ? [timeColumn, ...pkColumns] : pkColumns;
-  const order = ` ORDER BY ${orderKeys.map(k => (k.startsWith('"') ? k : `"${k}"`)).join(', ')}`;
+  // The time column leads when it is not already the primary key's first column, so the
+  // as-of grouping stays visible in the file. Deduplicated, because `fina_indicator`'s key
+  // is (ts_code, end_date, ann_date) and its time column *is* `ann_date` — without the
+  // filter the ORDER BY would name the same column twice.
+  const lead = timeColumn && !pkColumns.includes(`"${timeColumn}"`) ? `"${timeColumn}"` : null;
+  const orderKeys = lead ? [lead, ...pkColumns] : pkColumns;
+  const order = ` ORDER BY ${orderKeys.join(', ')}`;
   const rows = db.prepare(`SELECT ${quoted} FROM "${table}"${where}${order}`).all(...params) as any[];
   const escape = (value: unknown): string => {
     if (value === null || value === undefined) return '';
