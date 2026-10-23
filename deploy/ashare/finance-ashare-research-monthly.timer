@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the FinanceMCP A-share monthly forward review (Asia/Shanghai)
+
+[Timer]
+# Friday after 21:40 so the 18:40 / 21:10 / 21:15 jobs and the ChatGPT task are never contended.
+# The monthly timer's day range 22..28 contains exactly one Friday per month.
+OnCalendar=Fri *-*-22..28 21:55:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

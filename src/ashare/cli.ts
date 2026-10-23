@@ -24,6 +24,8 @@ const USAGE = `用法: finance-ashare <command> [options]
   research-evaluate --date YYYYMMDD [--db PATH] [--as-of YYYYMMDD] [--horizon 10]
                                                                  用已保存的快照评价持有期收益；未到期保持 PENDING
   research-seed --date YYYYMMDD [--db PATH]                      以该日正式 V1 股票池写入一次性 V1/V2 共同起点（只读正式库）
+  research-cadence <weekly|monthly> --as-of YYYYMMDD|latest --account-id ID [--dry-run]
+                                                                 周/月研究节奏报告（默认禁用，需 RESEARCH_CADENCE_ENABLED=1；只读行情与账户库）
   research-export [--date YYYYMMDD] --output DIR [--datasets a,b] [--allow-missing-bars]
                                                                  只读研究数据冻结快照导出（生产库只读，as-of 之后的数据拒绝导出）
   investment-research-bundle [--account ID] [--date YYYYMMDD] [--db PATH] [--market-db PATH]
@@ -89,6 +91,14 @@ async function main() {
   if (command === 'research-export') {
     const { runResearchExportCommand } = await import('./researchExport.js');
     print(await runResearchExportCommand(process.argv.slice(3)));
+    return;
+  }
+  // Weekly/monthly research cadence: disabled unless RESEARCH_CADENCE_ENABLED=1, opens the
+  // market cache and the ledger read-only, and handles its own databases (so it must run
+  // before openAshareDb(), which would create or migrate a writable live connection).
+  if (command === 'research-cadence') {
+    const { runCadenceCommand } = await import('./researchCadenceCli.js');
+    print(await runCadenceCommand(process.argv.slice(3)));
     return;
   }
   // Account commands only touch the separate portfolio database. They must not
