@@ -121,7 +121,7 @@ export function createOAuthRuntime(config: OAuthConfig): OAuthRuntime {
   const protectedResourceMetadata = () => ({
     resource: config.resource,
     authorization_servers: [config.issuer],
-    scopes_supported: [config.scope],
+    scopes_supported: [config.scope, config.writeScope],
     bearer_methods_supported: ['header'],
     resource_documentation: `${config.issuer}/docs/v1/V1_CHATGPT_ACCEPTANCE_CHECKLIST.md`,
   });
@@ -141,7 +141,7 @@ export function createOAuthRuntime(config: OAuthConfig): OAuthRuntime {
       token_endpoint: `${config.issuer}/oauth/token`,
       registration_endpoint: `${config.issuer}/oauth/register`,
       revocation_endpoint: `${config.issuer}/oauth/revoke`,
-      scopes_supported: [config.scope],
+      scopes_supported: [config.scope, config.writeScope],
       response_types_supported: ['code'],
       response_modes_supported: ['query'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
@@ -229,7 +229,7 @@ export function createOAuthRuntime(config: OAuthConfig): OAuthRuntime {
     if (!codeChallenge) return { error: 'code_challenge 缺失（必须使用 PKCE S256）' };
     if (method !== 'S256') return { error: 'code_challenge_method 必须是 S256' };
     if (resource !== config.resource) return { error: 'resource 与受保护资源不匹配' };
-    if (scope.split(' ').some(item => item !== config.scope && item !== 'portfolio:admin')) {
+    if (scope.split(' ').some(item => item !== config.scope && item !== config.writeScope && item !== 'portfolio:admin')) {
       return { error: 'scope 不受支持' };
     }
 
@@ -275,11 +275,13 @@ export function createOAuthRuntime(config: OAuthConfig): OAuthRuntime {
 </style></head>
 <body><div class="card">
   <h1>授权访问 A股投资账户</h1>
-  <p class="muted">一个客户端正在请求<strong>只读</strong>访问你的账户数据。</p>
+  <p class="muted">${(params.scope ?? config.scope).split(' ').includes(config.writeScope)
+    ? '一个客户端正在请求读取你的账户数据，并<strong>追加研究记录</strong>。'
+    : '一个客户端正在请求<strong>只读</strong>访问你的账户数据。'}</p>
   <ul class="muted">
-    <li>权限范围：<code>${escapeHtml(params.scope ?? config.scope)}</code>（只读）</li>
+    <li>权限范围：<code>${escapeHtml(params.scope ?? config.scope)}</code>${(params.scope ?? config.scope).split(' ').includes(config.writeScope) ? '（含研究记录追加）' : '（只读）'}</li>
     <li>资源：<code>${escapeHtml(params.resource)}</code></li>
-    <li>不包含下单、转账或修改账本的能力</li>
+    <li>不包含下单、转账或修改账本的能力${(params.scope ?? config.scope).split(' ').includes(config.writeScope) ? '；追加仅限研究记录，只增不改' : ''}</li>
   </ul>
   ${message ? `<p class="err">${escapeHtml(message)}</p>` : ''}
   <form method="post" action="${LOGIN_FORM_ACTION}">

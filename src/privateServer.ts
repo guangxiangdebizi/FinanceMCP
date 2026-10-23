@@ -4,7 +4,8 @@ import { dispatchPrivateTool, getPrivateToolList } from './dispatch.js';
 import { SERVER_VERSION } from './version.js';
 import type { OAuthConfig } from './oauth/config.js';
 import type { OAuthStore } from './oauth/store.js';
-import { verifyOAuthAccessToken, wwwAuthenticate, type OAuthFailure } from './oauth/verify.js';
+import { verifyOAuthAccessToken, wwwAuthenticate, hasWriteScope, type OAuthFailure } from './oauth/verify.js';
+import { CHATGPT_INTAKE_TOOL } from './portfolio/chatgptIntake.js';
 
 /**
  * 私有账户端点 `/private/mcp`（工作包 A5）。
@@ -70,6 +71,9 @@ interface AuthOutcome {
   ok: boolean;
   status?: 401 | 403;
   failure?: OAuthFailure;
+  /** 令牌被授予的 scope；静态令牌没有 scope 概念，记为 undefined。 */
+  scope?: string;
+  viaStatic?: boolean;
 }
 
 /**
@@ -83,8 +87,8 @@ function authenticatePrivate(req: Request): AuthOutcome {
 
   if (oauthRuntime) {
     const verified = verifyOAuthAccessToken(oauthRuntime.store, oauthRuntime.config, presented);
-    if (verified.ok) return { ok: true };
-    if (staticTokenAllowed() && staticTokenMatches(presented)) return { ok: true };
+    if (verified.ok) return { ok: true, scope: verified.scope };
+    if (staticTokenAllowed() && staticTokenMatches(presented)) return { ok: true, viaStatic: true };
     return { ok: false, status: verified.status ?? 401, failure: verified.failure };
   }
 
@@ -191,6 +195,18 @@ async function handlePrivateRpc(req: Request, res: Response): Promise<void> {
   if (method === 'tools/call') {
     const { name, arguments: args } = body.params || {};
     const tool = String(name);
+    // 写权限在**工具执行之前**、在 HTTP 入口处断言，而不是靠工具内部自觉。
+    // 静态令牌是部署方显式开启的旧通道，不受此约束。
+    const auth = res.locals.privateAuth as AuthOutcome | undefined;
+    if (tool === CHATGPT_INTAKE_TOOL && oauthRuntime?.config.requireWriteScope && !auth?.viaStatic
+        && !hasWriteScope(auth?.scope, oauthRuntime.config)) {
+      console.log(`[private] tool=${tool} status=denied reason=insufficient_scope`);
+      const challenge = wwwAuthenticate(oauthRuntime.config, undefined, true);
+      res.setHeader('WWW-Authenticate', challenge);
+      res.status(403).json({ jsonrpc: '2.0', error: { code: -32001, message: 'insufficient_scope' }, id: body.id,
+        _meta: { 'mcp/www_authenticate': challenge } });
+      return;
+    }
     try {
       const result = await dispatchPrivateTool(tool, args || {});
       // 只为审计记录工具名与结果，**不记录参数内容**（可能含账户细节）。
@@ -223,6 +239,7 @@ export function mountPrivateEndpoint(app: Express): boolean {
     }
     if (req.method === 'OPTIONS') return next();
     if (!outcome.ok) return unauthorized(res, outcome);
+    res.locals.privateAuth = outcome;
     if (privateRateLimited(req)) {
       return res.status(429).json({ jsonrpc: '2.0', error: { code: -32002, message: 'Too many requests' }, id: null });
     }

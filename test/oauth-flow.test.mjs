@@ -183,7 +183,7 @@ test('O1 未认证请求被拒绝，并给出 RFC 9728 发现信息', async () =
     assert.equal(prm.status, 200);
     assert.equal(prm.body.resource, `${server.issuer}${RESOURCE_PATH}`);
     assert.deepEqual(prm.body.authorization_servers, [server.issuer]);
-    assert.deepEqual(prm.body.scopes_supported, ['portfolio:read']);
+    assert.deepEqual(prm.body.scopes_supported, ['portfolio:read', 'research:append']); // 写 scope 独立于读 scope
     assert.deepEqual(prm.body.bearer_methods_supported, ['header']);
     // 路径化变体同样可用。
     const scoped = await server.json(`/.well-known/oauth-protected-resource${RESOURCE_PATH}`);

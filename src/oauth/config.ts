@@ -12,6 +12,11 @@ import { portfolioDbPath } from '../portfolio/db.js';
  */
 
 export const OAUTH_SCOPE = 'portfolio:read';
+/**
+ * 独立的写 scope：只覆盖 `ashare_chatgpt_research_record_append`（只追加、白名单入参的研究记录）。
+ * `portfolio:read` 永远不被视为写权限。它不授予下单、转账或修改账本的能力。
+ */
+export const OAUTH_WRITE_SCOPE = 'research:append';
 export const OAUTH_SUBJECT = 'owner';
 
 export interface OAuthConfig {
@@ -26,6 +31,13 @@ export interface OAuthConfig {
   accessTokenLifetime: number;
   refreshTokenLifetime: number;
   scope: string;
+  writeScope: string;
+  /**
+   * 为真时，追加工具必须持有 writeScope（或 portfolio:admin）。默认关闭：
+   * 在此之前签发的令牌只有 portfolio:read，直接强制会让既有的 ChatGPT 写回立刻失败，
+   * 所以要等连接器用新 scope 重新授权后再打开。
+   */
+  requireWriteScope: boolean;
 }
 
 function required(name: string): string {
@@ -83,5 +95,7 @@ export function oauthConfig(): OAuthConfig | null {
     accessTokenLifetime: positiveInt('ASHARE_OAUTH_ACCESS_TOKEN_TTL', 3600),
     refreshTokenLifetime: positiveInt('ASHARE_OAUTH_REFRESH_TOKEN_TTL', 30 * 24 * 3600),
     scope: OAUTH_SCOPE,
+    writeScope: OAUTH_WRITE_SCOPE,
+    requireWriteScope: (process.env.ASHARE_OAUTH_REQUIRE_WRITE_SCOPE ?? '').trim() === '1',
   };
 }

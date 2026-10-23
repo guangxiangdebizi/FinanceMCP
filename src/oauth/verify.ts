@@ -48,6 +48,12 @@ export function verifyOAuthAccessToken(
   return { ok: true, subject: stored.subject, scope: stored.scope, resource: stored.resource };
 }
 
+/** 令牌是否被授予追加研究记录的权限。`portfolio:read` 不算。 */
+export function hasWriteScope(scope: string | undefined, config: OAuthConfig): boolean {
+  const scopes = new Set((scope ?? '').split(' ').filter(Boolean));
+  return scopes.has(config.writeScope) || scopes.has('portfolio:admin');
+}
+
 /** 构造 RFC 6750 / RFC 9728 的 `WWW-Authenticate` 提示。 */
 export function wwwAuthenticate(
   config: OAuthConfig | null, failure?: OAuthFailure, scopeFail = false,
@@ -61,6 +67,6 @@ export function wwwAuthenticate(
   } else if (failure) {
     parts.push(`error="invalid_token"`, `error_description="${failure}"`);
   }
-  parts.push(`resource_metadata="${metadata}"`, `scope="${config.scope}"`);
+  parts.push(`resource_metadata="${metadata}"`, `scope="${scopeFail && failure === undefined ? config.writeScope : config.scope}"`);
   return `Bearer ${parts.join(', ')}`;
 }
