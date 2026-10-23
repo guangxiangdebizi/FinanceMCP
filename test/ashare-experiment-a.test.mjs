@@ -112,40 +112,60 @@ test('INDUSTRY_NEUTRAL ranks by score WITHIN each industry, not by code', t => {
 
 test('the horizon handed to the evaluator is the horizon actually evaluated', t => {
   const db = fixture(t);
-  // `evaluateArm` forwards `horizon` to `evaluateEvents`. A mutant that adds 5
-  // to it still produces priced, plausible numbers — it just prices a window
-  // five days later than the one the run claims, which is exactly the kind of
+  // `evaluateArm` forwards `horizon` to `evaluateEvents`. A mutant that adds or
+  // subtracts a few days still produces priced, plausible numbers — it just
+  // prices a window a few days off the one the run claims, which is exactly the
   // error that survives every "the numbers look fine" review.
   //
-  // Asserting the round trip alone is NOT enough: my first version of this test
-  // called `evaluateEvents` itself, so it proved the ENGINE honours the horizon
-  // while the mutant sat one layer up in `evaluateArm`. That mutant survived.
-  // The fix is to derive the expected exit date from the arm's own output.
+  // Two weaker versions of this test both failed to catch it:
+  //   1. Asserting the round trip (`arm.horizon === horizon`) only checks the
+  //      label, which is a field I set myself.
+  //   2. Calling `evaluateEvents` directly proves the ENGINE honours the
+  //      horizon while the mutant sits one layer up in `evaluateArm`.
+  // What works is pinning the arm to the MATURITY BOUNDARY: at a cutoff exactly
+  // `horizon` exchange days after the signal date, h=20 prices; one day earlier
+  // it is `horizon_after_as_of` and null. A horizon shifted by even a few days
+  // flips that boundary, so the arm's priced/unpriced verdict becomes a witness
+  // to which horizon really ran.
   const sel = selectPool(db, AS_OF, 'CHAMPION_SCORE_1_0_0');
   const code = sel.pool[0];
-  // The exchange calendar the engine builds, from the signal date to the cutoff.
+  // The full exchange calendar after the signal date, used to place the boundary.
   const calendar = db.prepare(
     'SELECT cal_date FROM trade_cal WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date',
-  ).all(AS_OF, CUTOFF).map(r => r.cal_date);
+  ).all(AS_OF, '29991231').map(r => r.cal_date);
   const signalIdx = calendar.indexOf(AS_OF);
+  assert.equal(signalIdx, 0, 'the calendar starts at the signal date, so index == days after signal');
+
   for (const horizon of HORIZONS) {
-    const arm = evaluateArm(db, sel, horizon, CUTOFF);
+    // The engine, asked directly, must exit exactly `horizon` days after signal.
     const direct = evaluateEvents(db, [{ date: AS_OF, ts_code: code }],
       { asOf: CUTOFF, horizon, ...EXPERIMENT_A_COSTS }).outcomes[0];
-    assert.equal(direct.planned_exit_date, calendar[signalIdx + horizon],
-      `h=${horizon} must exit ${horizon} exchange days after the signal date`);
-    if (direct.planned_exit_date == null) {
-      // The arm and the engine must agree that this horizon did not mature.
-      assert.equal(arm.completed, 0, `h=${horizon} is unmatured, so the arm must not price it`);
-      assert.equal(arm.excess, null, `h=${horizon} is unmatured, so it has no excess`);
-    } else {
-      assert.ok(arm.completed > 0, `h=${horizon} matures, so the arm must price its pool`);
+    assert.equal(direct.planned_exit_date, calendar[horizon],
+      `h=${horizon} must plan its exit ${horizon} exchange days after the signal date`);
+
+    // The ARM must agree with the engine about maturity at the boundary.
+    const atBoundary = evaluateArm(db, sel, horizon, calendar[horizon]);
+    assert.ok(atBoundary.completed > 0,
+      `h=${horizon} must mature at a cutoff ${horizon} exchange days after the signal date`);
+    const justShort = evaluateArm(db, sel, horizon, calendar[horizon - 1]);
+    assert.equal(justShort.completed, 0,
+      `h=${horizon} must NOT mature one exchange day before its horizon is up`);
+    assert.equal(justShort.excess, null, 'an unmatured horizon has no excess');
+    assert.equal(justShort.reasons.horizon_after_as_of, sel.pool.length,
+      `the reason must be that the horizon has not elapsed, got ${JSON.stringify(justShort.reasons)}`);
+
+    // And the arm's priced result must be the SAME window the engine prices.
+    const armPriced = evaluateArm(db, sel, horizon, CUTOFF);
+    if (armPriced.excess != null) {
+      const engine = evaluateEvents(db, sel.pool.map(c => ({ date: AS_OF, ts_code: c })),
+        { asOf: CUTOFF, horizon, ...EXPERIMENT_A_COSTS });
+      const expected = engine.outcomes
+        .filter(o => o.status === 'completed' && Number.isFinite(o.net_return))
+        .reduce((s, o) => s + o.net_return, 0) / engine.outcomes.filter(o => o.status === 'completed').length;
+      assert.ok(Math.abs(armPriced.net_return - expected) < 1e-12,
+        `h=${horizon}: the arm's net return must be the engine's mean over the same horizon`);
     }
   }
-  // Two horizons that plan different exits must not produce identical results.
-  const five = evaluateArm(db, sel, 5, CUTOFF);
-  const ten = evaluateArm(db, sel, 10, CUTOFF);
-  assert.notEqual(five.excess, ten.excess, 'h=5 and h=10 priced the same window');
 });
 
 test('the arms are actually different orderings, not six spellings of one', t => {
